@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QUrl
+from PySide6.QtCore import QObject, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QFont
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtWidgets import QApplication
@@ -172,8 +172,16 @@ class VisualShell(QObject):
         self._short_ask_turn_failed = False
         self._last_short_ask_prompt = ""
         self._resume_fallbacks_this_cycle = 0
+        self._scale_mode = False
+        self._scale_save_timer = QTimer(self)
+        self._scale_save_timer.setSingleShot(True)
+        self._scale_save_timer.setInterval(400)
+        self._scale_save_timer.timeout.connect(self._persist_ui_scale)
 
         self.pet.quit_requested.connect(QApplication.quit)
+        self.pet.scale_mode_toggled.connect(self._on_scale_mode_toggled)
+        self.pet.scale_wheel.connect(self._on_scale_wheel)
+        self.pet.scale_exit_requested.connect(self._on_scale_exit)
         self.dock.agent_selected.connect(self._on_dock_agent_selected)
         self.state_monitor.agent_state_changed.connect(self._on_agent_state_changed)
         self.state_monitor.resolved_state_changed.connect(self._on_resolved_state_changed)
@@ -219,6 +227,8 @@ class VisualShell(QObject):
         # Firefly restart. Safe even before the UI is shown.
         self.session_manager.load()
         self.state_monitor.start()
+        # Apply the persisted ui_scale before the first paint (no 100% flash).
+        theme.set_ui_scale(self.settings.ui_scale)
         self.coordinator.show_shell()
 
     def shutdown(self) -> None:
@@ -228,6 +238,7 @@ class VisualShell(QObject):
         self.state_monitor.stop()
         self.keep_awake.shutdown()
         self.quick_ask.shutdown()
+        self._persist_ui_scale()
         if self.plan_executor.running:
             self.plan_executor.stop()
         if self.review_executor.running:
@@ -273,6 +284,38 @@ class VisualShell(QObject):
 
     def _on_resolved_state_changed(self, state: ResolvedState) -> None:
         self.pet.apply_state(state.state.value)
+
+    # -- UI Scale Mode ---------------------------------------------------
+
+    def _on_scale_mode_toggled(self) -> None:
+        self._scale_mode = not self._scale_mode
+        if self._scale_mode:
+            self._show_scale_notice()
+            self.pet.setFocus()
+        else:
+            self._scale_save_timer.stop()
+            self._persist_ui_scale()
+
+    def _on_scale_exit(self) -> None:
+        if not self._scale_mode:
+            return
+        self._scale_mode = False
+        self._scale_save_timer.stop()
+        self._persist_ui_scale()
+
+    def _on_scale_wheel(self, direction: int) -> None:
+        if not self._scale_mode:
+            return
+        theme.set_ui_scale(theme.ui_scale() + direction * theme.SCALE_STEP)
+        self._show_scale_notice()
+        self._scale_save_timer.start()
+
+    def _show_scale_notice(self) -> None:
+        percent = round(theme.ui_scale() * 100)
+        self.bubble.show_message("Scale", f"{percent}%", duration_ms=1_200)
+
+    def _persist_ui_scale(self) -> None:
+        self.settings.set_ui_scale(theme.ui_scale())
 
     def _on_settings_changed(self, _prefs) -> None:
         self.notification_manager.set_enabled(self.settings.notifications_enabled)

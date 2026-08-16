@@ -57,6 +57,7 @@ class OverlayCoordinator(QObject):
         self.pet.reset_requested.connect(self.reset_position)
         self.pet.drag_started.connect(self._on_drag_started)
         self.toolbar.action_requested.connect(self._toolbar_action)
+        theme.on_scale_changed(self.apply_ui_scale)
 
         if self.workspace_popover is not None:
             self.workspace_popover.sessions_requested.connect(self._show_sessions)
@@ -115,19 +116,19 @@ class OverlayCoordinator(QObject):
         available = screen.availableGeometry()
         x = (
             available.right()
-            - theme.SCREEN_MARGIN
-            - theme.CLUSTER_RIGHT_INSET
+            - theme.scaled(theme.SCREEN_MARGIN)
+            - theme.scaled(theme.CLUSTER_RIGHT_INSET)
             - self.toolbar.width()
-            - theme.TOOLBAR_ANCHOR_GAP
+            - theme.scaled(theme.TOOLBAR_ANCHOR_GAP)
             - self.pet.width()
             + 1
         )
         y = (
             available.bottom()
-            - theme.SCREEN_MARGIN
-            - theme.CLUSTER_BOTTOM_INSET
+            - theme.scaled(theme.SCREEN_MARGIN)
+            - theme.scaled(theme.CLUSTER_BOTTOM_INSET)
             - self.dock.height()
-            - theme.DOCK_ANCHOR_GAP
+            - theme.scaled(theme.DOCK_ANCHOR_GAP)
             - self.pet.height()
             + 1
         )
@@ -143,32 +144,52 @@ class OverlayCoordinator(QObject):
 
         dock_point = QPoint(
             pet_geo.center().x() - self.dock.width() // 2,
-            pet_geo.bottom() + theme.DOCK_ANCHOR_GAP,
+            pet_geo.bottom() + theme.scaled(theme.DOCK_ANCHOR_GAP),
         )
         if dock_point.y() + self.dock.height() > available.bottom() + 1:
-            dock_point.setY(pet_geo.top() - theme.DOCK_ANCHOR_GAP - self.dock.height())
+            dock_point.setY(pet_geo.top() - theme.scaled(theme.DOCK_ANCHOR_GAP) - self.dock.height())
         self.dock.move(self._clamp_point(dock_point, self.dock, available))
 
         toolbar_point = QPoint(
-            pet_geo.right() + theme.TOOLBAR_ANCHOR_GAP,
+            pet_geo.right() + theme.scaled(theme.TOOLBAR_ANCHOR_GAP),
             pet_geo.center().y() - self.toolbar.height() // 2,
         )
         if toolbar_point.x() + self.toolbar.width() > available.right() + 1:
-            toolbar_point.setX(pet_geo.left() - theme.TOOLBAR_ANCHOR_GAP - self.toolbar.width())
+            toolbar_point.setX(pet_geo.left() - theme.scaled(theme.TOOLBAR_ANCHOR_GAP) - self.toolbar.width())
         self.toolbar.move(self._clamp_point(toolbar_point, self.toolbar, available))
 
         bubble_point = QPoint(
-            pet_geo.left() - self.bubble.width() + theme.BUBBLE_PET_OVERLAP,
-            pet_geo.top() - self.bubble.height() + theme.BUBBLE_VERTICAL_OVERLAP,
+            pet_geo.left() - self.bubble.width() + theme.scaled(theme.BUBBLE_PET_OVERLAP),
+            pet_geo.top() - self.bubble.height() + theme.scaled(theme.BUBBLE_VERTICAL_OVERLAP),
         )
         if bubble_point.x() < available.left():
-            bubble_point.setX(pet_geo.right() - theme.BUBBLE_PET_OVERLAP)
+            bubble_point.setX(pet_geo.right() - theme.scaled(theme.BUBBLE_PET_OVERLAP))
         self.bubble.move(self._clamp_point(bubble_point, self.bubble, available))
 
         self._position_ask_pill()
 
         if self.permission_card is not None and self.permission_card.isVisible():
             self._position_permission_card()
+
+    def apply_ui_scale(self, scale: float) -> None:
+        """Resize the whole shell for a new ui_scale while holding the pet anchor.
+
+        Keeping the pet's bottom-center fixed prevents the cluster from jumping
+        when the character shrinks/grows; dock/toolbar/bubble re-anchor after.
+        """
+        geo = self.pet.frameGeometry()
+        anchor_x = geo.center().x()
+        anchor_bottom = geo.bottom()
+        self.pet.apply_scale()
+        self.dock.apply_scale()
+        self.toolbar.apply_scale()
+        self.bubble.apply_scale()
+        new_geo = self.pet.frameGeometry()
+        self.pet.move(
+            new_geo.topLeft()
+            + QPoint(anchor_x - new_geo.center().x(), anchor_bottom - new_geo.bottom())
+        )
+        self.reposition()
 
     def toggle_bubble(self) -> None:
         # Workflow recovery: when an active non-terminal workflow's card is

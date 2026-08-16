@@ -45,6 +45,7 @@ class SpeechBubble(QWidget):
         layout = QHBoxLayout(self._card)
         layout.setContentsMargins(theme.SPACE_LG + 2, theme.SPACE_SM, theme.SPACE_LG + 2, theme.SPACE_SM)
         layout.setSpacing(theme.SPACE_MD)
+        self._card_layout = layout
         self._star = theme.VectorIcon("star", theme.CYAN_ACCENT, 24, self._card)
         layout.addWidget(self._star, 0, Qt.AlignVCenter)
 
@@ -61,10 +62,12 @@ class SpeechBubble(QWidget):
         self._auto_hide = QTimer(self)
         self._auto_hide.setSingleShot(True)
         self._auto_hide.timeout.connect(self.hide)
+        self._content: tuple = ("greeting", None)
 
     def show_greeting(self) -> None:
         self._auto_hide.stop()
         self._star.set_color(theme.CYAN_ACCENT)
+        self._content = ("greeting", None)
         self._text.setText(theme.bubble_html())
 
     def show_message(
@@ -77,10 +80,38 @@ class SpeechBubble(QWidget):
     ) -> None:
         self._auto_hide.stop()
         self._star.set_color(accent if accent is not None else theme.CYAN_ACCENT)
+        self._content = ("message", (title, message, accent))
         self._text.setText(self._message_html(title, message, accent))
         self.show()
         self.raise_()
         self._auto_hide.start(duration_ms)
+
+    def apply_scale(self) -> None:
+        w = theme.scaled_px(theme.BUBBLE_SIZE.width())
+        h = theme.scaled_px(theme.BUBBLE_SIZE.height())
+        self.setFixedSize(w, h)
+        self._card.setGeometry(
+            theme.scaled(theme.SHADOW_MARGIN),
+            theme.scaled(15),
+            w - theme.scaled(theme.SHADOW_MARGIN) * 2,
+            theme.scaled(94),
+        )
+        self._tail.setGeometry(
+            w - theme.scaled(62), theme.scaled(106), theme.scaled(32), theme.scaled(21)
+        )
+        self._star.setFixedSize(theme.scaled_px(24), theme.scaled_px(24))
+        self._card_layout.setContentsMargins(
+            theme.scaled(theme.SPACE_LG + 2),
+            theme.scaled_px(theme.SPACE_SM),
+            theme.scaled(theme.SPACE_LG + 2),
+            theme.scaled_px(theme.SPACE_SM),
+        )
+        self._card_layout.setSpacing(theme.scaled_px(theme.SPACE_MD))
+        if self._content[0] == "message":
+            title, message, accent = self._content[1]
+            self._text.setText(self._message_html(title, message, accent))
+        else:
+            self._text.setText(theme.bubble_html())
 
     @staticmethod
     def _message_html(title: str, message: str, accent) -> str:
@@ -90,7 +121,7 @@ class SpeechBubble(QWidget):
         else:
             accent_css = theme.css_color(theme.CYAN_ACCENT)
         return (
-            f"<div style=\"font-family:'{theme.FONT_FAMILY}'; font-size:10.5pt; line-height:145%;\">"
+            f"<div style=\"font-family:'{theme.FONT_FAMILY}'; font-size:{theme.scaled_font_px(10.5)}pt; line-height:145%;\">"
             f"<span style=\"color:{accent_css}; font-weight:600;\">{html.escape(title)}</span><br>"
             f"<span style=\"color:{secondary};\">{html.escape(message)}</span>"
             "</div>"

@@ -45,6 +45,10 @@ class ToolbarItem(QFrame):
         self._icon.set_color(theme.CYAN_ACCENT if selected else theme.TEXT_SECONDARY)
         self._refresh_style()
 
+    def apply_scale(self) -> None:
+        self.setFixedSize(theme.scaled_px(56), theme.scaled_px(58))
+        self._icon.setFixedSize(theme.scaled_px(28), theme.scaled_px(28))
+
     def enterEvent(self, event) -> None:
         self._hovered = True
         self._refresh_style()
@@ -85,6 +89,7 @@ class VerticalToolbar(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(theme.SHADOW_MARGIN - 2, theme.SHADOW_MARGIN, theme.SHADOW_MARGIN - 2, theme.SHADOW_MARGIN)
         root.setSpacing(0)
+        self._root_layout = root
 
         card = theme.GlassPanel(theme.RADIUS_TOOLBAR, self)
         theme.apply_soft_shadow(card)
@@ -93,15 +98,18 @@ class VerticalToolbar(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(theme.SPACE_XXS, theme.SPACE_SM, theme.SPACE_XXS, theme.SPACE_SM)
         layout.setSpacing(theme.SPACE_XXS)
+        self._card_layout = layout
         layout.addStretch(1)
 
         self._items: dict[str, ToolbarItem] = {}
+        self._separators: list[QFrame] = []
         for index, (action_id, tooltip, icon_kind) in enumerate(TOOLBAR_ACTIONS):
             if index:
                 separator = QFrame(card)
                 separator.setFixedSize(27, 1)
                 separator.setStyleSheet(theme.separator_style(vertical=False))
                 layout.addWidget(separator, 0, Qt.AlignHCenter)
+                self._separators.append(separator)
             item = ToolbarItem(action_id, tooltip, icon_kind, card)
             item.activated.connect(self.select_action)
             layout.addWidget(item, 0, Qt.AlignHCenter)
@@ -123,3 +131,23 @@ class VerticalToolbar(QWidget):
             item.set_selected(key == action_id)
         if emit_signal:
             self.action_requested.emit(action_id)
+
+    def apply_scale(self) -> None:
+        self.setFixedSize(theme.scaled_px(theme.TOOLBAR_SIZE.width()), theme.scaled_px(theme.TOOLBAR_SIZE.height()))
+        self._root_layout.setContentsMargins(
+            theme.scaled(theme.SHADOW_MARGIN - 2),
+            theme.scaled(theme.SHADOW_MARGIN),
+            theme.scaled(theme.SHADOW_MARGIN - 2),
+            theme.scaled(theme.SHADOW_MARGIN),
+        )
+        self._card_layout.setContentsMargins(
+            theme.scaled_px(theme.SPACE_XXS),
+            theme.scaled_px(theme.SPACE_SM),
+            theme.scaled_px(theme.SPACE_XXS),
+            theme.scaled_px(theme.SPACE_SM),
+        )
+        self._card_layout.setSpacing(theme.scaled_px(theme.SPACE_XXS))
+        for separator in self._separators:
+            separator.setFixedSize(theme.scaled_px(27), theme.scaled_px(1))
+        for item in self._items.values():
+            item.apply_scale()

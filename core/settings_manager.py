@@ -23,7 +23,22 @@ DEFAULT_PREFERENCES = {
     "notifications_enabled": True,
     "keep_awake_enabled": True,
     "greeting_on_startup": True,
+    "ui_scale": 1.0,
 }
+
+
+def _sanitize_ui_scale(value) -> float:
+    """Return a valid float for ui_scale, falling back to 1.0 on garbage.
+
+    Only type/NaN is normalized here; the authoritative MIN/MAX clamp lives in
+    ``ui.theme.set_ui_scale`` (kept out of core to avoid a core->ui dependency).
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 1.0
+    value = float(value)
+    if value != value or value in (float("inf"), float("-inf")):
+        return 1.0
+    return value
 
 
 class SettingsManager:
@@ -51,7 +66,9 @@ class SettingsManager:
         merged = dict(DEFAULT_PREFERENCES)
         for key, default in DEFAULT_PREFERENCES.items():
             value = self._preferences.get(key, default)
-            if isinstance(value, bool):
+            if key == "ui_scale":
+                merged[key] = _sanitize_ui_scale(value)
+            elif isinstance(value, bool):
                 merged[key] = value
         # Preserve unknown keys so future preference namespaces survive rewrites.
         for key, value in self._preferences.items():
@@ -73,6 +90,10 @@ class SettingsManager:
     def greeting_on_startup(self) -> bool:
         return bool(self._preferences["greeting_on_startup"])
 
+    @property
+    def ui_scale(self) -> float:
+        return float(self._preferences["ui_scale"])
+
     def set_notifications_enabled(self, enabled: bool) -> None:
         self._set("notifications_enabled", enabled)
 
@@ -81,6 +102,14 @@ class SettingsManager:
 
     def set_greeting_on_startup(self, enabled: bool) -> None:
         self._set("greeting_on_startup", enabled)
+
+    def set_ui_scale(self, value: float) -> None:
+        value = _sanitize_ui_scale(value)
+        if self._preferences.get("ui_scale") == value:
+            return
+        self._preferences["ui_scale"] = value
+        self.save()
+        self._notify()
 
     def _set(self, key: str, value: bool) -> None:
         value = bool(value)

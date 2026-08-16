@@ -73,6 +73,8 @@ BUBBLE_PET_OVERLAP = 62
 BUBBLE_VERTICAL_OVERLAP = 68
 
 DOCK_SIZE = QSize(462, 82)
+COMPACT_DOCK_SIZE = QSize(220, 82)
+FULL_DOCK_SCALE_THRESHOLD = 0.90
 TOOLBAR_SIZE = QSize(92, 246)
 BUBBLE_SIZE = QSize(352, 138)
 PET_MAX_DIMENSION = 274
@@ -85,6 +87,59 @@ PET_GLOW_HEIGHT = 28
 POPOVER_WIDTH = 340
 POPOVER_TEXT_WIDTH = 208
 POPOVER_ANCHOR_GAP = 14
+
+
+# Runtime UI scale (Firefly's own logical scaling on top of Qt DPI). This is the
+# single source of truth for the whole visual shell: pet, dock, toolbar, bubble,
+# offsets, icons and fonts all derive from it via the helpers below.
+MIN_SCALE = 0.60
+DEFAULT_SCALE = 1.00
+MAX_SCALE = 1.40
+SCALE_STEP = 0.05
+MIN_FONT_PX = 7
+
+_ui_scale = DEFAULT_SCALE
+_scale_listeners: list = []
+
+
+def ui_scale() -> float:
+    return _ui_scale
+
+
+def set_ui_scale(value: float) -> float:
+    """Clamp and apply a new scale; notifies listeners only when it changed."""
+    global _ui_scale
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        value = DEFAULT_SCALE
+    value = float(value)
+    if value != value or value in (float("inf"), float("-inf")):
+        value = DEFAULT_SCALE
+    value = min(MAX_SCALE, max(MIN_SCALE, value))
+    value = round(value, 2)
+    if value != _ui_scale:
+        _ui_scale = value
+        for listener in list(_scale_listeners):
+            listener(_ui_scale)
+    return _ui_scale
+
+
+def on_scale_changed(listener) -> None:
+    _scale_listeners.append(listener)
+
+
+def scaled(value: int | float) -> int:
+    """Scale an offset/gap (may be negative); no minimum clamp."""
+    return int(round(value * _ui_scale))
+
+
+def scaled_px(value: int | float) -> int:
+    """Scale a pixel size; never below 1px."""
+    return max(1, scaled(value))
+
+
+def scaled_font_px(value: int | float) -> int:
+    """Scale a font size; never below the readability floor."""
+    return max(MIN_FONT_PX, scaled(value))
 
 
 def qcolor(value: tuple[int, int, int, int]) -> QColor:
@@ -113,14 +168,14 @@ def glass_card_style(object_name: str, radius: int) -> str:
 def primary_label_style(size: int = FONT_SIZE_BODY, weight: int = FONT_WEIGHT_MEDIUM) -> str:
     return (
         f"color: {css_color(TEXT_PRIMARY)}; background: {TRANSPARENT}; "
-        f"font-family: '{FONT_FAMILY}'; font-size: {size}pt; font-weight: {weight};"
+        f"font-family: '{FONT_FAMILY}'; font-size: {scaled_font_px(size)}pt; font-weight: {weight};"
     )
 
 
 def secondary_label_style(size: int = FONT_SIZE_SMALL) -> str:
     return (
         f"color: {css_color(TEXT_SECONDARY)}; background: {TRANSPARENT}; "
-        f"font-family: '{FONT_FAMILY}'; font-size: {size}pt;"
+        f"font-family: '{FONT_FAMILY}'; font-size: {scaled_font_px(size)}pt;"
     )
 
 
@@ -168,7 +223,7 @@ def separator_style(*, vertical: bool) -> str:
 def section_label_style() -> str:
     return (
         f"color: {css_color(TEXT_SECONDARY)}; background: {TRANSPARENT}; "
-        f"font-family: '{FONT_FAMILY}'; font-size: {FONT_SIZE_SMALL}pt; font-weight: {FONT_WEIGHT_MEDIUM};"
+        f"font-family: '{FONT_FAMILY}'; font-size: {scaled_font_px(FONT_SIZE_SMALL)}pt; font-weight: {FONT_WEIGHT_MEDIUM};"
     )
 
 
@@ -181,7 +236,7 @@ def popover_button_style(object_name: str) -> str:
             border-radius: {RADIUS_ITEM}px;
             padding: {SPACE_XS}px {SPACE_MD}px;
             font-family: '{FONT_FAMILY}';
-            font-size: {FONT_SIZE_BODY}pt;
+            font-size: {scaled_font_px(FONT_SIZE_BODY)}pt;
             font-weight: {FONT_WEIGHT_MEDIUM};
         }}
         QPushButton#{object_name}:hover {{
@@ -199,7 +254,7 @@ def link_button_style(object_name: str) -> str:
             border: none;
             padding: {SPACE_XXS}px {SPACE_XS}px;
             font-family: '{FONT_FAMILY}';
-            font-size: {FONT_SIZE_SMALL}pt;
+            font-size: {scaled_font_px(FONT_SIZE_SMALL)}pt;
             font-weight: {FONT_WEIGHT_MEDIUM};
         }}
         QPushButton#{object_name}:hover {{
@@ -215,7 +270,7 @@ def bubble_html() -> str:
     secondary = css_color(TEXT_SECONDARY)
     accent = css_color(CYAN_ACCENT)
     return (
-        f"<div style=\"font-family:'{FONT_FAMILY}'; font-size:10.5pt; line-height:145%;\">"
+        f"<div style=\"font-family:'{FONT_FAMILY}'; font-size:{scaled_font_px(10.5)}pt; line-height:145%;\">"
         f"<span style=\"color:{primary}; font-weight:600;\">I'm </span>"
         f"<span style=\"color:{accent}; font-weight:600;\">Firefly!</span><br>"
         f"<span style=\"color:{secondary};\">How can I help you today?</span>"

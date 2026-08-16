@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QImageReader, QMovie, QPainter, QRadialGradient
-from PySide6.QtWidgets import QApplication, QLabel, QMenu, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 from . import theme
 
@@ -18,6 +18,9 @@ class PetOverlay(QWidget):
     drag_finished = Signal()
     reset_requested = Signal()
     quit_requested = Signal()
+    scale_mode_toggled = Signal()
+    scale_wheel = Signal(int)  # +1 wheel-up, -1 wheel-down
+    scale_exit_requested = Signal()
 
     def __init__(
         self,
@@ -29,7 +32,10 @@ class PetOverlay(QWidget):
         super().__init__(None)
         self._assets_dir = Path(assets_dir)
         self._state_gif = dict(state_gif)
+        self._base_max_dimension = max_dimension
         self._max_dimension = max_dimension
+        self._original_size: QSize | None = None
+        self._source_path: Path | None = None
         self._current_state: str | None = None
         self._paused = False
         self._drag_offset: QPoint | None = None
@@ -42,6 +48,7 @@ class PetOverlay(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_NoSystemBackground)
         self.setStyleSheet(theme.transparent_window_style())
+        self.setFocusPolicy(Qt.StrongFocus)
 
         self._label = QLabel(self)
         self._label.setAttribute(Qt.WA_TransparentForMouseEvents)
@@ -69,18 +76,35 @@ class PetOverlay(QWidget):
         path = self._assets_dir / gif_name
         if not path.exists():
             path = self._assets_dir / "idle.gif"
+        self._source_path = path
 
         scaled = self._scaled_size(path)
+        self._restart_movie(scaled, reset_frame=(state == "sleeping"))
+        self._apply_geometry(scaled)
+
+    def _restart_movie(self, scaled: QSize, *, reset_frame: bool) -> None:
+        """(Re)load the current frame source at ``scaled`` and keep playing.
+
+        QMovie only honors setScaledSize() before start(); once the movie is
+        running a later setScaledSize() is ignored and the label keeps painting
+        the previously-scaled frames. Re-applying the source at the new size
+        forces the frames to actually resize. The current frame and paused state
+        are restored so playback is visually uninterrupted.
+        """
+        frame = self._movie.currentFrameNumber()
         self._movie.stop()
-        self._movie.setFileName(str(path))
+        self._movie.setFileName(str(self._source_path))
         self._movie.setScaledSize(scaled)
         self._movie.start()
-        if state == "sleeping":
+        if reset_frame:
             self._movie.jumpToFrame(0)
-        self._movie.setPaused(self._paused or state == "sleeping")
+        elif frame > 0:
+            self._movie.jumpToFrame(frame)
+        self._movie.setPaused(self._paused or self.current_state == "sleeping")
 
-        width = scaled.width() + theme.PET_HORIZONTAL_PADDING
-        height = scaled.height() + theme.PET_BOTTOM_PADDING
+    def _apply_geometry(self, scaled: QSize) -> None:
+        width = scaled.width() + theme.scaled_px(theme.PET_HORIZONTAL_PADDING)
+        height = scaled.height() + theme.scaled_px(theme.PET_BOTTOM_PADDING)
         self.setFixedSize(width, height)
         self._label.setGeometry((width - scaled.width()) // 2, 0, scaled.width(), scaled.height())
         self.update()
@@ -89,6 +113,11 @@ class PetOverlay(QWidget):
         size = QImageReader(str(path)).size()
         if size.isEmpty():
             size = QSize(192, 208)
+        self._original_size = size
+        return self._scaled_from_original()
+
+    def _scaled_from_original(self) -> QSize:
+        size = self._original_size or QSize(192, 208)
         width, height = size.width(), size.height()
         longest = max(width, height)
         if longest > 0 and longest != self._max_dimension:
@@ -96,6 +125,20 @@ class PetOverlay(QWidget):
             width = max(1, int(round(width * ratio)))
             height = max(1, int(round(height * ratio)))
         return QSize(width, height)
+
+    def apply_scale(self) -> None:
+        """Re-derive the character size from the current ui_scale.
+
+        Kept separate from geometry-only resizing: a live QMovie ignores a
+        setScaledSize() issued after start(), which is exactly why the first
+        implementation only shrank the window (a crop) while the character
+        stayed at its old render size. Re-loading the immutable original frame
+        source at the new size makes the character itself actually scale.
+        """
+        self._max_dimension = theme.scaled_px(self._base_max_dimension)
+        scaled = self._scaled_from_original()
+        self._restart_movie(scaled, reset_frame=False)
+        self._apply_geometry(scaled)
 
     def pause(self) -> None:
         self._paused = True
@@ -110,7 +153,7 @@ class PetOverlay(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         center = self.width() / 2
         glow_y = self.height() - 18
-        glow_width = min(theme.PET_GLOW_WIDTH, self.width() - 8)
+        glow_width = min(theme.scaled(theme.PET_GLOW_WIDTH), self.width() - 8)
         glow_x = (self.width() - glow_width) / 2
         gradient = QRadialGradient(center, glow_y, glow_width * 0.56)
         gradient.setColorAt(0.0, theme.qcolor(theme.PET_GLOW_INNER))
@@ -120,9 +163,9 @@ class PetOverlay(QWidget):
         painter.drawEllipse(
             QRectF(
                 glow_x,
-                self.height() - theme.PET_GLOW_HEIGHT - 11,
+                self.height() - theme.scaled(theme.PET_GLOW_HEIGHT) - 11,
                 glow_width,
-                theme.PET_GLOW_HEIGHT,
+                theme.scaled(theme.PET_GLOW_HEIGHT),
             )
         )
         super().paintEvent(event)
@@ -182,17 +225,24 @@ class PetOverlay(QWidget):
         self.position_changed.emit()
 
     def contextMenuEvent(self, event) -> None:
-        menu = QMenu(self)
-        menu.addAction("Show / Hide greeting", self.clicked.emit)
-        menu.addSeparator()
-        if self._paused:
-            menu.addAction("Resume animation", self.resume)
-        else:
-            menu.addAction("Pause animation", self.pause)
-        menu.addAction("Reset position", self.reset_requested.emit)
-        menu.addSeparator()
-        menu.addAction("Quit", self.quit_requested.emit)
-        menu.exec(event.globalPos())
+        # Right-click toggles UI Scale Mode (replaces the old context menu).
+        self.scale_mode_toggled.emit()
+        event.accept()
+
+    def wheelEvent(self, event) -> None:
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self.scale_wheel.emit(1)
+        elif delta < 0:
+            self.scale_wheel.emit(-1)
+        event.accept()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Escape:
+            self.scale_exit_requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:
         if self._shutting_down:
