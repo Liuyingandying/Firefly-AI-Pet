@@ -5,6 +5,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import json
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -40,6 +41,152 @@ STATE_GIF = {
 
 def _norm(path: Path | str) -> str:
     return os.path.normcase(os.path.normpath(str(path)))
+
+
+def _gone_temp_path(name: str) -> Path:
+    """A path under the OS temp dir that is guaranteed not to exist."""
+    return Path(tempfile.gettempdir()) / name
+
+
+def test_stale_temp_current_not_restored() -> None:
+    """A persisted current that no longer exists must not be restored as current."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        valid = root / "valid"
+        valid.mkdir()
+        stale = _gone_temp_path("tmp_firefly_gone_current_xyz")
+        settings = root / "config" / "ui_settings.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(
+            json.dumps({
+                "current_workspace": str(stale),
+                "recent_workspaces": [str(stale), str(valid)],
+            }),
+            encoding="utf-8",
+        )
+        store = WorkspaceStore(settings, valid)
+        assert store.current_workspace != stale
+        assert store.current_workspace == valid.resolve()
+
+
+def test_stale_temp_recent_filtered() -> None:
+    """A stale temp recent is dropped; valid recents (both sides) are kept."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        valid_a = root / "a"
+        valid_b = root / "b"
+        valid_a.mkdir()
+        valid_b.mkdir()
+        stale = _gone_temp_path("tmp_firefly_gone_recent_xyz")
+        settings = root / "config" / "ui_settings.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(
+            json.dumps({
+                "current_workspace": str(valid_a),
+                "recent_workspaces": [str(valid_a), str(stale), str(valid_b)],
+            }),
+            encoding="utf-8",
+        )
+        store = WorkspaceStore(settings, valid_a)
+        recents = [str(x) for x in store.recent_workspaces]
+        assert str(valid_a) in recents
+        assert str(valid_b) in recents
+        assert str(stale) not in recents, "stale temp recent must be filtered out"
+
+
+def test_non_temp_missing_recent_kept() -> None:
+    """A missing non-temp path (e.g. a disconnected drive) is kept conservatively."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        valid = root / "valid"
+        valid.mkdir()
+        missing = PROJECT_DIR / "__firefly_missing_ws_test__"  # not under %TEMP%, gone
+        settings = root / "config" / "ui_settings.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(
+            json.dumps({
+                "current_workspace": str(valid),
+                "recent_workspaces": [str(valid), str(missing)],
+            }),
+            encoding="utf-8",
+        )
+        store = WorkspaceStore(settings, valid)
+        recents = [str(x) for x in store.recent_workspaces]
+        assert str(missing) in recents, "missing non-temp path must be kept (conservative)"
+
+
+def test_temp_store_does_not_touch_real_config() -> None:
+    """A test store must never modify the real user ui_settings.json."""
+    from ui.workspace_store import SETTINGS_FILE
+
+    before = SETTINGS_FILE.read_bytes() if SETTINGS_FILE.exists() else None
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        ws = root / "ws"
+        ws.mkdir()
+        store = WorkspaceStore(root / "config" / "ui_settings.json", ws)
+        manager = WorkspaceManager(store)
+        manager.set_current(ws)
+        store.prune_stale_recents()
+    after = SETTINGS_FILE.read_bytes() if SETTINGS_FILE.exists() else None
+    assert before == after, "test store must not write the real ui_settings.json"
+
+
+def test_selecting_deleted_workspace_keeps_current() -> None:
+    """Selecting a deleted workspace leaves the current unchanged (no switch)."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        ws_a = root / "a"
+        ws_b = root / "b"
+        ws_a.mkdir()
+        ws_b.mkdir()
+        store = WorkspaceStore(root / "config" / "ui_settings.json", ws_a)
+        manager = WorkspaceManager(store)
+        manager.set_current(ws_a)
+        before = manager.current()
+        shutil.rmtree(ws_b)
+        result = manager.add_or_select(ws_b)
+        assert result is None
+        assert manager.current() == before
+
+
+def test_quick_ask_rejects_missing_workspace() -> None:
+    """QuickAsk must not construct a QProcess for a nonexistent workspace."""
+    from unittest.mock import patch
+
+    from ui.process_launcher import QuickAskRunner
+
+    runner = QuickAskRunner(session_manager=None)
+    failed = []
+    runner.failed.connect(failed.append)
+    with patch("ui.process_launcher.QProcess") as qp:
+        ok = runner.ask("codex", "hello", Path("Z:/definitely/missing/ws"), effort="low", persistent=False)
+    assert ok is False
+    assert failed and "工作区不存在" in failed[0]
+    assert not qp.called, "must not construct a QProcess for a missing workspace"
+
+
+def test_prune_stale_recents_persists() -> None:
+    """prune_stale_recents removes stale temp entries from the on-disk file."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        valid = root / "valid"
+        valid.mkdir()
+        stale = _gone_temp_path("tmp_firefly_gone_prune_xyz")
+        settings = root / "config" / "ui_settings.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(
+            json.dumps({
+                "current_workspace": str(valid),
+                "recent_workspaces": [str(valid), str(stale)],
+            }),
+            encoding="utf-8",
+        )
+        store = WorkspaceStore(settings, valid)
+        removed = store.prune_stale_recents()
+        assert removed >= 1
+        on_disk = json.loads(settings.read_text(encoding="utf-8"))
+        assert str(stale) not in on_disk["recent_workspaces"]
 
 
 def test_manager() -> None:
@@ -195,6 +342,13 @@ def test_ui(app: QApplication) -> None:
 def main() -> None:
     app = QApplication.instance() or QApplication([])
     test_manager()
+    test_stale_temp_current_not_restored()
+    test_stale_temp_recent_filtered()
+    test_non_temp_missing_recent_kept()
+    test_temp_store_does_not_touch_real_config()
+    test_selecting_deleted_workspace_keeps_current()
+    test_quick_ask_rejects_missing_workspace()
+    test_prune_stale_recents_persists()
     test_ui(app)
     print("Phase 8A.3 workspace tests passed.")
 

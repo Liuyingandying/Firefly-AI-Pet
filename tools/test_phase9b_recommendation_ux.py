@@ -584,7 +584,7 @@ def main() -> None:
     app = QApplication.instance() or QApplication([])
     from app import VisualShell
 
-    shell = VisualShell(None)
+    shell = VisualShell(None, workspace_settings_file=Path(tempfile.mkdtemp(prefix="fap9b_ws_")) / "ui_settings.json")
     tests = [
         test_high_conf_claude_short_talk_no_card,
         test_explain_short_talk,

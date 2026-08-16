@@ -60,6 +60,7 @@ from ui.vertical_toolbar import VerticalToolbar
 from ui.workflow_card import WorkflowCard
 from ui.workflow_executor import PlanStepExecutor
 from ui.workflow_implement_executor import ImplementStepExecutor
+from ui.workspace_store import WorkspaceStore
 from ui.workflow_review_executor import ReviewStepExecutor
 from ui.workspace_popover import WorkspacePopover
 
@@ -94,6 +95,7 @@ class VisualShell(QObject):
         *,
         sessions_file: Path | str | None = None,
         artifact_root: Path | str | None = None,
+        workspace_settings_file: Path | str | None = None,
     ):
         super().__init__()
         self._server = server
@@ -103,7 +105,11 @@ class VisualShell(QObject):
         self.dock = AgentDock()
         self.bubble = SpeechBubble()
         self.toolbar = VerticalToolbar()
-        self.workspace_manager = WorkspaceManager()
+        self.workspace_manager = (
+            WorkspaceManager(store=WorkspaceStore(workspace_settings_file))
+            if workspace_settings_file is not None
+            else WorkspaceManager()
+        )
         if sessions_file is not None:
             self.session_manager = SessionManager(store=SessionStore(sessions_file))
         else:

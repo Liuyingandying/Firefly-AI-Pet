@@ -47,7 +47,6 @@ from core.workflow_models import ArtifactKind, WorkflowState, WorkflowStepState
 
 SESSIONS_FILE = PROJECT_DIR / "config" / "sessions.json"
 CLAUDE_SOURCE = PROJECT_DIR / "runtime" / "sources" / "claude.json"
-UI_SETTINGS_FILE = PROJECT_DIR / "config" / "ui_settings.json"
 ARTIFACT_ROOT = PROJECT_DIR / "runtime" / "artifacts"
 TIMEOUT_MS = 180_000
 
@@ -76,7 +75,6 @@ def main() -> int:
     app = QApplication.instance() or QApplication([])
     checks: dict[str, str] = {}
     exit_code: list[int] = []
-    ui_settings_before = UI_SETTINGS_FILE.read_bytes() if UI_SETTINGS_FILE.exists() else None
     tmp_artifacts = Path(tempfile.mkdtemp(prefix="fap9d3_smoke_artifacts_"))
 
     with tempfile.TemporaryDirectory() as td:
@@ -92,7 +90,11 @@ def main() -> int:
 
         from app import VisualShell
 
-        shell = VisualShell(None, artifact_root=tmp_artifacts)
+        shell = VisualShell(
+            None,
+            artifact_root=tmp_artifacts,
+            workspace_settings_file=Path(tempfile.mkdtemp(prefix="fap9d3_ws_settings_")) / "ui_settings.json",
+        )
         try:
             shell.short_ask.reset()
             shell.recommendation_card.clear_pending()
@@ -224,11 +226,6 @@ def main() -> int:
             return 0 if ok else 1
         finally:
             shell.shutdown()
-            # Restore the real workspace config the smoke touched.
-            if ui_settings_before is None:
-                UI_SETTINGS_FILE.unlink(missing_ok=True)
-            else:
-                UI_SETTINGS_FILE.write_bytes(ui_settings_before)
             if shell.workflow_card.workflow_id is not None:
                 try:
                     ArtifactStore(tmp_artifacts).remove_workflow(shell.workflow_card.workflow_id)

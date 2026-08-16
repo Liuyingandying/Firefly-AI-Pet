@@ -690,7 +690,7 @@ def main() -> None:
     app = QApplication.instance() or QApplication([])
     from app import VisualShell
 
-    _SHELL = VisualShell(None)
+    _SHELL = VisualShell(None, workspace_settings_file=Path(tempfile.mkdtemp(prefix="fap9c_ws_")) / "ui_settings.json")
     _TMP_METRICS = Path(tempfile.mkdtemp(prefix="fap9c_metrics_"))
     tests = [
         test_recommendation_does_not_auto_execute,
