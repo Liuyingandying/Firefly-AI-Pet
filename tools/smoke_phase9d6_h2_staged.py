@@ -11,17 +11,19 @@ loop:
         README.md) and verify the initial ``python test_greeting.py`` FAILS.
 
     --run-plan-and-implement --workspace PATH [--state PATH] [--evidence PATH]
-        Real Claude Plan (pinned workflow model, Plan validity gate) -> Step 1
-        SUCCEEDED -> confirm Step 2 -> managed ``codex exec`` (owned process,
-        workspace-write sandbox) -> wait for the exec to finish -> save minimal
-        smoke state (test-only control JSON) -> exit. The workflow stays
-        RUNNING; the user then inspects the workspace.
+        Real Plan through the direct provider (PlanStepExecutor ->
+        DirectProviderRunner -> WorkflowCoordinator) -> Step 1 SUCCEEDED ->
+        confirm Step 2 -> managed ``codex exec`` (owned process, workspace-write
+        sandbox) -> wait for the exec to finish -> save minimal smoke state
+        (test-only control JSON) -> exit. The workflow stays RUNNING; the user
+        then inspects the workspace.
 
     --continue [--state PATH] [--evidence PATH] [--review] [--no-cleanup]
         Reconstruct the smoke context from the control JSON, run the real
         completion path (workspace diff + USER_CONFIRMED + artifacts -> Step 2
-        SUCCEEDED), run the local test, and optionally run the real Claude
-        Review (Step 3). Writes the evidence JSON.
+        SUCCEEDED), run the local test, and optionally run the Review step
+        through the direct provider (ReviewStepExecutor -> DirectProviderRunner).
+        Writes the evidence JSON.
 
     --cleanup --workspace PATH
         Remove a disposable smoke workspace (only ever removes a directory
@@ -67,7 +69,6 @@ from core.workflow_models import (
     WorkflowStepState,
 )
 from core.workspace_snapshot import FileRecord, Snapshot, capture, diff
-from ui.process_launcher import QuickAskRunner
 from ui.workflow_executor import PlanStepExecutor
 from ui.workflow_implement_executor import ImplementStepExecutor
 from ui.workflow_review_executor import ReviewStepExecutor
@@ -177,6 +178,33 @@ def find_attached(plan, step_id: str, kind: ArtifactKind):
     return None
 
 
+def _step1_succeeded(plan) -> bool:
+    """The authoritative Step 1 completion gate (workflow state, not transport).
+
+    True only when the WorkflowCoordinator immutable plan state shows Step 1
+    SUCCEEDED with its PLAN artifact attached AND the plan reached the expected
+    post-Plan gate: Step 2 AWAITING_CONFIRMATION and the workflow
+    WAITING_FOR_USER. A provider HTTP 200 / AgentEvent FINAL / finished process
+    is never, by itself, success.
+    """
+    if plan is None:
+        return False
+    return (
+        plan.steps[0].state == WorkflowStepState.SUCCEEDED
+        and plan.steps[1].state == WorkflowStepState.AWAITING_CONFIRMATION
+        and plan.state == WorkflowState.WAITING_FOR_USER
+        and find_attached(plan, "step_1", ArtifactKind.PLAN) is not None
+    )
+
+
+def _describe_workflow(plan, step_index: int = 0) -> str:
+    """One-line snapshot of the authoritative workflow/step state for reports."""
+    if plan is None:
+        return "workflow_state=<none>"
+    step_state = plan.steps[step_index].state.value if step_index < len(plan.steps) else "?"
+    return f"workflow_state={plan.state.value} step{step_index + 1}_state={step_state}"
+
+
 # ---------------------------------------------------------------------------
 # test-only control state (allowlisted, no secrets)
 # ---------------------------------------------------------------------------
@@ -267,15 +295,32 @@ def prepare(workspace_arg: str | None) -> int:
 # stage 2: real Plan -> managed codex exec -> save state (no blocking gate)
 # ---------------------------------------------------------------------------
 
-def _wait_executor(executor, timeout_ms: int) -> bool:
+def _wait_for_turn(executor, timeout_ms: int) -> bool:
+    """Drive the Qt event loop until the executor's managed turn ends.
+
+    Returns True when the executor emitted ``turn_finished`` before the timeout,
+    False when the timeout fired first. This helper only observes the executor's
+    public ``turn_finished`` signal — the H4 direct-provider completion boundary.
+    It never reads the Short Talk process runner, the Claude CLI, or the provider
+    HTTP response; success/failure is decided by the caller from ``executor.plan``
+    (WorkflowCoordinator state), not by this helper.
+    """
+    finished = {"value": False}
+
+    def _mark_finished() -> None:
+        finished["value"] = True
+
     loop = QEventLoop()
+    executor.turn_finished.connect(_mark_finished)
     executor.turn_finished.connect(loop.quit)
     timer = QTimer()
     timer.setSingleShot(True)
     timer.timeout.connect(loop.quit)
     timer.start(timeout_ms)
     loop.exec()
-    return not timer.isActive()  # False means the timer fired (timeout)
+    executor.turn_finished.disconnect(_mark_finished)
+    executor.turn_finished.disconnect(loop.quit)
+    return finished["value"]
 
 
 def run_plan_and_implement(
@@ -308,26 +353,33 @@ def run_plan_and_implement(
     evidence["workspace"] = str(ws)
     evidence["task_text"] = TASK
 
-    # ---- Step 1: real Claude Plan (pinned model + validity gate) ----------
+    # ---- Step 1: Claude Plan via the direct provider ----------------------
     log(f"[9D6-H2] workflow={plan.workflow_id} created; confirming Step 1")
     plan = coord.confirm_step(plan, "step_1")
     plan_ex = PlanStepExecutor(coord, store, parent=app)
+    agent_events: list[str] = []
+    workflow_events: list[str] = []
+    plan_ex.agent_event.connect(lambda ev: agent_events.append(ev.type.value))
+    coord.connect(lambda ev: workflow_events.append(ev.type.value))
     plan_ex.execute(plan, "step_1")
-    if not _wait_executor(plan_ex, plan_timeout_ms):
-        errlog("[9D6-H2] Step 1 timed out waiting for the managed Claude call.")
+    if not _wait_for_turn(plan_ex, plan_timeout_ms):
+        errlog("[9D6-H2] Step 1 timed out waiting for Direct Provider Plan completion.")
+        errlog(f"[9D6-H2] current state: {_describe_workflow(plan_ex.plan, 0)}")
+        errlog(f"[9D6-H2] observed WorkflowEvents: {workflow_events or '<none>'}")
+        errlog(f"[9D6-H2] observed AgentEvents: {agent_events or '<none>'}")
         return 1
     plan = plan_ex.plan
-    if plan is None or plan.steps[0].state != WorkflowStepState.SUCCEEDED:
-        errlog(f"[9D6-H2] Step 1 did not SUCCEED (state={plan.steps[0].state.value if plan else '?'}).")
+    if not _step1_succeeded(plan):
+        errlog(
+            "[9D6-H2] Step 1 did not reach the Plan completion gate "
+            f"({_describe_workflow(plan, 0)})."
+        )
         return 1
     plan_ref = find_attached(plan, "step_1", ArtifactKind.PLAN)
-    if plan_ref is None:
-        errlog("[9D6-H2] Step 1 SUCCEEDED but no PLAN artifact attached.")
-        return 1
     plan_text = store.read_text(plan_ref)
     evidence["plan_sha256_prefix"] = (plan_ref.metadata or {}).get("sha256", "")[:12]
     evidence["plan_excerpt"] = plan_text[:800]
-    log(f"[9D6-H2] Step 1 SUCCEEDED (plan artifact {plan_ref.path})")
+    log("[9D6-H2] Step 1 SUCCEEDED (PLAN artifact attached; Step 2 AWAITING_CONFIRMATION)")
 
     # ---- Step 2: user confirm + managed codex exec ------------------------
     plan = coord.confirm_step(plan, "step_2")
@@ -337,13 +389,13 @@ def run_plan_and_implement(
         errlog("[9D6-H2] Step 2 did not start RUNNING; managed exec launch failed.")
         return 1
     log("[9D6-H2] Step 2 RUNNING: managed codex exec started (owned process)")
-    finished_ok = _wait_executor(impl_ex, codex_timeout_ms)
+    finished_ok = _wait_for_turn(impl_ex, codex_timeout_ms)
     plan = impl_ex.plan
     if not finished_ok or plan is None or plan.state == WorkflowState.FAILED:
-        errlog("[9D6-H2] Step 2 managed exec did not finish cleanly.")
+        errlog("[9D6-H2] Step 2 managed codex exec did not finish cleanly.")
         return 1
     if not impl_ex.managed_exec_finished:
-        errlog("[9D6-H2] Step 2 managed exec finished but not marked finished.")
+        errlog("[9D6-H2] Step 2 managed codex exec finished but not marked finished.")
         return 1
 
     evidence["codex_exit_code"] = impl_ex.managed_exec_exit_code
@@ -476,14 +528,14 @@ def continue_stage(state_arg: str | None, evidence_arg: str | None, review: bool
         log("[9D6-H2] RESULT=FAIL (Step 3 gate wrong after Step 2; no Review)")
         return 1
 
-    # ---- Step 3 (optional): real Claude Review ----------------------------
+    # ---- Step 3 (optional): Review via the direct provider -----------------
     review_verdict = "skipped"
     if review:
         plan = coord.confirm_step(plan, "step_3")
         review_ex = ReviewStepExecutor(coord, store, parent=app)
         review_ex.execute(plan, "step_3")
-        if not _wait_executor(review_ex, review_timeout_ms):
-            issues.append("Step 3 timed out waiting for the managed Claude call.")
+        if not _wait_for_turn(review_ex, review_timeout_ms):
+            issues.append("Step 3 timed out waiting for Direct Provider Review completion.")
             evidence["issues"] = issues
             write_evidence(evidence, evidence_arg, ws)
             log("[9D6-H2] RESULT=FAIL (Step 3 timeout)")
