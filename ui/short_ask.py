@@ -5,7 +5,7 @@ user" — never a chat window. It consumes only neutral AgentEvents (no provider
 JSON names, no raw protocol) and owns a tiny state machine so the user always
 has honest feedback while the provider streams: Connecting / Thinking /
 Generating / first-token STREAMING / Complete / Error / Cancelled. Long answers
-are truncated on display with a light "Open Claude" escape hatch.
+scroll inside a bounded viewport with follow-tail auto-scroll.
 """
 
 from __future__ import annotations
@@ -13,12 +13,15 @@ from __future__ import annotations
 from enum import Enum
 
 from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QTextCursor, QTextOption
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QSizePolicy,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -41,7 +44,6 @@ from .popover_base import PopoverBase
 
 
 AGENT_DISPLAY = {"claude": "Claude", "codex": "Codex", "chatgpt": "ChatGPT"}
-MAX_ANSWER_CHARS = 600
 MAX_ANSWER_HEIGHT = 110
 
 SLOW_AFTER_MS = 8_000  # no first token yet -> "Still working…"
@@ -94,6 +96,119 @@ _ERROR_CATEGORY_DISPLAY = {
     ErrorCategory.CANCELLED: "Cancelled",
     ErrorCategory.UNKNOWN: "Something went wrong",
 }
+
+
+class ScrollFollowTextBrowser(QTextBrowser):
+    """Read-only, scrollable answer viewport with follow-tail auto-scroll.
+
+    Streaming keeps the view pinned to the bottom only while the user is already
+    there. Scrolling up pauses following; scrolling back to the bottom resumes
+    it. A programmatic scroll never reads as a user scroll.
+    """
+
+    resized = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setOpenExternalLinks(True)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAutoFillBackground(False)
+        self.viewport().setAutoFillBackground(False)
+        self.setStyleSheet(self._style())
+        self._follow_tail = True
+        self._guard = False
+        self.verticalScrollBar().valueChanged.connect(self._on_value_changed)
+        self.document().documentLayout().documentSizeChanged.connect(self._sync_height)
+
+    def text(self) -> str:
+        """QLabel-compatible accessor so existing callers/tests keep working."""
+        return self.toPlainText()
+
+    @property
+    def follow_tail(self) -> bool:
+        return self._follow_tail
+
+    def reset(self) -> None:
+        """Clear the viewport and resume follow-tail for a fresh turn."""
+        self._follow_tail = True
+        self.set_answer("")
+
+    def set_answer(self, text: str) -> None:
+        """Replace the whole answer and (when following) pin to the tail."""
+        self._guard = True
+        try:
+            self.setPlainText(text or "")
+        finally:
+            self._guard = False
+        if self._follow_tail:
+            self.scroll_to_bottom()
+
+    def append_answer(self, delta: str) -> None:
+        """Append a streamed delta without disturbing an upward scroll."""
+        bar = self.verticalScrollBar()
+        previous = bar.value()
+        # insertText moves the cursor to the end and scrolls it into view; guard
+        # that internal scroll so it is never mistaken for a user scroll-up.
+        self._guard = True
+        try:
+            cursor = self.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            cursor.insertText(delta)
+            self.setTextCursor(cursor)
+        finally:
+            self._guard = False
+        if self._follow_tail:
+            self.scroll_to_bottom()
+        else:
+            # insertText scrolled the cursor into view; put the user back where
+            # they were reading instead of yanking them to the tail.
+            self._guard = True
+            try:
+                bar.setValue(previous)
+            finally:
+                self._guard = False
+
+    def scroll_to_bottom(self) -> None:
+        bar = self.verticalScrollBar()
+        self._guard = True
+        try:
+            bar.setValue(bar.maximum())
+        finally:
+            self._guard = False
+
+    def _on_value_changed(self, value: int) -> None:
+        if self._guard:
+            return
+        self._follow_tail = value >= self.verticalScrollBar().maximum()
+
+    def _sync_height(self, size) -> None:
+        # Compact for short answers (no empty viewport), bounded + scrollable
+        # for long ones. +1 avoids truncating a fractional last line.
+        height = min(int(size.height()) + 1, MAX_ANSWER_HEIGHT)
+        self.setFixedHeight(max(height, 0))
+        self.resized.emit()
+
+    @staticmethod
+    def _style() -> str:
+        handle = theme.css_color((150, 180, 205, 90))
+        handle_hover = theme.css_color((120, 160, 195, 150))
+        return (
+            f"QTextBrowser {{ background: transparent; border: none; "
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; font-size: 9pt; }}"
+            "QTextBrowser QScrollBar:vertical { background: transparent; width: 6px; margin: 0; }"
+            f"QTextBrowser QScrollBar::handle:vertical {{ background: {handle}; border-radius: 3px; min-height: 20px; }}"
+            f"QTextBrowser QScrollBar::handle:vertical:hover {{ background: {handle_hover}; }}"
+            "QTextBrowser QScrollBar::add-line:vertical, QTextBrowser QScrollBar::sub-line:vertical { height: 0; }"
+            "QTextBrowser QScrollBar::add-page:vertical, QTextBrowser QScrollBar::sub-page:vertical { background: transparent; }"
+        )
 
 
 class AskPill(QWidget):
@@ -166,7 +281,6 @@ class ShortAskPanel(PopoverBase):
         self._esc.setEnabled(False)
         self._agent: str = "claude"
         self._full_answer = ""
-        self._truncated = False
         self._state = ShortTalkState.IDLE
         self._session_ready = False
         self._pending_prompt = ""
@@ -184,6 +298,10 @@ class ShortAskPanel(PopoverBase):
         self._cancelled_timer = QTimer(self)
         self._cancelled_timer.setSingleShot(True)
         self._cancelled_timer.timeout.connect(self._on_cancel_back_ready)
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.setInterval(0)
+        self._resize_timer.timeout.connect(self.adjustSize)
 
         # Header: agent name + status.
         header = QHBoxLayout()
@@ -219,15 +337,10 @@ class ShortAskPanel(PopoverBase):
         self._input.setEnabled(False)
         self.content_layout.addWidget(self._input)
 
-        # Output: short, word-wrapped, height-bounded.
-        self._output = QLabel("")
-        self._output.setTextFormat(Qt.PlainText)
-        self._output.setWordWrap(True)
-        self._output.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self._output.setStyleSheet(theme.secondary_label_style(size=9))
-        self._output.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._output.setMaximumHeight(MAX_ANSWER_HEIGHT)
+        # Output: scrollable, height-bounded answer viewport.
+        self._output = ScrollFollowTextBrowser()
         self._output.setVisible(False)
+        self._output.resized.connect(self._resize_timer.start)
         self.content_layout.addWidget(self._output)
 
         # Actions row.
@@ -274,7 +387,6 @@ class ShortAskPanel(PopoverBase):
         self._agent = agent
         self._state = ShortTalkState.READY
         self._full_answer = ""
-        self._truncated = False
         self._session_ready = False
         self._error_detail = ""
         self._completed_while_hidden = False
@@ -284,7 +396,7 @@ class ShortAskPanel(PopoverBase):
         self._status.setText("Resuming session" if resume else "New session")
         self._status.setToolTip("")
         self._output.setVisible(False)
-        self._output.setText("")
+        self._output.reset()
         self._input.setEnabled(True)
         self._input.clear()
         self._input.setFocus()
@@ -300,7 +412,6 @@ class ShortAskPanel(PopoverBase):
         self._agent = agent
         self._state = ShortTalkState.READY
         self._full_answer = ""
-        self._truncated = False
         self._session_ready = False
         self._error_detail = ""
         self._completed_while_hidden = False
@@ -326,7 +437,6 @@ class ShortAskPanel(PopoverBase):
         self._pending_prompt = prompt or ""
         self._state = ShortTalkState.READY
         self._full_answer = ""
-        self._truncated = False
         self._session_ready = False
         self._error_detail = ""
         self._completed_while_hidden = False
@@ -350,7 +460,6 @@ class ShortAskPanel(PopoverBase):
     def set_running(self, status_text: str = "Connecting…") -> None:
         self._state = ShortTalkState.CONNECTING
         self._full_answer = ""
-        self._truncated = False
         self._session_ready = False
         self._error_detail = ""
         self._completed_while_hidden = False
@@ -359,7 +468,7 @@ class ShortAskPanel(PopoverBase):
         self._status.setText(status_text or "Connecting…")
         self._status.setToolTip("")
         self._output.setVisible(True)
-        self._output.setText("")
+        self._output.reset()
         self._input.setEnabled(False)
         self._primary_btn.setText("Stop")
         self._primary_btn.setVisible(True)
@@ -378,25 +487,21 @@ class ShortAskPanel(PopoverBase):
             return  # ignore late deltas after the turn ended
         self._mark_first_text()
         self._full_answer += delta
-        self._truncated = len(self._full_answer) > MAX_ANSWER_CHARS
-        self._output.setText(self._display_answer())
+        self._output.append_answer(delta)
 
     def set_answer(self, text: str) -> None:
         self._full_answer = text or ""
-        self._truncated = len(self._full_answer) > MAX_ANSWER_CHARS
-        self._output.setText(self._display_answer())
+        self._output.set_answer(self._full_answer)
 
-    def show_done(self, truncated: bool | None = None) -> None:
+    def show_done(self) -> None:
         self._state = ShortTalkState.COMPLETE
-        if truncated is not None:
-            self._truncated = truncated
         if not self.isVisible():
             self._completed_while_hidden = True
         self._stop_timers()
         self._refresh_done()
         self._secondary_btn.setVisible(False)
         self._secondary_action = ""
-        self._output.setText(self._display_answer())
+        self._output.set_answer(self._full_answer)
         self._input.setEnabled(True)
         self.adjustSize()
 
@@ -503,12 +608,12 @@ class ShortAskPanel(PopoverBase):
         self._completed_while_hidden = False
         self._stop_timers()
         self._full_answer = ""
-        self._truncated = False
         self._session_ready = False
         self._error_detail = ""
         self._status.setText("")
         self._status.setToolTip("")
         self._output.setVisible(False)
+        self._output.reset()
         self._input.clear()
         self._input.setEnabled(True)
         self._primary_btn.setVisible(False)
@@ -523,11 +628,6 @@ class ShortAskPanel(PopoverBase):
 
     def _open_label(self) -> str:
         return f"Open {AGENT_DISPLAY.get(self._agent, self._agent.title())}"
-
-    def _display_answer(self) -> str:
-        if len(self._full_answer) <= MAX_ANSWER_CHARS:
-            return self._full_answer
-        return self._full_answer[:MAX_ANSWER_CHARS].rstrip() + "…"
 
     def _mark_first_text(self) -> None:
         self._stop_timers()
@@ -580,7 +680,7 @@ class ShortAskPanel(PopoverBase):
         self._status.setText(_ERROR_CATEGORY_DISPLAY.get(category, _ERROR_CATEGORY_DISPLAY[ErrorCategory.UNKNOWN]))
         self._status.setToolTip(detail[:160] if detail else "")
         self._output.setVisible(True)
-        self._output.setText(self._display_answer())
+        self._output.set_answer(self._full_answer)
         self._primary_btn.setText(open_label or self._open_label())
         self._primary_btn.setVisible(True)
         self._secondary_btn.setVisible(False)
@@ -603,20 +703,14 @@ class ShortAskPanel(PopoverBase):
         self._cancelled_timer.start(CANCELLED_BACK_MS)
 
     def _refresh_done(self) -> None:
-        if self._truncated:
-            self._status.setText("Answer truncated.")
-            self._status.setToolTip("")
-            self._primary_btn.setText(self._open_label())
-            self._primary_btn.setVisible(True)
+        self._status.setText(f"Done{self._duration_text()}")
+        self._primary_btn.setVisible(False)
+        first = self._last_telemetry.first_text_ms() if self._last_telemetry is not None else None
+        total = self._last_telemetry.total_ms() if self._last_telemetry is not None else None
+        if first is not None and total is not None:
+            self._status.setToolTip(f"First response: {first / 1000:.1f}s · Total: {total / 1000:.1f}s")
         else:
-            self._status.setText(f"Done{self._duration_text()}")
-            self._primary_btn.setVisible(False)
-            first = self._last_telemetry.first_text_ms() if self._last_telemetry is not None else None
-            total = self._last_telemetry.total_ms() if self._last_telemetry is not None else None
-            if first is not None and total is not None:
-                self._status.setToolTip(f"First response: {first / 1000:.1f}s · Total: {total / 1000:.1f}s")
-            else:
-                self._status.setToolTip("")
+            self._status.setToolTip("")
 
     def _duration_text(self) -> str:
         total = self._last_telemetry.total_ms() if self._last_telemetry is not None else None

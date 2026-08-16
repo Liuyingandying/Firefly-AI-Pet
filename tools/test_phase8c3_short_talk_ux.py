@@ -48,7 +48,7 @@ from ui.permission_card import PermissionCard
 from ui.pet_overlay import PetOverlay
 from ui.session_popover import SessionPopover
 from ui.settings_popover import SettingsPopover
-from ui.short_ask import MAX_ANSWER_CHARS, MAX_ANSWER_HEIGHT, ShortAskPanel, ShortTalkState
+from ui.short_ask import MAX_ANSWER_HEIGHT, ShortAskPanel, ShortTalkState
 from ui.speech_bubble import SpeechBubble
 from ui.vertical_toolbar import VerticalToolbar
 from ui.workspace_popover import WorkspacePopover
@@ -365,19 +365,21 @@ def test_app_resume_indicator(shell) -> None:
     shell.short_ask.dismiss()
 
 
-# -- 17/18. Long response truncation, bounded window -------------------------
+# -- 17/18. Long response scrolls, bounded window ---------------------------
 
-def test_long_response_truncated(app: QApplication) -> None:
+def test_long_response_scrolls_full(app: QApplication) -> None:
     panel = ShortAskPanel()
     panel.show_input("claude")
+    panel.set_running()
     long_text = "word " * 2000
     panel.set_answer(long_text)
+    app.processEvents()
     assert panel.full_answer() == long_text, "full answer stays in memory"
-    assert len(panel._output.text()) <= MAX_ANSWER_CHARS + 1
-    assert panel._output.text().endswith("…")
+    assert panel._output.text() == long_text, "full answer is rendered, not truncated"
+    assert panel._output.verticalScrollBar().maximum() > 0, "long answer scrolls"
     panel.show_done()
-    assert panel._truncated
-    assert panel._primary_btn.isVisible() and panel._primary_btn.text() == "Open Claude"
+    assert panel._status.text().startswith("Done")
+    assert not panel._primary_btn.isVisible()
     panel.close()
 
 
@@ -390,7 +392,8 @@ def test_long_response_does_not_grow_window(app: QApplication) -> None:
         _delta(panel, long_text[start:start + 50])
     app.processEvents()
     assert panel._output.height() <= MAX_ANSWER_HEIGHT
-    assert len(panel._output.text()) <= MAX_ANSWER_CHARS + 1
+    assert panel._output.text() == long_text, "streamed deltas keep the full answer"
+    assert panel._output.verticalScrollBar().maximum() > 0
     assert panel.height() < 500, "panel must stay compact for a long answer"
     panel.close()
 
@@ -399,10 +402,7 @@ def test_long_response_does_not_grow_window(app: QApplication) -> None:
 
 def test_open_agent_signal_not_continue(app: QApplication) -> None:
     panel = ShortAskPanel()
-    panel.show_input("claude")
-    panel.set_answer("x" * 900)
-    panel.show_done()
-    assert panel._truncated
+    panel.show_recommendation("claude", "longer task", open_label="Open Claude", prompt="fix this bug")
     assert panel._primary_btn.text() == "Open Claude"
     assert "Continue" not in panel._primary_btn.text(), "label must not over-claim resume"
     opened = []
@@ -681,7 +681,7 @@ def main() -> None:
         test_esc_idle_closes(app)
         test_stop_only_running(app)
         test_resume_new_badge(app)
-        test_long_response_truncated(app)
+        test_long_response_scrolls_full(app)
         test_long_response_does_not_grow_window(app)
         test_open_agent_signal_not_continue(app)
         test_ask_anyway_signal_preserves_prompt(app)

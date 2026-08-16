@@ -42,7 +42,7 @@ from ui.permission_card import PermissionCard
 from ui.pet_overlay import PetOverlay
 from ui.process_launcher import QuickAskRunner, _claude_settings_env
 from ui.quick_chat_protocol import build_claude_args, classify_short_ask
-from ui.short_ask import MAX_ANSWER_CHARS, AskPill, ShortAskPanel
+from ui.short_ask import MAX_ANSWER_HEIGHT, AskPill, ShortAskPanel
 from ui.speech_bubble import SpeechBubble
 from ui.vertical_toolbar import VerticalToolbar
 
@@ -282,23 +282,30 @@ def test_classify_short_ask() -> None:
 def test_long_response_bounded(app: QApplication) -> None:
     panel = ShortAskPanel()
     panel.show_input("claude")
+    panel.set_running()
     long_text = "word " * 2000  # ~10k chars
     panel.set_answer(long_text)
+    app.processEvents()
     assert panel._full_answer == long_text, "full answer stays in memory"
-    assert len(panel._output.text()) <= MAX_ANSWER_CHARS + 1
-    assert panel._output.text().endswith("…")
+    assert panel._output.text() == long_text, "full answer is rendered, not truncated"
+    assert panel._output.verticalScrollBar().maximum() > 0, "long answer scrolls"
+    assert panel._output.height() <= MAX_ANSWER_HEIGHT
     panel.show_done()
-    assert panel._truncated
-    assert panel._primary_btn.isVisible() and panel._primary_btn.text() == "Open Claude"
+    assert panel._status.text().startswith("Done")
+    assert not panel._primary_btn.isVisible()
     panel.close()
 
 
 def test_short_response_not_truncated(app: QApplication) -> None:
     panel = ShortAskPanel()
     panel.show_input("claude")
+    panel.set_running()
     panel.set_answer("Short and sweet.")
+    app.processEvents()
+    assert panel._output.text() == "Short and sweet."
+    assert panel._output.verticalScrollBar().maximum() == 0
     panel.show_done()
-    assert not panel._truncated
+    assert panel._status.text().startswith("Done")
     assert not panel._primary_btn.isVisible()
     panel.close()
 
