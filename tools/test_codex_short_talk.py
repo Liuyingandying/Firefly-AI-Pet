@@ -24,10 +24,12 @@ if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
 from PySide6.QtCore import QProcess
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+import ui.short_ask as sa
 from core.agent_adapters import CodexJsonlAdapter, make_adapter
-from core.agent_events import AgentEvent, AgentEventType, ErrorCategory
+from core.agent_events import STATUS_RECONNECTING, AgentEvent, AgentEventType, ErrorCategory
 from core.session_manager import SessionManager
 from ui.quick_chat_protocol import build_codex_args
 from ui.short_ask import ShortAskPanel, ShortTalkState
@@ -298,6 +300,134 @@ def test_hard_timeout_timer_scoped_to_short_talk(app: QApplication) -> None:
     panel.close()
 
 
+# -- J. hard-timeout deadline semantics (production bug fix) ---------------
+
+def test_hard_timeout_survives_first_token(app: QApplication) -> None:
+    """The hard deadline is wall-clock from Send, not a "no first token" timer."""
+    panel = ShortAskPanel()
+    panel.show_input("claude")
+    panel.set_running("Connecting…")
+    assert panel._hard_timeout_timer.isActive()
+    panel.on_agent_event(AgentEvent.make("claude", AgentEventType.TEXT_DELTA, text="first"))
+    assert panel.state == ShortTalkState.STREAMING
+    assert panel._hard_timeout_timer.isActive(), "first token must not disarm the hard timeout"
+    assert not panel._slow_timer.isActive(), "slow/very-slow progress cues end on first token"
+    assert not panel._very_slow_timer.isActive()
+    panel.close()
+
+
+def test_hard_timeout_wallclock_not_reset_by_status(app: QApplication) -> None:
+    """Ongoing reconnect/status events must not extend the deadline."""
+    orig = sa.HARD_TIMEOUT_MS
+    sa.HARD_TIMEOUT_MS = 200
+    try:
+        panel = sa.ShortAskPanel()
+        panel.show_input("codex")
+        panel.set_running("Connecting…")
+        for _ in range(12):
+            panel.on_agent_event(
+                AgentEvent.make("codex", AgentEventType.STATUS, status=STATUS_RECONNECTING)
+            )
+            QTest.qWait(40)
+        assert panel.state == ShortTalkState.ERROR, (
+            "deadline must fire on time even while status events keep arriving"
+        )
+        panel.close()
+    finally:
+        sa.HARD_TIMEOUT_MS = orig
+
+
+def test_hard_timeout_stops_once_and_shows_recovery(app: QApplication) -> None:
+    orig = sa.HARD_TIMEOUT_MS
+    sa.HARD_TIMEOUT_MS = 150
+    try:
+        panel = sa.ShortAskPanel()
+        panel.show_input("codex")
+        panel.set_running("Connecting…")
+        stops = []
+        panel.stop_requested.connect(lambda: stops.append(True))
+        QTest.qWait(400)
+        assert panel.state == ShortTalkState.ERROR
+        assert panel._status.text() == "Codex is taking too long."
+        assert panel._primary_btn.text() == "Retry" and panel._primary_btn.isVisible()
+        assert panel._secondary_btn.text() == "Open Codex" and panel._secondary_btn.isVisible()
+        assert len(stops) == 1, "runner.stop must be requested exactly once"
+        panel.close()
+    finally:
+        sa.HARD_TIMEOUT_MS = orig
+
+
+def test_late_final_and_finished_after_timeout_stay_timeout(app: QApplication) -> None:
+    """A late FINAL / completed / finished(exit=0) must not flip the UI to Done."""
+    panel = ShortAskPanel()
+    panel.show_input("codex")
+    panel.set_running("Connecting…")
+    panel._on_hard_timeout()
+    assert panel.state == ShortTalkState.ERROR
+    panel.on_agent_event(AgentEvent.make("codex", AgentEventType.FINAL, text="late answer"))
+    panel.on_agent_event(AgentEvent.make("codex", AgentEventType.STATUS, status="completed"))
+    panel.finish_turn("late answer")
+    panel.reset_with_note("No text returned.")
+    assert panel.state == ShortTalkState.ERROR
+    assert panel._status.text() == "Codex is taking too long."
+    assert not panel._status.text().startswith("Done")
+    panel.close()
+
+
+def test_late_error_after_timeout_stays_timeout(app: QApplication) -> None:
+    """A late provider ERROR must not replace the timeout recovery UI."""
+    panel = ShortAskPanel()
+    panel.show_input("codex")
+    panel.set_running("Connecting…")
+    panel._on_hard_timeout()
+    assert panel.state == ShortTalkState.ERROR
+    panel.on_agent_event(
+        AgentEvent.make("codex", AgentEventType.ERROR, text="boom", error_code=ErrorCategory.PROVIDER)
+    )
+    assert panel.state == ShortTalkState.ERROR
+    assert panel._status.text() == "Codex is taking too long."
+    assert panel._primary_btn.text() == "Retry"
+    assert panel._secondary_btn.text() == "Open Codex"
+    panel.close()
+
+
+def test_retry_starts_a_fresh_turn(shell) -> None:
+    """After timeout, Retry re-arms a new request and clears the timeout state."""
+    shell.short_ask.reset()
+    with patch.object(shell.quick_ask, "ask", return_value=True) as ask_mock:
+        shell.dock.select_agent("codex", emit_signal=True)
+        shell._on_short_ask_requested()
+        shell._on_short_ask_send("hello")
+        assert ask_mock.call_count == 1
+        shell.short_ask._on_hard_timeout()
+        assert shell.short_ask.state == ShortTalkState.ERROR
+        shell.short_ask._on_primary()  # _retry_active -> retry_requested
+        assert ask_mock.call_count == 2, "Retry launches a fresh ask"
+        assert shell.short_ask.state == ShortTalkState.CONNECTING
+        assert shell.short_ask._hard_timeout_timer.isActive(), "new turn re-arms the deadline"
+        shell.short_ask.reset()
+
+
+def test_runner_rejects_concurrent_ask(shell) -> None:
+    """The single-process guard is the retry-isolation boundary: a new ask cannot
+    start while the old process is still running."""
+    from ui.process_launcher import QuickAskRunner
+
+    runner = QuickAskRunner(session_manager=None)
+
+    class FakeProcess:
+        def state(self):
+            return QProcess.Running
+
+    runner._process = FakeProcess()
+    runner._agent = "codex"
+    failed = []
+    runner.failed.connect(failed.append)
+    ok = runner.ask("codex", "hi", PROJECT_DIR, effort="low", persistent=False)
+    assert ok is False
+    assert failed and "已有" in failed[0]
+
+
 def main() -> None:
     app = QApplication.instance() or QApplication([])
     from app import VisualShell
@@ -316,6 +446,12 @@ def main() -> None:
     test_codex_short_talk_no_lifecycle_source_write(app)
     test_hard_timeout_shows_retry_and_open(app)
     test_hard_timeout_timer_scoped_to_short_talk(app)
+    test_hard_timeout_survives_first_token(app)
+    test_hard_timeout_wallclock_not_reset_by_status(app)
+    test_hard_timeout_stops_once_and_shows_recovery(app)
+    test_late_final_and_finished_after_timeout_stay_timeout(app)
+    test_late_error_after_timeout_stays_timeout(app)
+    test_runner_rejects_concurrent_ask(app)
 
     # Shell-level tests.
     shell = VisualShell(None)
@@ -323,6 +459,7 @@ def main() -> None:
         test_ask_codex_opens_input(shell)
         test_ask_codex_read_routes_to_codex_short_talk(shell)
         test_ask_codex_write_stays_read_only(shell)
+        test_retry_starts_a_fresh_turn(shell)
     finally:
         shell.shutdown()
 

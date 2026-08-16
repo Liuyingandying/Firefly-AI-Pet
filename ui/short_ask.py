@@ -639,7 +639,12 @@ class ShortAskPanel(PopoverBase):
         return f"Open {AGENT_DISPLAY.get(self._agent, self._agent.title())}"
 
     def _mark_first_text(self) -> None:
-        self._stop_timers()
+        # First token arrived: the "still working" / "open agent" progress cues
+        # are done, but the hard deadline stays armed. The hard timeout is a
+        # wall-clock deadline measured from Send, never a "no first token yet"
+        # timer, so a turn that streams a little then stalls still times out.
+        self._slow_timer.stop()
+        self._very_slow_timer.stop()
         if self._state != ShortTalkState.STREAMING:
             self._state = ShortTalkState.STREAMING
             self._status.setText("")
@@ -681,6 +686,8 @@ class ShortAskPanel(PopoverBase):
     def _error_from(self, detail: str, category: ErrorCategory, *, open_label: str | None = None) -> None:
         if self._state in (ShortTalkState.COMPLETE, ShortTalkState.CANCELLED):
             return
+        if self._state == ShortTalkState.ERROR:
+            return  # a late error after timeout/error must not override the state
         self._state = ShortTalkState.ERROR
         self._error_detail = detail
         if not self.isVisible():
