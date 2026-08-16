@@ -554,7 +554,7 @@ def test_chatgpt_no_fake_record(root: Path, app: QApplication) -> None:
     try:
         shell.short_ask.reset()
         with patch.object(shell.quick_ask, "ask") as ask_mock:
-            shell.dock.select_agent("chatgpt", emit_signal=True)
+            shell.dock.select_agent("chatgpt", emit_signal=False)
             shell._on_short_ask_requested()
             assert ask_mock.call_count == 0
         assert shell.session_manager.has("chatgpt", shell.workspace_manager.current()) is False

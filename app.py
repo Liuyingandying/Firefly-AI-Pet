@@ -174,6 +174,7 @@ class VisualShell(QObject):
         self._resume_fallbacks_this_cycle = 0
 
         self.pet.quit_requested.connect(QApplication.quit)
+        self.dock.agent_selected.connect(self._on_dock_agent_selected)
         self.state_monitor.agent_state_changed.connect(self._on_agent_state_changed)
         self.state_monitor.resolved_state_changed.connect(self._on_resolved_state_changed)
         self.session_popover.continue_requested.connect(self._on_continue_session)
@@ -249,6 +250,26 @@ class VisualShell(QObject):
         self.coordinator.on_agent_state(agent_id, state)
         self.notification_manager.on_agent_state(state)
         self.keep_awake.on_agent_state(state)
+
+    def _on_dock_agent_selected(self, agent_id: str) -> None:
+        # ChatGPT has no in-app backend: a dock click opens the web UI directly.
+        # Claude/Codex keep their selection-only dock behavior — the Ask entry
+        # drives Quick Ask, unchanged.
+        if agent_id == "chatgpt":
+            self._open_chatgpt()
+
+    def _open_chatgpt(self) -> None:
+        ok, _ = ProcessLauncher.open_chatgpt()
+        if not ok:
+            try:
+                self.bubble.show_message(
+                    "ChatGPT",
+                    "Couldn't open ChatGPT.",
+                    duration_ms=3_200,
+                    accent=theme.ERROR_STATUS,
+                )
+            except Exception:
+                pass
 
     def _on_resolved_state_changed(self, state: ResolvedState) -> None:
         self.pet.apply_state(state.state.value)

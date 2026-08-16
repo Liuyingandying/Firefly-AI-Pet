@@ -418,7 +418,7 @@ def test_open_agent_signal_not_continue(app: QApplication) -> None:
 def test_chatgpt_no_backend(shell) -> None:
     shell.short_ask.reset()
     with patch.object(shell.quick_ask, "ask") as ask_mock:
-        shell.dock.select_agent("chatgpt", emit_signal=True)
+        shell.dock.select_agent("chatgpt", emit_signal=False)
         shell._on_short_ask_requested()
         assert ask_mock.call_count == 0
         assert shell.short_ask._agent == "chatgpt"

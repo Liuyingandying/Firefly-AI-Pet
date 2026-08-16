@@ -240,7 +240,7 @@ def test_internal_ask_no_permission_card(shell) -> None:
 def test_chatgpt_no_fake_backend(shell) -> None:
     shell.short_ask.reset()
     with patch.object(shell.quick_ask, "ask") as ask_mock:
-        shell.dock.select_agent("chatgpt", emit_signal=True)
+        shell.dock.select_agent("chatgpt", emit_signal=False)
         shell._on_short_ask_requested()
         assert ask_mock.call_count == 0, "ChatGPT must not send any backend"
         assert shell.short_ask._agent == "chatgpt"
