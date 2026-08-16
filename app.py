@@ -176,6 +176,7 @@ class VisualShell(QObject):
         self.coordinator.short_ask_requested.connect(self._on_short_ask_requested)
         self.short_ask.send_requested.connect(self._on_short_ask_send)
         self.short_ask.force_send_requested.connect(self._on_short_ask_force_send)
+        self.short_ask.retry_requested.connect(self._on_short_ask_retry)
         self.short_ask.stop_requested.connect(self._on_short_ask_stop)
         self.short_ask.open_agent_requested.connect(self._on_short_ask_open_agent)
         self.recommendation_card.send_requested.connect(self._on_recommendation_send)
@@ -280,11 +281,8 @@ class VisualShell(QObject):
         agent = self.dock.selected_agent
         workspace = self.workspace_manager.current()
         if agent == "codex":
-            self.short_ask.show_notice(
-                "codex",
-                "Codex Short Talk isn't available yet.",
-                open_label="Open Codex",
-            )
+            # Codex Short Talk is ephemeral single-turn (read-only): no resume.
+            self.short_ask.show_input("codex", resume=False)
             self.coordinator.show_short_ask()
             return
         if agent == "chatgpt":
@@ -299,39 +297,43 @@ class VisualShell(QObject):
         self.short_ask.show_input("claude", resume=resuming)
         self.coordinator.show_short_ask()
 
-    def _task_request(self, prompt: str) -> TaskRequest:
-        """Build the router request. The dock's current selection is UI context
-        only and is deliberately NOT written into ``requested_agent``: the
-        router must stay free to recommend the best agent for the task."""
+    def _task_request(self, prompt: str, requested_agent: str | None = None) -> TaskRequest:
+        """Build the router request. ``requested_agent`` is only set when the
+        panel was opened for an explicit non-default agent (Ask Codex), so the
+        router honors the user's choice; otherwise it stays free to recommend
+        the best agent for the task."""
         return TaskRequest(
             text=prompt,
             workspace=str(self.workspace_manager.current()),
+            requested_agent=requested_agent,
         )
 
     def _on_short_ask_send(self, prompt: str) -> None:
         if self.short_ask.running:
             return  # never launch a second concurrent internal ask
         self._resume_fallbacks_this_cycle = 0
-        top = self.agent_router.recommend(self._task_request(prompt))[0]
+        # Ask Codex is an explicit agent choice; Ask Claude stays prompt-routed.
+        requested = self.short_ask.agent if self.short_ask.agent == "codex" else None
+        top = self.agent_router.recommend(self._task_request(prompt, requested_agent=requested))[0]
         if top.handoff_mode == HandoffMode.SHORT_TALK:
-            self._short_talk_claude(prompt)
+            self._short_talk(top.agent_id, prompt)
             return
         # OPEN_NATIVE and UNAVAILABLE both render on the recommendation card;
         # the card only acts on an explicit user click (never auto-launch).
         self.recommendation_card.show_recommendation(top, prompt, str(self.workspace_manager.current()))
         self.coordinator.show_recommendation()
 
-    def _short_talk_claude(self, prompt: str) -> None:
-        """Route a prompt into the Claude Short Talk path.
+    def _short_talk(self, agent: str, prompt: str) -> None:
+        """Route a prompt into the managed Short Talk path for ``agent``.
 
-        Router already decided Claude + SHORT_TALK; classify_short_ask still
-        decides whether this specific prompt fits a lightweight ask or should
-        steer to the native Claude surface (Phase 9B section 7/9).
+        The router already decided this agent + SHORT_TALK. Claude additionally
+        runs the long-task steer (Phase 9B): a complex prompt reroutes to the
+        native Claude surface instead of a lightweight read-only ask.
         """
         if self.short_ask.running:
             return
         self._resume_fallbacks_this_cycle = 0
-        if classify_short_ask(prompt) == "complex":
+        if agent == "claude" and classify_short_ask(prompt) == "complex":
             self.short_ask.show_recommendation(
                 "claude",
                 "This looks like a longer task. Open Claude instead?",
@@ -339,7 +341,7 @@ class VisualShell(QObject):
                 prompt=prompt,
             )
         else:
-            self._do_short_ask("claude", prompt)
+            self._do_short_ask(agent, prompt)
         self.coordinator.show_short_ask()
 
     def _on_recommendation_send(
@@ -693,16 +695,26 @@ class VisualShell(QObject):
         self._resume_fallbacks_this_cycle = 0
         self._do_short_ask(self.short_ask.agent, prompt)
 
+    def _on_short_ask_retry(self) -> None:
+        """Retry the last prompt after a Short Talk hard timeout."""
+        prompt = self._last_short_ask_prompt
+        if not prompt or self.short_ask.running:
+            return
+        self._do_short_ask(self.short_ask.agent, prompt)
+
     def _do_short_ask(self, agent: str, prompt: str) -> None:
         workspace = self.workspace_manager.current()
         self._short_ask_turn_failed = False
         self._last_short_ask_prompt = prompt
+        # Claude persists its native session; Codex Short Talk is ephemeral
+        # single-turn (read-only, no thread resume).
+        persistent = agent == "claude"
         if not self.quick_ask.ask(
             agent,
             prompt,
             workspace,
             effort="low",
-            persistent=True,
+            persistent=persistent,
             isolated=True,
         ):
             return

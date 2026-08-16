@@ -261,16 +261,27 @@ def test_dock_claude_does_not_override_coding(shell) -> None:
         )
 
 
-def test_dock_codex_does_not_override_analysis(shell) -> None:
+def test_ask_codex_routes_analysis_to_codex(shell) -> None:
     with patch.object(shell.quick_ask, "ask", return_value=True) as ask_mock:
         shell.dock.select_agent("codex", emit_signal=True)
-        # Routing happens on submit only; the request-time dock gate is bypassed.
+        shell._on_short_ask_requested()  # opens "Ask Codex" input
+        assert shell.short_ask.agent == "codex"
         shell._on_short_ask_send("分析这段代码")
         assert ask_mock.call_count == 1
-        assert ask_mock.call_args[0][0] == "claude"
+        assert ask_mock.call_args[0][0] == "codex"
         assert not shell.recommendation_card.has_pending, (
-            "dock=Codex must not redirect an analysis task into Codex"
+            "Ask Codex + read task stays in managed Codex Short Talk"
         )
+
+
+def test_ask_codex_write_routes_recommendation(shell) -> None:
+    with patch.object(shell.quick_ask, "ask") as ask_mock:
+        shell.dock.select_agent("codex", emit_signal=True)
+        shell._on_short_ask_requested()
+        shell._on_short_ask_send("重构这个模块")
+        assert ask_mock.call_count == 0, "read-only Codex Short Talk must not code"
+        assert shell.recommendation_card.has_pending
+        assert shell.recommendation_card.pending_agent == "codex"
 
 
 def test_dock_selection_not_written_as_requested_agent(shell) -> None:
@@ -593,7 +604,8 @@ def main() -> None:
         test_textual_requested_claude,
         test_textual_requested_codex,
         test_dock_claude_does_not_override_coding,
-        test_dock_codex_does_not_override_analysis,
+        test_ask_codex_routes_analysis_to_codex,
+        test_ask_codex_write_routes_recommendation,
         test_dock_selection_not_written_as_requested_agent,
         test_chatgpt_no_fake_backend,
         test_vision_not_sent_to_claude,

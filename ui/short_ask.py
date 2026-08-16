@@ -48,6 +48,7 @@ MAX_ANSWER_HEIGHT = 110
 
 SLOW_AFTER_MS = 8_000  # no first token yet -> "Still working…"
 VERY_SLOW_AFTER_MS = 20_000  # still no text -> light "Open Claude" action (never auto-cancel)
+HARD_TIMEOUT_MS = 45_000  # Short Talk hard timeout -> "taking too long" + Retry/Open
 CANCELLED_BACK_MS = 1_200  # "Cancelled" -> back to READY
 
 
@@ -270,6 +271,7 @@ class ShortAskPanel(PopoverBase):
     send_requested = Signal(str)
     force_send_requested = Signal(str)
     stop_requested = Signal()
+    retry_requested = Signal()
     open_agent_requested = Signal(str)
 
     def __init__(self, *, width: int = theme.POPOVER_WIDTH, parent=None):
@@ -285,6 +287,7 @@ class ShortAskPanel(PopoverBase):
         self._session_ready = False
         self._pending_prompt = ""
         self._secondary_action = ""  # "" | "ask_again" | "open_agent"
+        self._retry_active = False
         self._last_telemetry = None
         self._error_detail = ""
         self._completed_while_hidden = False
@@ -295,6 +298,9 @@ class ShortAskPanel(PopoverBase):
         self._very_slow_timer = QTimer(self)
         self._very_slow_timer.setSingleShot(True)
         self._very_slow_timer.timeout.connect(self._on_very_slow_timeout)
+        self._hard_timeout_timer = QTimer(self)
+        self._hard_timeout_timer.setSingleShot(True)
+        self._hard_timeout_timer.timeout.connect(self._on_hard_timeout)
         self._cancelled_timer = QTimer(self)
         self._cancelled_timer.setSingleShot(True)
         self._cancelled_timer.timeout.connect(self._on_cancel_back_ready)
@@ -464,6 +470,7 @@ class ShortAskPanel(PopoverBase):
         self._error_detail = ""
         self._completed_while_hidden = False
         self._last_telemetry = None
+        self._retry_active = False
         self._start_slow_timers()
         self._status.setText(status_text or "Connecting…")
         self._status.setToolTip("")
@@ -554,6 +561,8 @@ class ShortAskPanel(PopoverBase):
         self.show_done()
 
     def reset_with_note(self, note: str) -> None:
+        if self._state == ShortTalkState.ERROR:
+            return  # timeout/error already failed the turn; keep the failure UI
         self._state = ShortTalkState.READY
         self._completed_while_hidden = False
         self._stop_timers()
@@ -689,6 +698,8 @@ class ShortAskPanel(PopoverBase):
         self.adjustSize()
 
     def _finish_cancel(self) -> None:
+        if self._state == ShortTalkState.ERROR:
+            return  # a late cancel after timeout/error must not override the state
         self._state = ShortTalkState.CANCELLED
         if not self.isVisible():
             self._completed_while_hidden = True
@@ -721,10 +732,12 @@ class ShortAskPanel(PopoverBase):
     def _start_slow_timers(self) -> None:
         self._slow_timer.start(SLOW_AFTER_MS)
         self._very_slow_timer.start(VERY_SLOW_AFTER_MS)
+        self._hard_timeout_timer.start(HARD_TIMEOUT_MS)
 
     def _stop_timers(self) -> None:
         self._slow_timer.stop()
         self._very_slow_timer.stop()
+        self._hard_timeout_timer.stop()
         self._cancelled_timer.stop()
 
     def _on_slow_timeout(self) -> None:
@@ -743,6 +756,25 @@ class ShortAskPanel(PopoverBase):
             self._secondary_btn.setVisible(True)
             self._secondary_action = "open_agent"
 
+    def _on_hard_timeout(self) -> None:
+        """Short Talk hard timeout: stop the turn and offer Retry / Open."""
+        if self._state not in _RUNNING_STATES or self._state == ShortTalkState.CANCELLING:
+            return
+        self._stop_timers()
+        self._state = ShortTalkState.ERROR
+        self._retry_active = True
+        display = AGENT_DISPLAY.get(self._agent, self._agent.title())
+        self._status.setText(f"{display} is taking too long.")
+        self._status.setToolTip("")
+        self._primary_btn.setText("Retry")
+        self._primary_btn.setVisible(True)
+        self._secondary_btn.setText(self._open_label())
+        self._secondary_btn.setVisible(True)
+        self._secondary_action = "open_agent"
+        self._input.setEnabled(True)
+        self.adjustSize()
+        self.stop_requested.emit()
+
     def _on_cancel_back_ready(self) -> None:
         self._state = ShortTalkState.READY
         self._status.setText("")
@@ -759,6 +791,10 @@ class ShortAskPanel(PopoverBase):
         if self.running:
             self.stop_requested.emit()
             self.begin_cancel()
+            return
+        if self._retry_active:
+            self._retry_active = False
+            self.retry_requested.emit()
             return
         self.open_agent_requested.emit(self._agent)
 

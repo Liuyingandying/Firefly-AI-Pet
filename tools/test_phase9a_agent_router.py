@@ -184,7 +184,7 @@ def test_requested_codex_overrides_default() -> None:
     # Default for this read text would be Claude; explicit Codex wins.
     rec = _single(_req("解释这段代码", agent="codex"))
     assert rec.agent_id == "codex"
-    assert rec.handoff_mode == HandoffMode.OPEN_NATIVE  # no managed Short Talk
+    assert rec.handoff_mode == HandoffMode.SHORT_TALK  # read-only managed Short Talk
     assert rec.requires_confirmation is False  # read task
 
 
@@ -272,12 +272,12 @@ def test_capability_registry_matches_current_functionality() -> None:
     codex = reg.profile("codex")
     chatgpt = reg.profile("chatgpt")
     assert claude is not None and codex is not None and chatgpt is not None
-    # Managed Short Talk is Claude-only.
+    # Managed Short Talk is Claude + Codex (read-only).
     assert claude.managed_short_talk is True
-    assert codex.managed_short_talk is False
+    assert codex.managed_short_talk is True
     assert chatgpt.managed_short_talk is False
     assert reg.has("claude", AgentCapability.MANAGED_SHORT_TALK)
-    assert not reg.has("codex", AgentCapability.MANAGED_SHORT_TALK)
+    assert reg.has("codex", AgentCapability.MANAGED_SHORT_TALK)
     # Claude is the analysis/review/chat surface.
     for cap in (
         AgentCapability.CHAT,

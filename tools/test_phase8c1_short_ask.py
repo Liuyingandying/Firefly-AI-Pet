@@ -248,13 +248,15 @@ def test_chatgpt_no_fake_backend(shell) -> None:
         assert not shell.short_ask._input.isEnabled()
 
 
-def test_codex_notice_no_online_call(shell) -> None:
+def test_codex_input_no_online_call(shell) -> None:
     shell.short_ask.reset()
     with patch.object(shell.quick_ask, "ask") as ask_mock:
         shell.dock.select_agent("codex", emit_signal=True)
         shell._on_short_ask_requested()
-        assert ask_mock.call_count == 0, "Codex online calls must stay 0 this phase"
+        assert ask_mock.call_count == 0, "opening Ask Codex must not send a backend call"
         assert shell.short_ask._agent == "codex"
+        assert shell.short_ask._input.isEnabled(), "Ask Codex opens an input, not a notice"
+        assert shell.short_ask._title.text() == "Ask Codex"
 
 
 # -- Complex prompt steering ----------------------------------------------
@@ -466,7 +468,7 @@ def main() -> None:
             test_app_cancel_then_ask_again(shell)
             test_internal_ask_no_permission_card(shell)
             test_chatgpt_no_fake_backend(shell)
-            test_codex_notice_no_online_call(shell)
+            test_codex_input_no_online_call(shell)
             test_complex_prompt_recommends_native(shell)
         finally:
             shell.shutdown()

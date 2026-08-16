@@ -334,7 +334,8 @@ def test_next_turn_uses_new_selected_agent(shell) -> None:
         shell.dock.select_agent("codex", emit_signal=True)
         shell._on_short_ask_requested()
         assert shell.short_ask.agent == "codex"
-        assert "available" in shell.short_ask._status.text().lower()
+        assert shell.short_ask._input.isEnabled(), "Ask Codex opens an input, not a notice"
+        assert shell.short_ask._title.text() == "Ask Codex"
         shell.short_ask.reset()
 
 

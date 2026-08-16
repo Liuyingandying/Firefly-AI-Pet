@@ -398,23 +398,23 @@ class AgentRouter:
             or request.requires_write is True
             or request.intent in (TaskIntent.CODE, TaskIntent.DEBUG)
         )
-        if agent == "claude":
+        if profile.managed_short_talk:
             if write_task:
                 # Managed Short Talk is read-only; honor the request natively.
                 return [
                     self._rec(
-                        "claude", 100, ReasonCode.NATIVE_SURFACE_REQUIRED,
+                        agent, 100, ReasonCode.NATIVE_SURFACE_REQUIRED,
                         Confidence.MEDIUM, intent, HandoffMode.OPEN_NATIVE,
                         requires_confirmation=True,
                     )
                 ]
             return [
                 self._rec(
-                    "claude", 100, ReasonCode.USER_REQUESTED_AGENT, Confidence.HIGH,
+                    agent, 100, ReasonCode.USER_REQUESTED_AGENT, Confidence.HIGH,
                     intent, HandoffMode.SHORT_TALK,
                 )
             ]
-        # Codex and other available agents have no managed Short Talk yet.
+        # Available but no managed Short Talk yet (future agents).
         return [
             self._rec(
                 agent, 100, ReasonCode.USER_REQUESTED_AGENT, Confidence.HIGH,

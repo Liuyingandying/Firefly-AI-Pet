@@ -190,19 +190,21 @@ class CapabilityRegistry:
                     AgentCapability.FILE_WRITE,
                     AgentCapability.TERMINAL,
                     AgentCapability.LONG_TASK,
+                    AgentCapability.MANAGED_SHORT_TALK,
                     AgentCapability.SESSION_RESUME,
                     AgentCapability.NATIVE_LAUNCH,
                     AgentCapability.LIFECYCLE_MONITOR,
                 }
             ),
             available=True,
-            managed_short_talk=False,
+            managed_short_talk=True,
             notes=(
-                "No Firefly managed Short Talk yet; recommendations use "
-                "OPEN_NATIVE.",
-                "Native coding/implementation is the routed mode.",
+                "Firefly managed Short Talk is read-only (codex exec "
+                "--sandbox read-only --json --ephemeral): no file writes or "
+                "approval flows.",
+                "Long or write tasks route to the native Codex surface.",
                 "Thread resume is structurally supported but not "
-                "online-verified.",
+                "online-verified; Short Talk uses ephemeral single-turn.",
             ),
         )
         chatgpt = AgentProfile(
