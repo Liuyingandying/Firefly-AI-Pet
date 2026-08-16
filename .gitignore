@@ -1,0 +1,130 @@
+# ============================================================
+# Firefly AI Pet - Git Ignore
+# ============================================================
+
+
+# ----------------------------
+# Python / virtual environment
+# ----------------------------
+
+.venv/
+venv/
+env/
+
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+
+# ----------------------------
+# Runtime state / generated data
+# ----------------------------
+
+runtime/
+
+# Historical explicit runtime ignores
+runtime/state.json.tmp
+runtime/pet.pid
+
+
+# ----------------------------
+# Local Firefly configuration
+# ----------------------------
+
+config/ui_settings.json
+config/ui_settings.json.tmp
+
+config/sessions.json
+config/sessions.json.tmp
+
+config/pet_preferences.json
+config/pet_preferences.json.tmp
+
+
+# ----------------------------
+# Claude / Codex local metadata
+# ----------------------------
+
+.claude/
+.codex/
+
+
+# ----------------------------
+# Local hook / test artifacts
+# ----------------------------
+
+*_hook_test.txt
+hook_test.txt
+
+
+# ----------------------------
+# Logs / temporary files
+# ----------------------------
+
+*.log
+*.tmp
+*.bak
+
+
+# ----------------------------
+# Secrets / credentials
+# ----------------------------
+
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+
+# ----------------------------
+# IDE / editor
+# ----------------------------
+
+.vscode/
+.idea/
+
+*.swp
+*.swo
+
+
+# ----------------------------
+# Build / package outputs
+# ----------------------------
+
+build/
+dist/
+*.egg-info/
+
+
+# ----------------------------
+# Test / coverage output
+# ----------------------------
+
+.coverage
+coverage.xml
+htmlcov/
+
+
+# ----------------------------
+# Windows
+# ----------------------------
+
+Thumbs.db
+Desktop.ini
+# ----------------------------
+# Historical project backups
+# ----------------------------
+
+backups/
+Firefly_AI_Pet_Phase7A_Upgrade/
+
+*.backup-*
+*.backup
