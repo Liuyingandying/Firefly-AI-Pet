@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+
+from core import windows_autostart
 
 from . import theme
 from .popover_base import PopoverBase
@@ -21,6 +23,7 @@ TOGGLE_KEYS = (
     ("notifications_enabled", "Task notifications"),
     ("keep_awake_enabled", "Keep awake"),
     ("greeting_on_startup", "Greeting on startup"),
+    ("launch_on_startup", "Launch on startup"),
 )
 
 
@@ -108,10 +111,15 @@ class _ToggleRow(QFrame):
 class SettingsPopover(PopoverBase):
     reset_position_requested = Signal()
 
-    def __init__(self, manager, parent=None):
+    def __init__(self, manager, parent=None, autostart=None):
         super().__init__(width=theme.POPOVER_WIDTH, parent=parent)
         self._manager = manager
+        self._autostart = autostart if autostart is not None else windows_autostart
         self._rows: dict[str, _ToggleRow] = {}
+        self._status_timer = QTimer(self)
+        self._status_timer.setSingleShot(True)
+        self._status_timer.setInterval(3200)
+        self._status_timer.timeout.connect(self._clear_status)
 
         header = QLabel("Settings")
         header.setStyleSheet(theme.primary_label_style(size=11))
@@ -122,9 +130,15 @@ class SettingsPopover(PopoverBase):
         self.content_layout.addWidget(general)
 
         for key, label in TOGGLE_KEYS:
-            row = _ToggleRow(label, key, bool(getattr(manager, key)), self._on_toggle, self._card)
+            row = _ToggleRow(label, key, self._initial_state(key), self._on_toggle, self._card)
             self._rows[key] = row
             self.content_layout.addWidget(row)
+
+        self._status_label = QLabel("")
+        self._status_label.setStyleSheet(self._status_style())
+        self._status_label.setWordWrap(True)
+        self._status_label.setVisible(False)
+        self.content_layout.addWidget(self._status_label)
 
         separator = QFrame(self._card)
         separator.setFixedHeight(1)
@@ -145,7 +159,7 @@ class SettingsPopover(PopoverBase):
 
     def refresh(self) -> None:
         for key, row in self._rows.items():
-            row.set_state(bool(getattr(self._manager, key)))
+            row.set_state(self._initial_state(key))
         self.adjustSize()
 
     # -- test helpers ---------------------------------------------------
@@ -163,6 +177,49 @@ class SettingsPopover(PopoverBase):
             self._manager.set_keep_awake_enabled(value)
         elif key == "greeting_on_startup":
             self._manager.set_greeting_on_startup(value)
+        elif key == "launch_on_startup":
+            self._on_toggle_launch_on_startup(value)
+
+    def _initial_state(self, key: str) -> bool:
+        if key == "launch_on_startup":
+            return bool(self._autostart.is_enabled())
+        return bool(getattr(self._manager, key))
+
+    def _on_toggle_launch_on_startup(self, value: bool) -> None:
+        """Enable/disable the Startup shortcut; revert to real state on failure.
+
+        The shortcut's on-disk existence is the source of truth, so after the
+        operation we re-read it and snap the toggle back to reality instead of
+        claiming success. A lightweight inline message explains the failure.
+        """
+        try:
+            if value:
+                self._autostart.enable()
+            else:
+                self._autostart.disable()
+        except Exception:
+            pass
+        actual = bool(self._autostart.is_enabled())
+        if actual != value:
+            self._rows["launch_on_startup"].set_state(actual)
+            self._show_status("Couldn't enable startup." if value else "Couldn't disable startup.")
+
+    def _show_status(self, text: str) -> None:
+        self._status_label.setText(text)
+        self._status_label.setVisible(bool(text))
+        self._status_timer.start()
+        self.adjustSize()
+
+    def _clear_status(self) -> None:
+        self._status_label.setText("")
+        self._status_label.setVisible(False)
+        self.adjustSize()
+
+    def _status_style(self) -> str:
+        return (
+            f"color: {theme.css_color(theme.ERROR_STATUS)}; background: {theme.TRANSPARENT}; "
+            f"font-family: '{theme.FONT_FAMILY}'; font-size: {theme.scaled_font_px(theme.FONT_SIZE_SMALL)}pt;"
+        )
 
     def _on_settings_changed(self, _prefs) -> None:
         self.refresh()
