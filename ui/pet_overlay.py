@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QImageReader, QMovie, QPainter, QRadialGradient
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
@@ -42,6 +42,11 @@ class PetOverlay(QWidget):
         self._press_global: QPoint | None = None
         self._dragging = False
         self._shutting_down = False
+
+        self._right_click_timer = QTimer(self)
+        self._right_click_timer.setSingleShot(True)
+        self._right_click_timer.setInterval(QApplication.doubleClickInterval())
+        self._right_click_timer.timeout.connect(self.scale_mode_toggled.emit)
 
         self.setWindowTitle("Firefly")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -177,7 +182,28 @@ class PetOverlay(QWidget):
             self._dragging = False
             event.accept()
             return
+        if event.button() == Qt.RightButton:
+            if self._right_click_timer.isActive():
+                # A second right press within the system double-click interval
+                # is a double click: cancel the pending toggle and quit. Qt only
+                # synthesizes a mouseDoubleClickEvent when the two clicks are
+                # within the drag-distance threshold, so this timer check is
+                # what makes the exit purely interval-based.
+                self._right_click_timer.stop()
+                self.quit_requested.emit()
+            else:
+                self._right_click_timer.start()
+            event.accept()
+            return
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.RightButton:
+            self._right_click_timer.stop()
+            self.quit_requested.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
         if event.buttons() & Qt.LeftButton and self._drag_offset is not None:
@@ -225,8 +251,8 @@ class PetOverlay(QWidget):
         self.position_changed.emit()
 
     def contextMenuEvent(self, event) -> None:
-        # Right-click toggles UI Scale Mode (replaces the old context menu).
-        self.scale_mode_toggled.emit()
+        # Right-click is handled via mousePressEvent / mouseDoubleClickEvent;
+        # swallow the context-menu event so it never double-triggers Scale Mode.
         event.accept()
 
     def wheelEvent(self, event) -> None:
@@ -254,5 +280,6 @@ class PetOverlay(QWidget):
 
     def shutdown(self) -> None:
         self._shutting_down = True
+        self._right_click_timer.stop()
         self._movie.stop()
         self.close()

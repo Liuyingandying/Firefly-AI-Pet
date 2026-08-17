@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -248,6 +249,88 @@ def test_legacy_preferences_without_launch_field() -> None:
         assert not hasattr(manager, "launch_on_startup")
 
 
+# -- no-console PowerShell (G/H/I/J/M) -------------------------------------
+
+
+def test_powershell_helper_is_no_console() -> None:
+    # G: the helper produces CREATE_NO_WINDOW + hidden STARTUPINFO on Windows.
+    if not WINDOWS:
+        print("  (skip no-console helper: not Windows)")
+        return
+    kwargs = windows_shortcuts._windows_no_console_kwargs()
+    assert kwargs["creationflags"] & subprocess.CREATE_NO_WINDOW
+    startupinfo = kwargs["startupinfo"]
+    assert startupinfo.dwFlags & subprocess.STARTF_USESHOWWINDOW
+    assert startupinfo.wShowWindow == subprocess.SW_HIDE
+
+
+def test_run_powershell_passes_no_console_flags() -> None:
+    # H: the real PowerShell invocation forwards the windowless flags.
+    if not WINDOWS:
+        print("  (skip run_powershell no-console: not Windows)")
+        return
+    captured: dict = {}
+    original = subprocess.run
+
+    def fake_run(args, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    windows_shortcuts.subprocess.run = fake_run
+    try:
+        windows_shortcuts._run_powershell("Write-Output 'x'")
+    finally:
+        windows_shortcuts.subprocess.run = original
+
+    assert captured["creationflags"] & subprocess.CREATE_NO_WINDOW
+    assert captured["startupinfo"].dwFlags & subprocess.STARTF_USESHOWWINDOW
+    assert captured["startupinfo"].wShowWindow == subprocess.SW_HIDE
+
+
+def test_special_folder_uses_no_console() -> None:
+    # I/J: resolving the Startup folder (the is_enabled/enable path that runs at
+    # startup and on toggle) never opens a visible console.
+    if not WINDOWS:
+        print("  (skip special_folder no-console: not Windows)")
+        return
+    captured: dict = {}
+    original = subprocess.run
+
+    def fake_run(args, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    windows_shortcuts.subprocess.run = fake_run
+    try:
+        windows_shortcuts.special_folder("Startup")
+    finally:
+        windows_shortcuts.subprocess.run = original
+
+    assert captured["creationflags"] & subprocess.CREATE_NO_WINDOW
+
+
+def test_run_powershell_nonzero_still_raises() -> None:
+    # M: hiding the window must not swallow a non-zero exit / stderr.
+    if not WINDOWS:
+        print("  (skip nonzero no-console: not Windows)")
+        return
+    original = subprocess.run
+
+    def fake_run(args, **kwargs):
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="boom")
+
+    windows_shortcuts.subprocess.run = fake_run
+    try:
+        try:
+            windows_shortcuts._run_powershell("exit 1")
+        except RuntimeError as exc:
+            assert "boom" in str(exc)
+        else:
+            raise AssertionError("expected RuntimeError")
+    finally:
+        windows_shortcuts.subprocess.run = original
+
+
 def main() -> None:
     app = QApplication.instance() or QApplication([])
 
@@ -267,6 +350,11 @@ def main() -> None:
     test_toggle_disable_failure_reverts(app)
     test_toggle_success_updates_state(app)
     test_legacy_preferences_without_launch_field()
+
+    test_powershell_helper_is_no_console()
+    test_run_powershell_passes_no_console_flags()
+    test_special_folder_uses_no_console()
+    test_run_powershell_nonzero_still_raises()
 
     print("Windows launch tests passed.")
 

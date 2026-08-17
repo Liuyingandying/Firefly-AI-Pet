@@ -68,17 +68,37 @@ def _powershell_exe() -> str:
 
 
 def _run_powershell(script: str) -> str:
-    """Run a PowerShell snippet; return trimmed stdout, raise on failure."""
+    """Run a PowerShell snippet; return trimmed stdout, raise on failure.
+
+    On Windows the child is launched windowless (CREATE_NO_WINDOW + a hidden
+    STARTUPINFO) so a background GUI runtime never flashes a console. stdout,
+    stderr and the exit code are still captured, so a non-zero exit still
+    raises and its stderr is preserved.
+    """
     result = subprocess.run(
         [_powershell_exe(), "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True,
         text=True,
         timeout=60,
+        **_windows_no_console_kwargs(),
     )
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
         raise RuntimeError(stderr or f"PowerShell exited {result.returncode}.")
     return result.stdout
+
+
+def _windows_no_console_kwargs() -> dict:
+    """subprocess.run() kwargs that keep the child windowless on Windows."""
+    if not _is_windows():
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return {
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+        "startupinfo": startupinfo,
+    }
 
 
 def _encode_json(payload: dict) -> str:

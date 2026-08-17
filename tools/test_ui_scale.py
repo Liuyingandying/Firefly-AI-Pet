@@ -148,6 +148,111 @@ def test_esc_exits_mode(shell) -> None:
     assert shell._scale_mode is False
 
 
+# -- double right-click exit (A/B/C/D/E/F) -------------------------------
+
+def test_single_right_click_toggles_once_after_interval(app: QApplication) -> None:
+    """A: one right click arms a deferred toggle that fires exactly once."""
+    pet = _fresh_pet()
+    pet.show()
+    toggled: list[int] = []
+    pet.scale_mode_toggled.connect(lambda: toggled.append(1))
+    try:
+        QTest.mouseClick(pet, Qt.RightButton, pos=pet.rect().center())
+        _settle(app)
+        assert toggled == []  # deferred, not immediate
+        QTest.qWait(QApplication.doubleClickInterval() + 120)
+        assert toggled == [1]
+    finally:
+        pet.shutdown()
+
+
+def test_double_right_click_quits_without_toggle(app: QApplication) -> None:
+    """B: the second click cancels the toggle and requests quit exactly once."""
+    pet = _fresh_pet()
+    pet.show()
+    toggled: list[int] = []
+    quits: list[int] = []
+    pet.scale_mode_toggled.connect(lambda: toggled.append(1))
+    pet.quit_requested.connect(lambda: quits.append(1))
+    try:
+        QTest.mouseDClick(pet, Qt.RightButton, pos=pet.rect().center())
+        _settle(app)
+        assert quits == [1]
+        assert toggled == []
+        # no late toggle after the interval elapses
+        QTest.qWait(QApplication.doubleClickInterval() + 120)
+        assert toggled == []
+    finally:
+        pet.shutdown()
+
+
+def test_two_right_presses_within_interval_quit(app: QApplication) -> None:
+    """Two separate right presses within the interval (no synthesized dblclick)
+    still quit via the timer-activity check, once, with no toggle."""
+    pet = _fresh_pet()
+    pet.show()
+    toggled: list[int] = []
+    quits: list[int] = []
+    pet.scale_mode_toggled.connect(lambda: toggled.append(1))
+    pet.quit_requested.connect(lambda: quits.append(1))
+    try:
+        QTest.mouseClick(pet, Qt.RightButton, pos=pet.rect().center())
+        _settle(app)
+        QTest.mouseClick(pet, Qt.RightButton, pos=pet.rect().center())
+        _settle(app)
+        assert quits == [1]
+        assert toggled == []
+        QTest.qWait(QApplication.doubleClickInterval() + 120)
+        assert toggled == []
+    finally:
+        pet.shutdown()
+
+
+def test_two_slow_right_clicks_toggle_twice(app: QApplication) -> None:
+    """C: clicks further apart than the interval are two independent toggles."""
+    pet = _fresh_pet()
+    pet.show()
+    toggled: list[int] = []
+    quits: list[int] = []
+    pet.scale_mode_toggled.connect(lambda: toggled.append(1))
+    pet.quit_requested.connect(lambda: quits.append(1))
+    try:
+        interval = QApplication.doubleClickInterval()
+        QTest.mouseClick(pet, Qt.RightButton, pos=pet.rect().center())
+        QTest.qWait(interval + 120)
+        QTest.mouseClick(pet, Qt.RightButton, pos=pet.rect().center())
+        QTest.qWait(interval + 120)
+        assert toggled == [1, 1]
+        assert quits == []
+    finally:
+        pet.shutdown()
+
+
+def test_left_double_click_does_not_quit(app: QApplication) -> None:
+    """D: left double-click is untouched — no quit, no scale toggle."""
+    pet = _fresh_pet()
+    pet.show()
+    toggled: list[int] = []
+    quits: list[int] = []
+    pet.scale_mode_toggled.connect(lambda: toggled.append(1))
+    pet.quit_requested.connect(lambda: quits.append(1))
+    try:
+        QTest.mouseDClick(pet, Qt.LeftButton, pos=pet.rect().center())
+        _settle(app)
+        QTest.qWait(QApplication.doubleClickInterval() + 120)
+        assert quits == []
+        assert toggled == []
+    finally:
+        pet.shutdown()
+
+
+def test_exit_path_avoids_hard_kill() -> None:
+    """E: the exit trigger is the graceful quit_requested signal, never a kill."""
+    src = (PROJECT_DIR / "ui" / "pet_overlay.py").read_text(encoding="utf-8")
+    for banned in ("os._exit", "taskkill", "TerminateProcess"):
+        assert banned not in src, banned
+
+
 # -- shell: sizing + anchoring (J/K/L/M) ---------------------------------
 
 def test_pet_size_scales(shell) -> None:
@@ -644,6 +749,12 @@ def main() -> None:
     test_pet_render_size_scales(app)
     test_pet_frame_within_viewport(app)
     test_pet_render_roundtrip(app)
+    test_single_right_click_toggles_once_after_interval(app)
+    test_double_right_click_quits_without_toggle(app)
+    test_two_right_presses_within_interval_quit(app)
+    test_two_slow_right_clicks_toggle_twice(app)
+    test_left_double_click_does_not_quit(app)
+    test_exit_path_avoids_hard_kill()
     test_dock_full_at_090_compact_at_085(app)
     test_compact_labels_hidden_icons_visible(app)
     test_compact_buttons_clickable(app)
