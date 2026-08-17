@@ -47,13 +47,6 @@ def main() -> None:
     assert dock.state_for("chatgpt") == "unavailable"
     assert toolbar.selected_action == "companion"
 
-    QTest.mouseClick(pet, Qt.LeftButton, pos=pet.rect().center())
-    app.processEvents()
-    assert not bubble.isVisible()
-    QTest.mouseClick(pet, Qt.LeftButton, pos=pet.rect().center())
-    app.processEvents()
-    assert bubble.isVisible()
-
     old_pet_position = pet.pos()
     old_positions = (dock.pos(), toolbar.pos(), bubble.pos())
     start = pet.rect().center()

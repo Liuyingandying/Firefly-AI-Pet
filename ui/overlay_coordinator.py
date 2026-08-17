@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from enum import Enum
+
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QWidget
@@ -9,6 +11,19 @@ from PySide6.QtWidgets import QApplication, QWidget
 from core.notification_manager import NotificationEvent
 from . import theme
 from .permission_card import PERMISSION_AGENTS
+
+
+class PresentationState(Enum):
+    """The three shell presentation states driven by the left-click sequence.
+
+    PET_ONLY  -> character only (toolbar/dock/bubble hidden)
+    CONTROLS  -> character + toolbar + dock (bubble hidden)
+    CHAT      -> character + toolbar + dock + greeting/Ask bubble
+    """
+
+    PET_ONLY = "pet_only"
+    CONTROLS = "controls"
+    CHAT = "chat"
 
 
 class OverlayCoordinator(QObject):
@@ -51,9 +66,10 @@ class OverlayCoordinator(QObject):
         self._waiting: dict[str, object] = {}
         self._pending_notification = None
         self._context_switching = False
+        self._presentation_state = PresentationState.PET_ONLY
 
         self.pet.position_changed.connect(self.reposition)
-        self.pet.clicked.connect(self.toggle_bubble)
+        self.pet.left_clicked.connect(self.advance_presentation_state)
         self.pet.reset_requested.connect(self.reset_position)
         self.pet.drag_started.connect(self._on_drag_started)
         self.toolbar.action_requested.connect(self._toolbar_action)
@@ -87,6 +103,17 @@ class OverlayCoordinator(QObject):
                 self.bubble.show()
                 self._show_ask_pill()
         self.reposition()
+        self.raise_shell()
+
+    def show_shell_pet_only(self) -> None:
+        """Startup entry: the character only, no chrome, no startup flash.
+
+        The default presentation state is applied before any top-level chrome is
+        shown, so the first painted frame is Firefly alone.
+        """
+        self.pet.show()
+        self.reset_position()
+        self.set_presentation_state(PresentationState.PET_ONLY)
         self.raise_shell()
 
     def _greeting_on_startup(self) -> bool:
@@ -214,6 +241,63 @@ class OverlayCoordinator(QObject):
             self.bubble.raise_()
             self._show_ask_pill()
             self.pet.raise_()
+
+    @property
+    def presentation_state(self) -> PresentationState:
+        return self._presentation_state
+
+    def set_presentation_state(self, state: PresentationState) -> None:
+        self._presentation_state = state
+        if state == PresentationState.PET_ONLY:
+            self._apply_pet_only()
+        elif state == PresentationState.CONTROLS:
+            self._apply_controls()
+        elif state == PresentationState.CHAT:
+            self._apply_chat()
+
+    def advance_presentation_state(self) -> None:
+        """Advance the three-state cycle: PET_ONLY -> CONTROLS -> CHAT -> PET_ONLY."""
+        if self._presentation_state == PresentationState.PET_ONLY:
+            self.set_presentation_state(PresentationState.CONTROLS)
+        elif self._presentation_state == PresentationState.CONTROLS:
+            self.set_presentation_state(PresentationState.CHAT)
+        else:
+            self.set_presentation_state(PresentationState.PET_ONLY)
+
+    def _apply_pet_only(self) -> None:
+        self.toolbar.hide()
+        self.dock.hide()
+        self._hide_bubble()
+        # Close the attached transient overlays. Hiding is never a cancel: a
+        # running Short Ask / Recommendation / Workflow keeps its backend state.
+        self._dismiss_business_popovers()
+        self.suspend_short_ask()
+        self.suspend_recommendation()
+        self.suspend_workflow()
+        self.pet.raise_()
+
+    def _apply_controls(self) -> None:
+        self.dock.show()
+        self.toolbar.show()
+        self._hide_bubble()
+        self.reposition()
+        self.raise_shell()
+
+    def _apply_chat(self) -> None:
+        self.dock.show()
+        self.toolbar.show()
+        # CHAT always shows the bubble; the greeting preference only decides
+        # whether to pre-fill it with the greeting copy, never its existence.
+        if self._greeting_on_startup():
+            self.bubble.show_greeting()
+        else:
+            self.bubble.show_blank()
+        self.bubble.show()
+        self.bubble.raise_()
+        self._show_ask_pill()
+        self.pet.raise_()
+        self.reposition()
+        self.raise_shell()
 
     def close_overlays(self) -> None:
         app = QApplication.instance()

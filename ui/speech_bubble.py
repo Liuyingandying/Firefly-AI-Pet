@@ -70,6 +70,13 @@ class SpeechBubble(QWidget):
         self._content = ("greeting", None)
         self._text.setText(theme.bubble_html())
 
+    def show_blank(self) -> None:
+        """Show the bubble shell with no greeting copy (greeting-on-startup off)."""
+        self._auto_hide.stop()
+        self._star.set_color(theme.CYAN_ACCENT)
+        self._content = ("blank", None)
+        self._text.setText("")
+
     def show_message(
         self,
         title: str,
@@ -110,6 +117,8 @@ class SpeechBubble(QWidget):
         if self._content[0] == "message":
             title, message, accent = self._content[1]
             self._text.setText(self._message_html(title, message, accent))
+        elif self._content[0] == "blank":
+            self._text.setText("")
         else:
             self._text.setText(theme.bubble_html())
 

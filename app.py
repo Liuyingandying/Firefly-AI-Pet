@@ -229,7 +229,7 @@ class VisualShell(QObject):
         self.state_monitor.start()
         # Apply the persisted ui_scale before the first paint (no 100% flash).
         theme.set_ui_scale(self.settings.ui_scale)
-        self.coordinator.show_shell()
+        self.coordinator.show_shell_pet_only()
 
     def shutdown(self) -> None:
         if self._shutting_down:

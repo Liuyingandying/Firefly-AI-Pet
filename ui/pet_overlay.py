@@ -12,7 +12,7 @@ from . import theme
 
 
 class PetOverlay(QWidget):
-    clicked = Signal()
+    left_clicked = Signal()  # one valid left click (not a drag), emitted on release
     position_changed = Signal()
     drag_started = Signal()
     drag_finished = Signal()
@@ -177,9 +177,7 @@ class PetOverlay(QWidget):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
-            self._press_global = event.globalPosition().toPoint()
-            self._drag_offset = self._press_global - self.frameGeometry().topLeft()
-            self._dragging = False
+            self._arm_left_press(event)
             event.accept()
             return
         if event.button() == Qt.RightButton:
@@ -201,6 +199,13 @@ class PetOverlay(QWidget):
         if event.button() == Qt.RightButton:
             self._right_click_timer.stop()
             self.quit_requested.emit()
+            event.accept()
+            return
+        if event.button() == Qt.LeftButton:
+            # The second press of a double click is delivered here instead of
+            # mousePressEvent; arm a click so the trailing release counts once
+            # (a real double click resolves to exactly 2, never 3).
+            self._arm_left_press(event)
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
@@ -229,10 +234,15 @@ class PetOverlay(QWidget):
             if was_drag:
                 self.drag_finished.emit()
             elif was_click:
-                self.clicked.emit()
+                self.left_clicked.emit()
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def _arm_left_press(self, event) -> None:
+        self._press_global = event.globalPosition().toPoint()
+        self._drag_offset = self._press_global - self.frameGeometry().topLeft()
+        self._dragging = False
 
     def _clamped_top_left(self, proposed: QPoint, cursor: QPoint) -> QPoint:
         screen = QApplication.screenAt(cursor) or QApplication.primaryScreen()
