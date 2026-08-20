@@ -17,8 +17,8 @@ FONT_WEIGHT_MEDIUM = 600
 
 # Light Glass palette
 TRANSPARENT = "transparent"
-GLASS_BACKGROUND = (244, 250, 255, 198)
-GLASS_BACKGROUND_HOVER = (249, 253, 255, 218)
+GLASS_BACKGROUND = (244, 250, 255, 250)
+GLASS_BACKGROUND_HOVER = (249, 253, 255, 252)
 GLASS_BACKGROUND_SELECTED = (218, 247, 252, 68)
 TOOLBAR_ACTIVE_BACKGROUND = (211, 246, 251, 142)
 GLASS_BORDER = (190, 219, 237, 92)
@@ -87,6 +87,16 @@ PET_GLOW_HEIGHT = 28
 POPOVER_WIDTH = 340
 POPOVER_TEXT_WIDTH = 208
 POPOVER_ANCHOR_GAP = 14
+
+# PageLens Panel (Phase 9A.1 — persistent reading panel)
+# Reading dimensions are FIXED logical pixels, independent of Pet scale.
+# They only respond to true system UI/DPI scale, not the Pet character scale.
+PAGELENS_WIDTH = 460
+PAGELENS_HEIGHT = 560
+PAGELENS_MIN_WIDTH = 400
+PAGELENS_MIN_HEIGHT = 420
+PAGELENS_ANCHOR_GAP = 12
+PAGELENS_HEADER_HEIGHT = 48
 
 
 # Runtime UI scale (Firefly's own logical scaling on top of Qt DPI). This is the
@@ -366,10 +376,12 @@ class VectorIcon(QWidget):
             self._draw_hexagon(painter, radius, inner=self._kind == "codex")
         elif self._kind in {"gear", "settings"}:
             self._draw_gear(painter, radius)
-        elif self._kind == "claude":
+        elif self._kind in {"claude"}:
             self._draw_claude(painter, radius)
-        elif self._kind == "chatgpt":
+        elif self._kind in {"chatgpt"}:
             self._draw_chatgpt(painter, radius)
+        elif self._kind in {"pagelens"}:
+            self._draw_pagelens(painter, radius)
         else:
             painter.drawEllipse(QRectF(-radius, -radius, radius * 2, radius * 2))
 
@@ -431,3 +443,42 @@ class VectorIcon(QWidget):
             painter.rotate(index * 60)
             painter.drawArc(QRectF(-loop_radius, -radius * 0.72, loop_radius * 2, radius * 0.9), 20 * 16, 205 * 16)
             painter.restore()
+
+    @staticmethod
+    def _draw_pagelens(painter: QPainter, radius: float) -> None:
+        """A 2x2 grid (four small rectangles) suggesting pages / a lens."""
+        painter.setPen(painter.pen().color())
+        painter.setBrush(Qt.NoBrush)
+        half = radius * 0.55
+        gap = radius * 0.08
+        w = half - gap
+        # top-left
+        painter.drawRect(QRectF(-half, -half, w, w))
+        # top-right
+        painter.drawRect(QRectF(gap, -half, w, w))
+        # bottom-left
+        painter.drawRect(QRectF(-half, gap, w, w))
+        # bottom-right
+        painter.drawRect(QRectF(gap, gap, w, w))
+
+
+# -- PageLens mock data (Phase 9A static shell) ------------------------------
+
+PAGELENS_MOCK_CONCEPT = {
+    "term": "相位裕度",
+    "english": "Phase Margin",
+    "summary": (
+        "衡量闭环系统距离不稳定状态还有多少相位余量。"
+        "相位裕度越大，系统越稳定，但响应可能变慢；"
+        "相位裕度太小，系统可能出现振荡甚至发散。"
+    ),
+    "context": (
+        "当前测试内容用于验证 PageLens 桌面面板的布局、"
+        "尺寸、滚动与跟随行为。"
+    ),
+    "related": ["GBW", "Cf", "噪声增益"],
+    "questions": [
+        "Cf 如何影响相位裕度？",
+        "GBW 为什么影响稳定性？",
+    ],
+}

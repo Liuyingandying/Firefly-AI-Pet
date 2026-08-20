@@ -47,6 +47,7 @@ class OverlayCoordinator(QObject):
         short_ask=None,
         recommendation_card=None,
         workflow_card=None,
+        pagelens_panel=None,
     ):
         super().__init__(parent)
         self.pet = pet
@@ -62,11 +63,13 @@ class OverlayCoordinator(QObject):
         self.short_ask = short_ask
         self.recommendation_card = recommendation_card
         self.workflow_card = workflow_card
+        self.pagelens_panel = pagelens_panel
         self._active_context = "workspace"
         self._waiting: dict[str, object] = {}
         self._pending_notification = None
         self._context_switching = False
         self._presentation_state = PresentationState.PET_ONLY
+        self._pagelens_was_visible = True  # track bubble visibility before pagelens open
 
         self.pet.position_changed.connect(self.reposition)
         self.pet.left_clicked.connect(self.advance_presentation_state)
@@ -135,6 +138,8 @@ class OverlayCoordinator(QObject):
             self.recommendation_card.raise_()
         if self.workflow_card is not None and self.workflow_card.isVisible():
             self.workflow_card.raise_()
+        if self.pagelens_panel is not None and self.pagelens_panel.isVisible():
+            self.pagelens_panel.raise_()
 
     def reset_position(self) -> None:
         screen = QApplication.primaryScreen()
@@ -198,6 +203,9 @@ class OverlayCoordinator(QObject):
         if self.permission_card is not None and self.permission_card.isVisible():
             self._position_permission_card()
 
+        if self.pagelens_panel is not None and self.pagelens_panel.visible:
+            self._position_pagelens()
+
     def apply_ui_scale(self, scale: float) -> None:
         """Resize the whole shell for a new ui_scale while holding the pet anchor.
 
@@ -211,6 +219,8 @@ class OverlayCoordinator(QObject):
         self.dock.apply_scale()
         self.toolbar.apply_scale()
         self.bubble.apply_scale()
+        if self.pagelens_panel is not None:
+            self.pagelens_panel.apply_scale()
         new_geo = self.pet.frameGeometry()
         self.pet.move(
             new_geo.topLeft()
@@ -322,11 +332,15 @@ class OverlayCoordinator(QObject):
             self.permission_card.close()
         if self.settings_popover is not None:
             self.settings_popover.close()
+        if self.pagelens_panel is not None:
+            self.pagelens_panel.close()
 
     def _toolbar_action(self, action_id: str) -> None:
         if action_id == "companion":
             if not self.bubble.isVisible():
                 self.toggle_bubble()
+        elif action_id == "pagelens":
+            self.toggle_pagelens()
         elif action_id == "workspace":
             self._toggle_context()
         elif action_id == "settings":
@@ -362,6 +376,97 @@ class OverlayCoordinator(QObject):
             self.session_popover.dismiss()
         if self.settings_popover is not None and self.settings_popover.isVisible():
             self.settings_popover.dismiss()
+        # PageLens is a persistent reading panel — do NOT dismiss on drag.
+
+    # -- PageLens ---------------------------------------------------------
+
+    def toggle_pagelens(self) -> None:
+        if self.pagelens_panel is None:
+            return
+        if self.pagelens_panel.visible:
+            self.hide_pagelens()
+        else:
+            self.show_pagelens()
+
+    def show_pagelens(self) -> None:
+        if self.pagelens_panel is None:
+            return
+        # Save bubble visibility state before opening PageLens
+        self._pagelens_was_visible = self.bubble.isVisible()
+        # Hide bubble while PageLens is open
+        self._hide_bubble()
+        # Dismiss higher-tier overlays
+        self._dismiss_business_popovers()
+        self.suspend_short_ask()
+        self.suspend_recommendation()
+        self.suspend_workflow()
+        # Highlight the toolbar button
+        self.toolbar.select_action("pagelens", emit_signal=False)
+        # Show and position
+        self.pagelens_panel.show_panel()
+        self._position_pagelens()
+        self.raise_shell()
+
+    def hide_pagelens(self) -> None:
+        if self.pagelens_panel is None:
+            return
+        self.pagelens_panel.hide_panel()
+        # Restore toolbar selection to companion
+        self.toolbar.select_action("companion", emit_signal=False)
+        # Restore bubble if it was visible before PageLens opened
+        if self._pagelens_was_visible:
+            self.reposition()
+            self.bubble.show()
+            self.bubble.raise_()
+
+    def _position_pagelens(self) -> None:
+        panel = self.pagelens_panel
+        if panel is None or not panel.visible:
+            return
+        screen = (
+            QGuiApplication.screenAt(self.pet.frameGeometry().center())
+            or QApplication.primaryScreen()
+        )
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        pet_geo = self.pet.frameGeometry()
+        toolbar_geo = self.toolbar.frameGeometry()
+
+        # Decide anchor side: prefer left of toolbar, flip if not enough space
+        gap = theme.scaled(theme.PAGELENS_ANCHOR_GAP)
+        panel_width = panel.width()
+        panel_height = panel.height()
+
+        # Default: place panel to the left of the toolbar/cluster
+        # Vertical center: align panel center with cluster center
+        cluster_left = min(pet_geo.left(), toolbar_geo.left())
+        cluster_center_y = (toolbar_geo.top() + toolbar_geo.bottom()) // 2
+        point = QPoint(
+            cluster_left - gap - panel_width,
+            cluster_center_y - panel_height // 2,
+        )
+
+        # Check if left side has enough space
+        if point.x() < available.left() + 10:
+            # Flip to the right side
+            cluster_right = max(pet_geo.right(), toolbar_geo.right())
+            point = QPoint(
+                cluster_right + gap,
+                cluster_center_y - panel_height // 2,
+            )
+            panel.set_anchor_side("right")
+        else:
+            panel.set_anchor_side("left")
+
+        # Clamp vertically with margin
+        margin = theme.scaled(theme.SPACE_MD)
+        if point.y() < available.top() + margin:
+            point.setY(available.top() + margin)
+        if point.y() + panel_height > available.bottom() - margin:
+            point.setY(available.bottom() - panel_height - margin)
+
+        panel.move(self._clamp_point(point, panel, available))
 
     # -- lifecycle ------------------------------------------------------
 
@@ -752,6 +857,9 @@ class OverlayCoordinator(QObject):
                 if not self.recommendation_card.frameGeometry().contains(global_pos):
                     # Clicking away declines the recommendation.
                     self.recommendation_card.dismiss()
+        # PageLens is a persistent reading panel — outside-click does NOT
+        # close it. The user must explicitly toggle the toolbar button or
+        # press Esc (handled by the panel itself if needed).
         return super().eventFilter(watched, event)
 
     @staticmethod

@@ -7,16 +7,28 @@ The legacy CompanionPanel remains on disk but is not imported or shown.
 
 from __future__ import annotations
 
+import logging
 import ctypes
 import os
 import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QTimer, QUrl
+import keyboard
+
+log = logging.getLogger("firefly.app")
+
+from PySide6.QtCore import QObject, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QDesktopServices, QFont
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtWidgets import QApplication
+
+# ---------------------------------------------------------------------------
+# Global hotkey manager (keyboard hook)
+# ---------------------------------------------------------------------------
+_HOTKEY_SHORTCUT = "ctrl+alt+shift+l"
+_HOTKEY_LABEL = "Ctrl+Alt+Shift+L"
+
 
 from core.agent_router import AgentRouter
 from core.artifact_store import ArtifactStore
@@ -30,6 +42,7 @@ from core.handoff import (
 from core.keep_awake import KeepAwakeService
 from core.models import AgentState, ResolvedState
 from core.notification_manager import NotificationManager
+from core.pagelens_bridge import PageLensBridge
 from core.quick_ask_metrics import MetricsWriter
 from core.routing_models import HandoffMode, TaskRequest
 from core.session_manager import SessionManager
@@ -63,6 +76,47 @@ from ui.workflow_implement_executor import ImplementStepExecutor
 from ui.workspace_store import WorkspaceStore
 from ui.workflow_review_executor import ReviewStepExecutor
 from ui.workspace_popover import WorkspacePopover
+from ui.pagelens_panel import PageLensPanel
+
+
+class _HotkeyManager(QObject):
+    """Register the PageLens toggle through a Python global keyboard hook."""
+
+    triggered = Signal()
+
+    def __init__(self, parent: QObject | None = None):
+        super().__init__(parent)
+        self._hotkey_handle = None
+        self.active_shortcut = _HOTKEY_LABEL
+
+    def register(self) -> bool:
+        if self._hotkey_handle is not None:
+            return True
+        self._hotkey_handle = keyboard.add_hotkey(
+            _HOTKEY_SHORTCUT,
+            self._on_hotkey,
+            suppress=False,
+            trigger_on_release=False,
+        )
+        print(
+            f"[PageLens Hotkey] registered {self.active_shortcut} "
+            "via keyboard hook",
+            flush=True,
+        )
+        return True
+
+    def _on_hotkey(self) -> None:
+        print(
+            f"[PageLens Hotkey] triggered {self.active_shortcut}",
+            flush=True,
+        )
+        self.triggered.emit()
+
+    def unregister(self) -> None:
+        if self._hotkey_handle is None:
+            return
+        keyboard.remove_hotkey(self._hotkey_handle)
+        self._hotkey_handle = None
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -136,7 +190,27 @@ class VisualShell(QObject):
             self.workflow_coordinator, self.artifact_store, parent=self
         )
         self.workflow_card = WorkflowCard(coordinator=self.workflow_coordinator)
+        self.pagelens = PageLensPanel()
         self._active_workflow_id: str | None = None
+        # PageLens Bridge (Phase 9B)
+        self.pagelens_bridge = PageLensBridge(parent=self)
+        self.pagelens_bridge.start()
+        # Connect bridge signals to panel
+        self.pagelens_bridge.concept_loading.connect(self.pagelens.show_loading)
+        self.pagelens_bridge.concept_card.connect(self.pagelens.set_concept)
+        self.pagelens_bridge.concept_error.connect(self.pagelens.show_error)
+        self.pagelens_bridge.concepts.connect(self.pagelens.set_top_concepts)
+        self.pagelens_bridge.bridge_connected.connect(self.pagelens.set_bridge_connected)
+        self.pagelens_bridge.bridge_disconnected.connect(self.pagelens.set_bridge_connected)
+        # Connect panel signals to bridge
+        self.pagelens.related_requested.connect(self.pagelens_bridge.send_open_related)
+        self.pagelens_bridge.action_open_related.connect(self.pagelens.related_requested.emit)
+        self.pagelens.question_requested.connect(self.pagelens_bridge.send_open_question)
+        self.pagelens_bridge.action_open_question.connect(self.pagelens.question_requested.emit)
+        self.pagelens.concept_requested.connect(self.pagelens_bridge.send_open_concept)
+        self.pagelens_bridge.action_open_concept.connect(self.pagelens.concept_requested.emit)
+        self.pagelens.back_requested.connect(self.pagelens_bridge.send_back)
+        self.pagelens_bridge.action_back.connect(self.pagelens.back_requested.emit)
         self.agent_router = AgentRouter()
         self.coordinator = OverlayCoordinator(
             self.pet,
@@ -153,7 +227,17 @@ class VisualShell(QObject):
             short_ask=self.short_ask,
             recommendation_card=self.recommendation_card,
             workflow_card=self.workflow_card,
+            pagelens_panel=self.pagelens,
         )
+        # Close button → coordinator.hide_pagelens()
+        self.pagelens.close_requested.connect(self.coordinator.hide_pagelens)
+        # Global keyboard hook → queued coordinator.toggle_pagelens().
+        self.hotkey_manager = _HotkeyManager(self)
+        self.hotkey_manager.triggered.connect(
+            self.coordinator.toggle_pagelens,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.hotkey_manager.register()
         self.state_monitor = StateMonitor(
             RUNTIME_DIR / "sources",
             STATE_FILE,
@@ -247,6 +331,11 @@ class VisualShell(QObject):
             self.implement_executor.stop()
         self.implement_executor.reset()
         self.coordinator.close_overlays()
+        # Stop PageLens bridge before closing overlays (panel needs it)
+        self.pagelens_bridge.stop()
+        # Unregister global hotkey
+        if hasattr(self, "hotkey_manager"):
+            self.hotkey_manager.unregister()
         self.pet.shutdown()
         if self._server is not None:
             self._server.close()

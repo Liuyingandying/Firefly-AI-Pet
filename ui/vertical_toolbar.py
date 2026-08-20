@@ -10,6 +10,7 @@ from . import theme
 
 TOOLBAR_ACTIONS = (
     ("companion", "Companion", "star"),
+    ("pagelens", "PageLens", "pagelens"),
     ("workspace", "Workspace", "hexagon"),
     ("settings", "Settings", "gear"),
 )

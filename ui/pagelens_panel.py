@@ -1,0 +1,946 @@
+"""PageLens overlay panel - Phase 9B real interaction.
+
+A glass-surface persistent reading panel for PageLens concept cards.
+Phase 9B: connected to browser PageLens via WebSocket bridge.
+
+Signals (for bridge connection):
+    related_requested(str): user clicked a related concept chip
+    question_requested(str): user clicked a continue exploration question
+    concept_requested(str): user clicked a top concept chip
+    back_requested(): user clicked the back button
+    close_requested(): user clicked the close button (×)
+
+Architecture:
+    - Reading dimensions FIXED logical pixels, independent of Pet scale
+    - Header shows connection status (Connected/Offline)
+    - Top concepts area shows page-level concept chips
+    - Concept Card with real data from browser
+    - Question View with SSE streaming
+    - Back button for navigation
+    - Non-opaque reading surface for readability
+"""
+
+from __future__ import annotations
+
+import logging
+import sys
+
+from PySide6.QtCore import Qt, QRectF, QPoint, Signal
+from PySide6.QtGui import QPainter, QPainterPath, QFont, QFontMetrics
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QFrame,
+    QScrollArea,
+    QApplication,
+    QSizePolicy,
+)
+
+from . import theme
+
+log = logging.getLogger("firefly.pagelens")
+
+# ---------------------------------------------------------------------------
+# PageLens uses a FIXED reading scale that does NOT follow Pet character scale.
+# ---------------------------------------------------------------------------
+PAGELENS_READING_SCALE = 1.0
+
+
+def _pl_scaled(value: int | float) -> int:
+    return int(round(value * PAGELENS_READING_SCALE))
+
+
+def _pl_scaled_px(value: int | float) -> int:
+    return max(1, _pl_scaled(value))
+
+
+def _pl_font_px(value: int | float) -> int:
+    return max(9, _pl_scaled(value))
+
+
+class PageLensPanel(QWidget):
+    """A glass-surface persistent reading panel for PageLens concept cards.
+
+    Phase 9B: connected to browser PageLens via WebSocket bridge.
+    """
+
+    # Signals for bridge connection
+    related_requested = Signal(str)
+    question_requested = Signal(str)
+    concept_requested = Signal(str)
+    back_requested = Signal()
+    close_requested = Signal()
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setWindowTitle("Firefly PageLens")
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setStyleSheet(theme.transparent_window_style())
+
+        w = _pl_scaled_px(theme.PAGELENS_WIDTH)
+        h = _pl_scaled_px(theme.PAGELENS_HEIGHT)
+        self.setFixedSize(w, h)
+
+        # State (initialized before any method that reads them)
+        self._visible = False
+        self._anchor_side = "left"
+        self._bridge_connected = False
+
+        # Root layout with shadow
+        root = QVBoxLayout(self)
+        shadow = theme.SHADOW_MARGIN - 2
+        root.setContentsMargins(shadow, shadow, shadow, shadow)
+        root.setSpacing(0)
+
+        self._glass = theme.GlassPanel(theme.RADIUS_CARD, self)
+        theme.apply_soft_shadow(self._glass)
+        root.addWidget(self._glass)
+
+        # Inner layout
+        inner = QVBoxLayout(self._glass)
+        inner.setContentsMargins(0, 0, 0, 0)
+        inner.setSpacing(0)
+
+        # Header
+        self._header = self._build_header()
+        inner.addWidget(self._header)
+
+        # Top concepts area (compact, scrollable)
+        self._top_concepts = self._build_top_concepts()
+        inner.addWidget(self._top_concepts)
+
+        # Separator
+        sep = QFrame(self._glass)
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(f"background: {theme.css_color(theme.GLASS_BORDER)};")
+        inner.addWidget(sep)
+
+        # Scroll area for concept card / question view
+        self._scroll = QScrollArea(self._glass)
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            f"QScrollBar:vertical {{ background: transparent; width: {_pl_scaled_px(6)}px; }}"
+            f"QScrollBar::handle:vertical {{ background: {theme.css_color(theme.GLASS_BORDER)}; border-radius: 3px; min-height: {_pl_scaled_px(20)}px; }}"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
+        )
+        inner.addWidget(self._scroll)
+
+        # Content (concept card or question view)
+        self._content = _ScrollContent(self._glass, self)
+        self._scroll.setWidget(self._content)
+
+        log.info("[PageLensPanel] created")
+
+    # ------------------------------------------------------------------
+    # Header
+    # ------------------------------------------------------------------
+
+    def _build_header(self) -> QFrame:
+        header = QFrame(self._glass)
+        header.setFixedHeight(_pl_scaled_px(theme.PAGELENS_HEADER_HEIGHT))
+        header.setObjectName("pageLensHeader")
+
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(
+            _pl_scaled_px(18), _pl_scaled_px(8),
+            _pl_scaled_px(18), _pl_scaled_px(8),
+        )
+        layout.setSpacing(_pl_scaled_px(14))
+
+        # Title
+        title = QLabel("Firefly PageLens", header)
+        title.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_PRIMARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(11)}pt; "
+            f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
+        )
+        layout.addWidget(title, 1)
+
+        # Status badge
+        self._badge = QFrame(header)
+        self._badge.setFixedSize(_pl_scaled_px(64), _pl_scaled_px(20))
+        self._badge.setObjectName("pageLensStatusBadge")
+        self._badge_layout = QHBoxLayout(self._badge)
+        self._badge_layout.setContentsMargins(0, 0, 0, 0)
+        self._badge_layout.setAlignment(Qt.AlignCenter)
+        self._badge_text = QLabel(self._badge)
+        self._badge_layout.addWidget(self._badge_text)
+        self._update_status_badge()
+        layout.addWidget(self._badge)
+
+        # Close button (×)
+        self._close_btn = _CloseButton(header)
+        self._close_btn.clicked.connect(lambda: self.close_requested.emit())
+        layout.addWidget(self._close_btn)
+
+        return header
+
+    def _update_status_badge(self) -> None:
+        if self._bridge_connected:
+            text = "Connected"
+            color = theme.CYAN_ACCENT
+            bg_alpha = 32
+        else:
+            text = "Offline"
+            color = (128, 128, 136, 255)  # gray with full alpha
+            bg_alpha = 20
+
+        self._badge_text.setText(text)
+        self._badge_text.setStyleSheet(
+            f"color: {theme.css_color(color)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(7)}pt; "
+            f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
+        )
+        self._badge.setStyleSheet(
+            f"background-color: {theme.css_color((*color[:3], bg_alpha))}; "
+            f"border-radius: 10px;"
+        )
+
+    def set_bridge_connected(self, connected: bool) -> None:
+        self._bridge_connected = connected
+        self._update_status_badge()
+
+    # ------------------------------------------------------------------
+    # Top concepts area
+    # ------------------------------------------------------------------
+
+    def _build_top_concepts(self) -> QFrame:
+        frame = QFrame(self._glass)
+        frame.setObjectName("pageLensTopConcepts")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(
+            _pl_scaled_px(16), _pl_scaled_px(6),
+            _pl_scaled_px(16), _pl_scaled_px(6),
+        )
+        layout.setSpacing(_pl_scaled_px(4))
+
+        # Title
+        self._top_concepts_header = QLabel("本页概念", frame)
+        self._top_concepts_header.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(8)}pt; "
+            f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
+        )
+        layout.addWidget(self._top_concepts_header)
+
+        # Chips container
+        self._top_concepts_layout = QHBoxLayout()
+        self._top_concepts_layout.setSpacing(_pl_scaled_px(5))
+        layout.addLayout(self._top_concepts_layout)
+
+        frame.setFixedHeight(_pl_scaled_px(52))
+        return frame
+
+    def set_top_concepts(self, items: list[str]) -> None:
+        """Render top concept chips. Clicking sends concept_requested signal."""
+        # Clear old chips
+        for w in self._top_concepts_layout.children():
+            if isinstance(w, QWidget) and w != self._top_concepts_layout:
+                w.deleteLater()
+
+        # Show at most 8 concepts
+        for text in (items or [])[:8]:
+            chip = _TopConceptChip(text, self)
+            chip.clicked.connect(lambda t=text: self.concept_requested.emit(t))
+            self._top_concepts_layout.addWidget(chip)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def set_concept(self, card: dict) -> None:
+        self._content.set_concept(card)
+
+    def show_loading(self, term: str) -> None:
+        self._content.show_loading(term)
+
+    def show_error(self, message: str) -> None:
+        self._content.show_error(message)
+
+    def show_panel(self) -> None:
+        self._visible = True
+        self.show()
+        self.raise_()
+        log.info("[PageLensPanel] show")
+
+    def hide_panel(self) -> None:
+        self._visible = False
+        self.hide()
+        log.info("[PageLensPanel] hide")
+
+    def toggle(self) -> bool:
+        if self._visible:
+            self.hide_panel()
+            return False
+        else:
+            self.show_panel()
+            return True
+
+    def apply_scale(self) -> None:
+        """Phase 9A.1/9B: FIXED reading scale — ignore Pet character scale."""
+        pass
+
+    # -- Question view delegation (bridge / app → _content) ----------------
+
+    def show_question_loading(self, parent_term: str, question: str) -> None:
+        self._content.show_question_loading(parent_term, question)
+
+    def append_question_delta(self, delta: str) -> None:
+        self._content.append_question_delta(delta)
+
+    def finish_question(self) -> None:
+        self._content.finish_question()
+
+    def show_question_error(self, message: str) -> None:
+        self._content.show_question_error(message)
+
+    # -- Read-only introspection (needed by tests and bridge wiring) --------
+
+    @property
+    def related_widgets(self) -> list:
+        return self._content._related_widgets
+
+    @property
+    def question_widgets(self) -> list:
+        return self._content._question_widgets
+
+    @property
+    def question_parent_label(self) -> QLabel:
+        return self._content._question_parent_label
+
+    @property
+    def question_title_label(self) -> QLabel:
+        return self._content._question_title_label
+
+    @property
+    def question_status_label(self) -> QLabel:
+        return self._content._question_status_label
+
+    @property
+    def question_answer_label(self) -> QLabel:
+        return self._content._question_answer_label
+
+    @property
+    def bridge_connected(self) -> bool:
+        return self._bridge_connected
+
+    @property
+    def visible(self) -> bool:
+        return self._visible
+
+    @property
+    def anchor_side(self) -> str:
+        return self._anchor_side
+
+    def set_anchor_side(self, side: str) -> None:
+        if side not in ("left", "right"):
+            side = "left"
+        if side != self._anchor_side:
+            self._anchor_side = side
+            log.info("[PageLensPanel] anchor side: %s", side)
+
+
+# ---------------------------------------------------------------------------
+# Top concept chip (for "本页概念" area)
+# ---------------------------------------------------------------------------
+
+class _TopConceptChip(QFrame):
+    """Compact chip for top page concepts."""
+
+    clicked = Signal(str)
+
+    def __init__(self, text: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._text = text
+        self.setFixedSize(_pl_scaled_px(56), _pl_scaled_px(22))
+        self.setCursor(Qt.PointingHandCursor)
+        self._hovered = False
+        self.setObjectName("pageLensTopConceptChip")
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit(self._text)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), 11, 11)
+
+        if self._hovered:
+            painter.fillPath(path, theme.qcolor(theme.GLASS_BACKGROUND_HOVER))
+            painter.setPen(theme.qcolor(theme.CYAN_ACCENT))
+        else:
+            painter.fillPath(path, theme.qcolor(theme.GLASS_BACKGROUND))
+            painter.setPen(theme.qcolor(theme.GLASS_BORDER))
+
+        painter.drawPath(path)
+        painter.setPen(theme.qcolor(theme.TEXT_SECONDARY))
+        painter.drawText(self.rect(), Qt.AlignCenter, self._text)
+        painter.end()
+
+
+# ---------------------------------------------------------------------------
+# Scroll content (concept card + question view)
+# ---------------------------------------------------------------------------
+
+class _ScrollContent(QWidget):
+    """Scrollable inner widget that holds the PageLens concept card content."""
+
+    def __init__(self, parent: QWidget | None = None, parent_panel: PageLensPanel | None = None):
+        super().__init__(parent)
+        # Hold references to parent panel's signals for forwarding clicks
+        self._parent_panel = parent_panel
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(
+            _pl_scaled_px(20), _pl_scaled_px(12),
+            _pl_scaled_px(20), _pl_scaled_px(18),
+        )
+        self._layout.setSpacing(_pl_scaled_px(16))
+
+        # --- Back button (hidden by default) ---
+        self._back_btn = _BackButton(self)
+        self._back_btn.hidden = True
+        self._back_btn.clicked.connect(lambda: None)  # placeholder
+        self._layout.addWidget(self._back_btn)
+
+        # --- Term label ---
+        self._term_label = QLabel(self)
+        self._term_label.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_PRIMARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(18)}pt; "
+            f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
+        )
+        self._term_label.setWordWrap(False)
+        self._term_label.setMinimumHeight(_pl_scaled_px(30))
+        self._layout.addWidget(self._term_label)
+
+        # --- English subtitle ---
+        self._english_label = QLabel(self)
+        self._english_label.setStyleSheet(
+            f"color: {theme.css_color(theme.CYAN_ACCENT)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(13)}pt; "
+            f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
+        )
+        self._english_label.setWordWrap(False)
+        self._english_label.setMinimumHeight(_pl_scaled_px(22))
+        self._layout.addWidget(self._english_label)
+
+        # --- Separator ---
+        sep = QFrame(self)
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(f"background: {theme.css_color(theme.GLASS_BORDER)};")
+        self._layout.addWidget(sep)
+
+        # --- Summary ---
+        self._summary_label = QLabel(self)
+        self._summary_label.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_PRIMARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(10.5)}pt; "
+            f"line-height: 160%;"
+        )
+        self._summary_label.setWordWrap(True)
+        self._summary_label.setSizePolicy(
+            QSizePolicy.Fixed, QSizePolicy.Expanding,
+        )
+        self._layout.addWidget(self._summary_label)
+
+        # --- Separator ---
+        sep2 = QFrame(self)
+        sep2.setFixedHeight(1)
+        sep2.setStyleSheet(f"background: {theme.css_color(theme.GLASS_BORDER)};")
+        self._layout.addWidget(sep2)
+
+        # --- Context section ---
+        self._context_header = QLabel(self)
+        self._context_header.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(9)}pt; "
+            f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
+        )
+        self._context_header.setText("为什么这里提到它")
+        self._layout.addWidget(self._context_header)
+
+        self._context_label = QLabel(self)
+        self._context_label.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(10)}pt; "
+            f"line-height: 160%;"
+        )
+        self._context_label.setWordWrap(True)
+        self._context_label.setSizePolicy(
+            QSizePolicy.Fixed, QSizePolicy.Expanding,
+        )
+        self._layout.addWidget(self._context_label)
+
+        # --- Separator ---
+        sep3 = QFrame(self)
+        sep3.setFixedHeight(1)
+        sep3.setStyleSheet(f"background: {theme.css_color(theme.GLASS_BORDER)};")
+        self._layout.addWidget(sep3)
+
+        # --- Related concepts header ---
+        self._related_header = QLabel(self)
+        self._related_header.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(9)}pt; "
+            f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
+        )
+        self._related_header.setText("相关概念")
+        self._layout.addWidget(self._related_header)
+
+        self._related_layout = QHBoxLayout()
+        self._related_layout.setSpacing(_pl_scaled_px(7))
+        self._related_widgets: list[QWidget] = []
+        self._layout.addLayout(self._related_layout)
+
+        # --- Separator ---
+        sep4 = QFrame(self)
+        sep4.setFixedHeight(1)
+        sep4.setStyleSheet(f"background: {theme.css_color(theme.GLASS_BORDER)};")
+        self._layout.addWidget(sep4)
+
+        # --- Questions header ---
+        self._questions_header = QLabel(self)
+        self._questions_header.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(9)}pt; "
+            f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
+        )
+        self._questions_header.setText("继续探索")
+        self._layout.addWidget(self._questions_header)
+
+        self._questions_layout = QVBoxLayout()
+        self._questions_layout.setSpacing(_pl_scaled_px(4))
+        self._question_widgets: list[QWidget] = []
+        self._layout.addLayout(self._questions_layout)
+
+        self._layout.addStretch(1)
+
+        # --- Question view elements (hidden by default) ---
+        self._question_parent_label = QLabel(self)
+        self._question_parent_label.setStyleSheet(
+            f"color: {theme.css_color(theme.CYAN_ACCENT)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(10)}pt; "
+            f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
+        )
+        self._question_parent_label.setVisible(False)
+        self._layout.addWidget(self._question_parent_label)
+
+        self._question_title_label = QLabel(self)
+        self._question_title_label.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_PRIMARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(12)}pt; "
+            f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
+        )
+        self._question_title_label.setWordWrap(True)
+        self._question_title_label.setVisible(False)
+        self._layout.addWidget(self._question_title_label)
+
+        self._question_status_label = QLabel(self)
+        self._question_status_label.setStyleSheet(
+            f"color: {theme.css_color(theme.CYAN_ACCENT)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(9)}pt; "
+        )
+        self._question_status_label.setVisible(False)
+        self._layout.addWidget(self._question_status_label)
+
+        self._question_answer_label = QLabel(self)
+        self._question_answer_label.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_PRIMARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(10.5)}pt; "
+            f"line-height: 160%;"
+        )
+        self._question_answer_label.setWordWrap(True)
+        self._question_answer_label.setSizePolicy(
+            QSizePolicy.Fixed, QSizePolicy.Expanding,
+        )
+        self._question_answer_label.setVisible(False)
+        self._layout.addWidget(self._question_answer_label)
+
+        # --- Idle state ---
+        self._idle_label = QLabel(self)
+        self._idle_label.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(11)}pt; "
+            f"font-style: italic;"
+        )
+        self._idle_label.setAlignment(Qt.AlignCenter)
+        self._idle_label.setText("等待网页内容…")
+        self._idle_label.setVisible(True)
+        self._layout.addWidget(self._idle_label)
+
+    # -- Concept card methods -------------------------------------------
+
+    def set_concept(self, card: dict) -> None:
+        self._show_concept_view()
+        self._back_btn.set_text(card.get("_back_term", ""))
+        self._term_label.setText(card.get("term", ""))
+        self._english_label.setText(card.get("english", ""))
+        self._summary_label.setText(card.get("summary", ""))
+        self._context_label.setText(card.get("context", ""))
+
+        # Related chips
+        for w in self._related_widgets:
+            w.deleteLater()
+        self._related_widgets.clear()
+        for text in card.get("related", []):
+            chip = _RelatedChip(text, self)
+            chip.clicked.connect(lambda t=text: self._emit_related(t))
+            self._related_layout.addWidget(chip)
+            self._related_widgets.append(chip)
+
+        # Question items
+        for item in self._questions_layout.children():
+            if isinstance(item, QWidget) and item not in (
+                self._questions_header, self._question_parent_label,
+                self._question_title_label, self._question_status_label,
+                self._question_answer_label, self._idle_label,
+            ):
+                item.deleteLater()
+        for w in self._question_widgets:
+            w.deleteLater()
+        self._question_widgets.clear()
+        for text in card.get("questions", []):
+            qitem = _QuestionItem(text, self)
+            qitem.clicked.connect(lambda t=text: self._emit_question(t))
+            self._questions_layout.addWidget(qitem)
+            self._question_widgets.append(qitem)
+
+    def show_loading(self, term: str) -> None:
+        self._show_concept_view()
+        self._back_btn.hidden = True
+        self._term_label.setText(term)
+        self._english_label.setText("")
+        self._summary_label.setText("加载中...")
+        self._context_label.setText("")
+        for w in self._related_widgets:
+            w.deleteLater()
+        self._related_widgets.clear()
+        for w in self._question_widgets:
+            w.deleteLater()
+        self._question_widgets.clear()
+
+    def show_error(self, message: str) -> None:
+        self._show_concept_view()
+        self._back_btn.hidden = True
+        self._term_label.setText("PageLens")
+        self._english_label.setText("")
+        self._summary_label.setText(message)
+        self._context_label.setText("")
+        for w in self._related_widgets:
+            w.deleteLater()
+        self._related_widgets.clear()
+        for w in self._question_widgets:
+            w.deleteLater()
+        self._question_widgets.clear()
+
+    # -- Question view methods ------------------------------------------
+
+    def show_question_loading(self, parent_term: str, question: str) -> None:
+        self._show_question_view()
+        self._question_parent_label.setText(f"← {parent_term}")
+        self._question_parent_label.setVisible(True)
+        self._question_title_label.setText(question)
+        self._question_title_label.setVisible(True)
+        self._question_status_label.setText("Qwen 正在解释…")
+        self._question_status_label.setVisible(True)
+        self._question_answer_label.setText("")
+        self._question_answer_label.setVisible(True)
+        self._hide_concept_sections()
+
+    def append_question_delta(self, delta: str) -> None:
+        current = self._question_answer_label.text()
+        self._question_answer_label.setText(current + delta)
+
+    def finish_question(self) -> None:
+        self._question_status_label.setText("完成")
+
+    def show_question_error(self, message: str) -> None:
+        self._show_question_view()
+        self._question_status_label.setText("回答失败")
+        self._question_answer_label.setText(message)
+        self._question_answer_label.setVisible(True)
+
+    # -- Helpers --------------------------------------------------------
+
+    def _show_concept_view(self) -> None:
+        self._back_btn.hidden = False
+        self._term_label.setVisible(True)
+        self._english_label.setVisible(True)
+        # Show all concept sections
+        for child in self._layout.children():
+            if isinstance(child, QFrame) and child.height() == 1:
+                child.setVisible(True)
+            elif isinstance(child, QLabel) and child not in (
+                self._question_parent_label, self._question_title_label,
+                self._question_status_label, self._question_answer_label,
+                self._idle_label,
+            ):
+                child.setVisible(True)
+        # Hide question view
+        self._question_parent_label.setVisible(False)
+        self._question_title_label.setVisible(False)
+        self._question_status_label.setVisible(False)
+        self._question_answer_label.setVisible(False)
+        self._idle_label.setVisible(False)
+
+    def _show_question_view(self) -> None:
+        self._back_btn.hidden = False
+        self._back_btn.set_text("")  # no back term for question view
+        self._term_label.setVisible(False)
+        self._english_label.setVisible(False)
+        self._hide_concept_sections()
+        self._idle_label.setVisible(False)
+
+    def _hide_concept_sections(self) -> None:
+        """Hide all concept card sections (summary, context, related, questions)."""
+        for child in self._layout.children():
+            if isinstance(child, QFrame) and child.height() == 1:
+                child.setVisible(False)
+            elif isinstance(child, QLabel) and child in (
+                self._term_label, self._english_label,
+                self._summary_label, self._context_header, self._context_label,
+                self._related_header, self._questions_header,
+            ):
+                child.setVisible(False)
+
+    def _emit_related(self, text: str) -> None:
+        log.info("[PageLensPanel] related: %s", text)
+        if self._parent_panel is not None:
+            self._parent_panel.related_requested.emit(text)
+
+    def _emit_question(self, text: str) -> None:
+        log.info("[PageLensPanel] question: %s", text)
+        if self._parent_panel is not None:
+            self._parent_panel.question_requested.emit(text)
+
+
+# ---------------------------------------------------------------------------
+# Back button
+# ---------------------------------------------------------------------------
+
+class _BackButton(QFrame):
+    """A small back button (← term)."""
+
+    clicked = Signal()
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._text = ""
+        self._hovered = False
+        self.hidden = True
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(_pl_scaled_px(26))
+
+    def set_text(self, term: str) -> None:
+        self._text = term
+        self.update()
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:
+        if self.hidden:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        if self._hovered:
+            painter.setPen(theme.qcolor(theme.CYAN_ACCENT))
+        else:
+            painter.setPen(theme.qcolor(theme.TEXT_SECONDARY))
+        painter.drawText(6, self.height() // 2 + 4, "← " + self._text)
+        painter.end()
+
+
+# ---------------------------------------------------------------------------
+# Related chip
+# ---------------------------------------------------------------------------
+
+class _RelatedChip(QFrame):
+    """A small pill-shaped chip for related concepts."""
+
+    clicked = Signal(str)
+
+    def __init__(self, text: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._text = text
+        self.setFixedSize(_pl_scaled_px(64), _pl_scaled_px(26))
+        self.setCursor(Qt.PointingHandCursor)
+        self._hovered = False
+        self._selected = False
+        self.setObjectName("pageLensRelatedChip")
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit(self._text)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), 13, 13)
+
+        if self._selected:
+            painter.fillPath(path, theme.qcolor(theme.CYAN_ACCENT))
+            painter.setPen(theme.qcolor(theme.TRANSPARENT))
+        elif self._hovered:
+            painter.fillPath(path, theme.qcolor(theme.GLASS_BACKGROUND_HOVER))
+            painter.setPen(theme.qcolor(theme.CYAN_ACCENT))
+        else:
+            painter.fillPath(path, theme.qcolor(theme.GLASS_BACKGROUND))
+            painter.setPen(theme.qcolor(theme.GLASS_BORDER))
+
+        painter.drawPath(path)
+        painter.setPen(theme.qcolor(theme.TEXT_PRIMARY if self._selected else theme.TEXT_SECONDARY))
+        painter.drawText(self.rect(), Qt.AlignCenter, self._text)
+        painter.end()
+
+
+# ---------------------------------------------------------------------------
+# Question item
+# ---------------------------------------------------------------------------
+
+class _QuestionItem(QFrame):
+    """A clickable question row."""
+
+    clicked = Signal(str)
+
+    def __init__(self, text: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._text = text
+        self.setFixedHeight(_pl_scaled_px(32))
+        self.setCursor(Qt.PointingHandCursor)
+        self._hovered = False
+        self.setObjectName("pageLensQuestionItem")
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit(self._text)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        if self._hovered:
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(self.rect()), theme.RADIUS_ITEM, theme.RADIUS_ITEM)
+            painter.fillPath(path, theme.qcolor(theme.GLASS_BACKGROUND_HOVER))
+
+        painter.setPen(theme.qcolor(theme.TEXT_PRIMARY if self._hovered else theme.TEXT_SECONDARY))
+        painter.drawText(8, self.height() // 2 + 5, "> " + self._text)
+        painter.end()
+
+
+# ---------------------------------------------------------------------------
+# Close button
+# ---------------------------------------------------------------------------
+
+class _CloseButton(QFrame):
+    """Minimal close button (×) in the panel header."""
+
+    clicked = Signal()
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._hovered = False
+        self.setFixedSize(_pl_scaled_px(26), _pl_scaled_px(26))
+        self.setCursor(Qt.PointingHandCursor)
+        self.setObjectName("pageLensCloseButton")
+        self.setToolTip("关闭 PageLens")
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(theme.qcolor(theme.TEXT_SECONDARY if not self._hovered else theme.TEXT_PRIMARY))
+        painter.drawText(self.rect(), Qt.AlignCenter, "×")
+        painter.end()

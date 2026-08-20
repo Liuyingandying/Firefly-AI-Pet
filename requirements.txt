@@ -1,1 +1,3 @@
 PySide6
+websockets
+keyboard==0.13.5
