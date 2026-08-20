@@ -78,6 +78,7 @@ hook_test.txt
 
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 *.p12
@@ -128,3 +129,6 @@ Firefly_AI_Pet_Phase7A_Upgrade/
 
 *.backup-*
 *.backup
+
+# runtime state
+core/provider_state.json

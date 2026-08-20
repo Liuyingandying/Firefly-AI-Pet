@@ -21,14 +21,18 @@ Security:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
+import math
 import threading
 import time
 from typing import Any
 
 import websockets
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
+
+from core.ai_router import chat
 
 log = logging.getLogger("firefly.pagelens.bridge")
 
@@ -40,6 +44,13 @@ BRIDGE_PORT = 17321
 BRIDGE_KEEPALIVE_INTERVAL = 20  # seconds
 BRIDGE_RECONNECT_BASE = 1  # seconds (for browser client)
 BRIDGE_RECONNECT_MAX = 5  # seconds (for browser client)
+
+_AI_CHAT_SOURCES = frozenset({
+    "explain",
+    "semantic_concept",
+    "concept_card",
+    "follow_up",
+})
 
 # ---------------------------------------------------------------------------
 # Incoming message types (Browser → Desktop)
@@ -58,6 +69,7 @@ _INCOMING_TYPES = frozenset({
     "question_error",
     "view_state",
     "pagelens-desktop-sync-request",
+    "ai_chat_request",
 })
 
 # ---------------------------------------------------------------------------
@@ -113,7 +125,7 @@ class PageLensBridge(QObject):
     action_open_question = Signal(str)
     action_back = Signal()
 
-    def __init__(self, parent: QObject | None = None):
+    def __init__(self, parent: QObject | None = None, *, chat_handler=None):
         super().__init__(parent)
         self._thread: QThread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -125,6 +137,8 @@ class PageLensBridge(QObject):
         self._keepalive_task: asyncio.Task | None = None
         self._reconnect_timer: asyncio.TimerHandle | None = None
         self._pending_actions: list[dict] = []  # queue actions while disconnected
+        self._chat_handler = chat_handler or chat
+        self._ai_chat_tasks: dict[str, asyncio.Task] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -310,14 +324,17 @@ class PageLensBridge(QObject):
         except Exception:
             log.exception("[PageLens Bridge] client error")
         finally:
-            self._connected = False
-            self._active_tab_id = None
-            if self._keepalive_task is not None:
-                self._keepalive_task.cancel()
-                self._keepalive_task = None
-            self._writer = None
-            self.bridge_disconnected.emit(False)
-            log.info("[PageLens Bridge] disconnected")
+            # A superseded connection must not tear down the newer writer or
+            # cause its in-flight RPC results to be treated as disconnected.
+            if websocket is self._writer:
+                self._connected = False
+                self._active_tab_id = None
+                if self._keepalive_task is not None:
+                    self._keepalive_task.cancel()
+                    self._keepalive_task = None
+                self._writer = None
+                self.bridge_disconnected.emit(False)
+                log.info("[PageLens Bridge] disconnected")
 
     def _handle_incoming(self, raw: str) -> None:
         """Parse and dispatch an incoming JSON message."""
@@ -396,11 +413,144 @@ class PageLensBridge(QObject):
             # The real sync happens via browser sending pagelens-mirror messages.
             log.info("[PageLens Bridge] sync-request received, browser will send state")
 
+        elif msg_type == "ai_chat_request":
+            self._schedule_ai_chat(msg)
+
+    def _schedule_ai_chat(self, request: dict) -> None:
+        """Validate and schedule one non-blocking AI Router request."""
+        request_id, source, messages, temperature, error = self._validate_ai_chat_request(
+            request
+        )
+        if error:
+            self._send_ai_chat_error(request_id, error)
+            return
+        if request_id in self._ai_chat_tasks:
+            self._send_ai_chat_error(request_id, "duplicate requestId")
+            return
+        if self._loop is None or not self._loop.is_running():
+            self._send_ai_chat_error(request_id, "Desktop AI bridge is unavailable")
+            return
+
+        connection = self._writer
+        task = asyncio.ensure_future(
+            self._run_ai_chat(
+                request_id,
+                source,
+                messages,
+                temperature,
+                connection,
+            ),
+            loop=self._loop,
+        )
+        self._ai_chat_tasks[request_id] = task
+
+        def _forget(completed: asyncio.Task) -> None:
+            if self._ai_chat_tasks.get(request_id) is completed:
+                self._ai_chat_tasks.pop(request_id, None)
+
+        task.add_done_callback(_forget)
+
+    @staticmethod
+    def _validate_ai_chat_request(request: dict) -> tuple[str, str, list, float, str]:
+        request_id = request.get("requestId")
+        safe_request_id = request_id.strip() if isinstance(request_id, str) else ""
+        if not safe_request_id:
+            return "", "", [], 0.0, "requestId is required"
+        if len(safe_request_id) > 128:
+            return safe_request_id[:128], "", [], 0.0, "requestId is too long"
+
+        source = request.get("source")
+        if not isinstance(source, str) or not source.strip():
+            return safe_request_id, "", [], 0.0, "source is required"
+        source = source.strip()
+        if source not in _AI_CHAT_SOURCES:
+            return safe_request_id, source, [], 0.0, "unsupported source"
+
+        messages = request.get("messages")
+        if not isinstance(messages, list):
+            return safe_request_id, source, [], 0.0, "messages must be a list"
+
+        temperature = request.get("temperature")
+        if (
+            isinstance(temperature, bool)
+            or not isinstance(temperature, (int, float))
+            or not math.isfinite(float(temperature))
+        ):
+            return safe_request_id, source, messages, 0.0, "temperature must be a number"
+        return safe_request_id, source, messages, float(temperature), ""
+
+    async def _run_ai_chat(
+        self,
+        request_id: str,
+        source: str,
+        messages: list,
+        temperature: float,
+        connection,
+    ) -> None:
+        """Run synchronous ``core.ai_router.chat`` outside the WebSocket loop."""
+        try:
+            response = await asyncio.to_thread(
+                self._chat_handler,
+                messages,
+                temperature=temperature,
+            )
+            provider = response.get("provider") if isinstance(response, dict) else None
+            choices = response.get("choices") if isinstance(response, dict) else None
+            choice = choices[0] if isinstance(choices, list) and choices else None
+            message = choice.get("message") if isinstance(choice, dict) else None
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(provider, str) or not provider:
+                raise ValueError("AI Router response has no provider")
+            if not isinstance(content, str):
+                raise ValueError("AI Router response has no content")
+        except Exception as exc:  # isolate provider and response failures
+            if connection is self._writer and connection is not None:
+                self._send_ai_chat_error(request_id, str(exc)[:500])
+            return
+
+        # A request that finishes after its WebSocket disconnected must never
+        # leak into a later connection, even if that connection reuses a tab.
+        if connection is not self._writer or connection is None:
+            log.info("[PageLens Bridge] discarded stale AI response: %s", request_id)
+            return
+        self._send_json({
+            "type": "ai_chat_response",
+            "requestId": request_id,
+            "provider": provider,
+            "content": content,
+        })
+        log.info(
+            "[PageLens Bridge] AI response: request=%s source=%s provider=%s",
+            request_id,
+            source,
+            provider,
+        )
+
+    def _send_ai_chat_error(self, request_id: str, error: str) -> None:
+        self._send_json({
+            "type": "ai_chat_error",
+            "requestId": request_id,
+            "error": error or "AI Router request failed",
+        })
+
     def _send_json(self, msg: dict) -> None:
         """Send JSON to the browser client. Thread-safe."""
         if self._writer is not None:
             try:
-                self._writer.send(json.dumps(msg, ensure_ascii=False))
+                result = self._writer.send(json.dumps(msg, ensure_ascii=False))
+                if inspect.isawaitable(result):
+                    if self._loop is None or not self._loop.is_running():
+                        result.close()
+                        raise RuntimeError("WebSocket event loop is not running")
+                    future = asyncio.run_coroutine_threadsafe(result, self._loop)
+
+                    def _report_send_failure(completed) -> None:
+                        try:
+                            completed.result()
+                        except Exception:
+                            log.exception("[PageLens Bridge] async send error")
+
+                    future.add_done_callback(_report_send_failure)
             except Exception:
                 log.exception("[PageLens Bridge] send error")
         elif self._connected:

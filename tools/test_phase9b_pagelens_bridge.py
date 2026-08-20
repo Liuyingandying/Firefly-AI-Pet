@@ -27,6 +27,7 @@ pagelens_bridge_module.BRIDGE_PORT = 0
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QEventLoop, QTimer, Qt
+from PySide6.QtTest import QTest
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +470,30 @@ def test_panel_question_signal() -> None:
     panel.deleteLater()
 
 
+def test_panel_question_real_mouse_click() -> None:
+    """A real press/release sequence must reach the existing open-question signal."""
+    app = _app()
+    from ui.pagelens_panel import PageLensPanel
+
+    panel = PageLensPanel()
+    received = []
+    panel.question_requested.connect(received.append)
+    panel.set_concept({
+        "term": "测试", "english": "Test",
+        "summary": "摘要", "context": "上下文",
+        "related": [],
+        "questions": ["为什么这里提到它？"],
+    })
+    panel.show_panel()
+    app.processEvents()
+
+    QTest.mouseClick(panel.question_widgets[0], Qt.LeftButton)
+    app.processEvents()
+
+    assert received == ["为什么这里提到它？"]
+    panel.deleteLater()
+
+
 def test_panel_concept_signal() -> None:
     app = _app()
     from ui.pagelens_panel import PageLensPanel
@@ -615,6 +640,7 @@ def main() -> None:
         test_invalid_json_ignored,
         test_panel_related_signal,
         test_panel_question_signal,
+        test_panel_question_real_mouse_click,
         test_panel_concept_signal,
         test_panel_show_question_view,
         test_panel_append_question_delta,

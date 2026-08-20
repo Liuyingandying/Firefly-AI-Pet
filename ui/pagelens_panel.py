@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import sys
 
-from PySide6.QtCore import Qt, QRectF, QPoint, Signal
+from PySide6.QtCore import Qt, QRect, QRectF, QPoint, QSize, QTimer, Signal
 from PySide6.QtGui import QPainter, QPainterPath, QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QWidget,
@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QFrame,
+    QLayout,
     QScrollArea,
     QApplication,
     QSizePolicy,
@@ -60,6 +61,85 @@ def _pl_font_px(value: int | float) -> int:
     return max(9, _pl_scaled(value))
 
 
+class _FlowLayout(QLayout):
+    """Compact wrapping layout used by PageLens concept chips."""
+
+    def __init__(self, parent=None, *, horizontal_spacing: int = 5, vertical_spacing: int = 5):
+        super().__init__(parent)
+        self._items = []
+        self._horizontal_spacing = horizontal_spacing
+        self._vertical_spacing = vertical_spacing
+
+    def addItem(self, item) -> None:
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def expandingDirections(self):
+        return Qt.Orientations()
+
+    def heightForWidth(self, width: int) -> int:
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect: QRect) -> None:
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self) -> QSize:
+        width = self.geometry().width()
+        if width <= 0:
+            width = _pl_scaled_px(theme.PAGELENS_WIDTH - 32)
+        return QSize(width, self.heightForWidth(width))
+
+    def minimumSize(self) -> QSize:
+        size = QSize()
+        for item in self._items:
+            if item.isEmpty():
+                continue
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        return size + QSize(
+            margins.left() + margins.right(),
+            margins.top() + margins.bottom(),
+        )
+
+    def _do_layout(self, rect: QRect, *, test_only: bool) -> int:
+        margins = self.contentsMargins()
+        effective = rect.adjusted(
+            margins.left(), margins.top(), -margins.right(), -margins.bottom()
+        )
+        x = effective.x()
+        y = effective.y()
+        line_height = 0
+
+        for item in self._items:
+            if item.isEmpty():
+                continue
+            size = item.sizeHint()
+            next_x = x + size.width() + self._horizontal_spacing
+            if line_height > 0 and next_x - self._horizontal_spacing > effective.right() + 1:
+                x = effective.x()
+                y += line_height + self._vertical_spacing
+                next_x = x + size.width() + self._horizontal_spacing
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), size))
+            x = next_x
+            line_height = max(line_height, size.height())
+
+        return y + line_height - rect.y() + margins.bottom()
+
+
 class PageLensPanel(QWidget):
     """A glass-surface persistent reading panel for PageLens concept cards.
 
@@ -81,7 +161,10 @@ class PageLensPanel(QWidget):
 
         w = _pl_scaled_px(theme.PAGELENS_WIDTH)
         h = _pl_scaled_px(theme.PAGELENS_HEIGHT)
-        self.setFixedSize(w, h)
+        self._default_height = h
+        self.setFixedWidth(w)
+        self.resize(w, h)
+        self._apply_height_limits()
 
         # State (initialized before any method that reads them)
         self._visible = False
@@ -107,7 +190,7 @@ class PageLensPanel(QWidget):
         self._header = self._build_header()
         inner.addWidget(self._header)
 
-        # Top concepts area (compact, scrollable)
+        # Compact context bar: concepts support wrapping without taking over the panel.
         self._top_concepts = self._build_top_concepts()
         inner.addWidget(self._top_concepts)
 
@@ -120,6 +203,8 @@ class PageLensPanel(QWidget):
         # Scroll area for concept card / question view
         self._scroll = QScrollArea(self._glass)
         self._scroll.setWidgetResizable(True)
+        self._scroll.setMinimumHeight(0)
+        self._scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._scroll.setStyleSheet(
@@ -214,12 +299,22 @@ class PageLensPanel(QWidget):
     def _build_top_concepts(self) -> QFrame:
         frame = QFrame(self._glass)
         frame.setObjectName("pageLensTopConcepts")
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(
-            _pl_scaled_px(16), _pl_scaled_px(6),
-            _pl_scaled_px(16), _pl_scaled_px(6),
+        frame.setStyleSheet(
+            f"QFrame#pageLensTopConcepts {{ "
+            f"background-color: {theme.css_color(theme.GLASS_BACKGROUND_SELECTED)}; "
+            f"border-top: 1px solid {theme.css_color(theme.GLASS_BORDER)}; "
+            f"border-bottom: 1px solid {theme.css_color(theme.GLASS_BORDER)}; "
+            "}"
         )
-        layout.setSpacing(_pl_scaled_px(4))
+        context_height = max(70, min(_pl_scaled_px(82), 90))
+        frame.setFixedHeight(context_height)
+
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(
+            _pl_scaled_px(14), _pl_scaled_px(8),
+            _pl_scaled_px(10), _pl_scaled_px(8),
+        )
+        layout.setSpacing(_pl_scaled_px(8))
 
         # Title
         self._top_concepts_header = QLabel("本页概念", frame)
@@ -229,28 +324,101 @@ class PageLensPanel(QWidget):
             f"font-size: {_pl_font_px(8)}pt; "
             f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
         )
-        layout.addWidget(self._top_concepts_header)
+        self._top_concepts_header.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self._top_concepts_header.setFixedWidth(_pl_scaled_px(56))
+        layout.addWidget(self._top_concepts_header, 0, Qt.AlignTop)
 
-        # Chips container
-        self._top_concepts_layout = QHBoxLayout()
-        self._top_concepts_layout.setSpacing(_pl_scaled_px(5))
-        layout.addLayout(self._top_concepts_layout)
+        # Chips viewport: wrapping is preserved, overflow scrolls inside the bar.
+        self._top_concepts_scroll = QScrollArea(frame)
+        self._top_concepts_scroll.setWidgetResizable(True)
+        self._top_concepts_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._top_concepts_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._top_concepts_scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            f"QScrollBar:vertical {{ background: transparent; width: {_pl_scaled_px(4)}px; }}"
+            f"QScrollBar::handle:vertical {{ background: {theme.css_color(theme.GLASS_BORDER)}; border-radius: 2px; min-height: {_pl_scaled_px(14)}px; }}"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
+        )
+        self._top_concepts_content = QWidget(self._top_concepts_scroll)
+        self._top_concepts_content.setStyleSheet("background: transparent;")
+        self._top_concepts_layout = _FlowLayout(
+            self._top_concepts_content,
+            horizontal_spacing=_pl_scaled_px(5),
+            vertical_spacing=_pl_scaled_px(5),
+        )
+        self._top_concepts_layout.setContentsMargins(0, 0, 0, 0)
+        self._top_concept_widgets: list[QWidget] = []
+        self._top_concepts_scroll.setWidget(self._top_concepts_content)
+        layout.addWidget(self._top_concepts_scroll, 1)
 
-        frame.setFixedHeight(_pl_scaled_px(52))
+        frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         return frame
 
     def set_top_concepts(self, items: list[str]) -> None:
         """Render top concept chips. Clicking sends concept_requested signal."""
         # Clear old chips
-        for w in self._top_concepts_layout.children():
-            if isinstance(w, QWidget) and w != self._top_concepts_layout:
-                w.deleteLater()
+        for widget in self._top_concept_widgets:
+            widget.deleteLater()
+        self._top_concept_widgets.clear()
+        while self._top_concepts_layout.count():
+            self._top_concepts_layout.takeAt(0)
 
         # Show at most 8 concepts
         for text in (items or [])[:8]:
             chip = _TopConceptChip(text, self)
             chip.clicked.connect(lambda t=text: self.concept_requested.emit(t))
             self._top_concepts_layout.addWidget(chip)
+            self._top_concept_widgets.append(chip)
+        self._top_concepts_content.updateGeometry()
+        self._top_concepts_scroll.verticalScrollBar().setValue(0)
+        self._top_concepts.updateGeometry()
+        self._request_height_fit()
+
+    def _screen_height_limit(self) -> int:
+        screen = QApplication.screenAt(self.frameGeometry().center()) or QApplication.primaryScreen()
+        if screen is None:
+            return self._default_height
+        return max(_pl_scaled_px(320), int(screen.availableGeometry().height() * 0.85))
+
+    def _apply_height_limits(self) -> None:
+        maximum = self._screen_height_limit()
+        self.setMinimumHeight(min(self._default_height, maximum))
+        self.setMaximumHeight(maximum)
+
+    def _request_height_fit(self) -> None:
+        QTimer.singleShot(0, self._fit_height_to_content)
+
+    def _fit_height_to_content(self) -> None:
+        if not hasattr(self, "_content"):
+            return
+        self._apply_height_limits()
+        self._content.layout().activate()
+        self._top_concepts.layout().activate()
+
+        root_margins = self.layout().contentsMargins()
+        natural_height = (
+            root_margins.top()
+            + root_margins.bottom()
+            + self._header.sizeHint().height()
+            + self._top_concepts.sizeHint().height()
+            + 1
+            + self._content.sizeHint().height()
+        )
+        target_height = min(
+            max(self.minimumHeight(), natural_height),
+            self.maximumHeight(),
+        )
+        if target_height == self.height():
+            return
+
+        old_center_y = self.frameGeometry().center().y()
+        self.resize(self.width(), target_height)
+        screen = QApplication.screenAt(self.frameGeometry().center()) or QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            target_y = old_center_y - target_height // 2
+            target_y = max(available.top(), min(target_y, available.bottom() - target_height + 1))
+            self.move(self.x(), target_y)
 
     # ------------------------------------------------------------------
     # Public API
@@ -258,15 +426,19 @@ class PageLensPanel(QWidget):
 
     def set_concept(self, card: dict) -> None:
         self._content.set_concept(card)
+        self._request_height_fit()
 
     def show_loading(self, term: str) -> None:
         self._content.show_loading(term)
+        self._request_height_fit()
 
     def show_error(self, message: str) -> None:
         self._content.show_error(message)
+        self._request_height_fit()
 
     def show_panel(self) -> None:
         self._visible = True
+        self._request_height_fit()
         self.show()
         self.raise_()
         log.info("[PageLensPanel] show")
@@ -292,15 +464,19 @@ class PageLensPanel(QWidget):
 
     def show_question_loading(self, parent_term: str, question: str) -> None:
         self._content.show_question_loading(parent_term, question)
+        self._request_height_fit()
 
     def append_question_delta(self, delta: str) -> None:
         self._content.append_question_delta(delta)
+        self._request_height_fit()
 
     def finish_question(self) -> None:
         self._content.finish_question()
+        self._request_height_fit()
 
     def show_question_error(self, message: str) -> None:
         self._content.show_question_error(message)
+        self._request_height_fit()
 
     # -- Read-only introspection (needed by tests and bridge wiring) --------
 
@@ -360,10 +536,17 @@ class _TopConceptChip(QFrame):
     def __init__(self, text: str, parent: QWidget | None = None):
         super().__init__(parent)
         self._text = text
-        self.setFixedSize(_pl_scaled_px(56), _pl_scaled_px(22))
+        self.setFixedHeight(_pl_scaled_px(22))
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setToolTip(text)
         self.setCursor(Qt.PointingHandCursor)
         self._hovered = False
         self.setObjectName("pageLensTopConceptChip")
+
+    def sizeHint(self) -> QSize:
+        text_width = QFontMetrics(self.font()).horizontalAdvance(self._text)
+        width = max(_pl_scaled_px(48), min(text_width + _pl_scaled_px(20), _pl_scaled_px(180)))
+        return QSize(width, _pl_scaled_px(22))
 
     def enterEvent(self, event) -> None:
         self._hovered = True
@@ -397,7 +580,11 @@ class _TopConceptChip(QFrame):
 
         painter.drawPath(path)
         painter.setPen(theme.qcolor(theme.TEXT_SECONDARY))
-        painter.drawText(self.rect(), Qt.AlignCenter, self._text)
+        text_rect = self.rect().adjusted(_pl_scaled_px(8), 0, -_pl_scaled_px(8), 0)
+        text = QFontMetrics(painter.font()).elidedText(
+            self._text, Qt.ElideRight, text_rect.width()
+        )
+        painter.drawText(text_rect, Qt.AlignCenter, text)
         painter.end()
 
 
@@ -414,46 +601,67 @@ class _ScrollContent(QWidget):
         self._parent_panel = parent_panel
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(
-            _pl_scaled_px(20), _pl_scaled_px(12),
-            _pl_scaled_px(20), _pl_scaled_px(18),
+            _pl_scaled_px(16), _pl_scaled_px(14),
+            _pl_scaled_px(16), _pl_scaled_px(18),
         )
-        self._layout.setSpacing(_pl_scaled_px(16))
+        self._layout.setSpacing(_pl_scaled_px(12))
+        self._layout.setAlignment(Qt.AlignTop)
+
+        # --- Title card: back action, bilingual title, divider ---
+        self._title_card = QFrame(self)
+        self._title_card.setObjectName("pageLensConceptTitleCard")
+        self._title_card.setStyleSheet(
+            f"QFrame#pageLensConceptTitleCard {{ "
+            f"background-color: {theme.css_color(theme.GLASS_BACKGROUND_HOVER)}; "
+            f"border: 1px solid {theme.css_color(theme.GLASS_BORDER)}; "
+            f"border-radius: {_pl_scaled_px(theme.RADIUS_ITEM)}px; "
+            "}"
+        )
+        title_layout = QVBoxLayout(self._title_card)
+        title_layout.setContentsMargins(
+            _pl_scaled_px(14), _pl_scaled_px(9),
+            _pl_scaled_px(14), _pl_scaled_px(12),
+        )
+        title_layout.setSpacing(_pl_scaled_px(5))
 
         # --- Back button (hidden by default) ---
-        self._back_btn = _BackButton(self)
+        self._back_btn = _BackButton(self._title_card)
         self._back_btn.hidden = True
         self._back_btn.clicked.connect(lambda: None)  # placeholder
-        self._layout.addWidget(self._back_btn)
+        title_layout.addWidget(self._back_btn)
 
         # --- Term label ---
-        self._term_label = QLabel(self)
+        self._term_label = QLabel(self._title_card)
         self._term_label.setStyleSheet(
             f"color: {theme.css_color(theme.TEXT_PRIMARY)}; "
             f"font-family: '{theme.FONT_FAMILY}'; "
-            f"font-size: {_pl_font_px(18)}pt; "
+            f"font-size: {_pl_font_px(16)}pt; "
             f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
         )
-        self._term_label.setWordWrap(False)
-        self._term_label.setMinimumHeight(_pl_scaled_px(30))
-        self._layout.addWidget(self._term_label)
+        self._term_label.setWordWrap(True)
+        self._term_label.setMinimumHeight(_pl_scaled_px(26))
+        self._term_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        title_layout.addWidget(self._term_label)
 
         # --- English subtitle ---
-        self._english_label = QLabel(self)
+        self._english_label = QLabel(self._title_card)
         self._english_label.setStyleSheet(
             f"color: {theme.css_color(theme.CYAN_ACCENT)}; "
             f"font-family: '{theme.FONT_FAMILY}'; "
-            f"font-size: {_pl_font_px(13)}pt; "
+            f"font-size: {_pl_font_px(11)}pt; "
             f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
         )
-        self._english_label.setWordWrap(False)
-        self._english_label.setMinimumHeight(_pl_scaled_px(22))
-        self._layout.addWidget(self._english_label)
+        self._english_label.setWordWrap(True)
+        self._english_label.setMinimumHeight(_pl_scaled_px(18))
+        self._english_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        title_layout.addWidget(self._english_label)
 
         # --- Separator ---
-        sep = QFrame(self)
+        sep = QFrame(self._title_card)
         sep.setFixedHeight(1)
         sep.setStyleSheet(f"background: {theme.css_color(theme.GLASS_BORDER)};")
-        self._layout.addWidget(sep)
+        title_layout.addWidget(sep)
+        self._layout.addWidget(self._title_card)
 
         # --- Summary ---
         self._summary_label = QLabel(self)
@@ -461,11 +669,15 @@ class _ScrollContent(QWidget):
             f"color: {theme.css_color(theme.TEXT_PRIMARY)}; "
             f"font-family: '{theme.FONT_FAMILY}'; "
             f"font-size: {_pl_font_px(10.5)}pt; "
-            f"line-height: 160%;"
+            f"line-height: 170%;"
+        )
+        self._summary_label.setContentsMargins(
+            _pl_scaled_px(4), _pl_scaled_px(8),
+            _pl_scaled_px(4), _pl_scaled_px(8),
         )
         self._summary_label.setWordWrap(True)
         self._summary_label.setSizePolicy(
-            QSizePolicy.Fixed, QSizePolicy.Expanding,
+            QSizePolicy.Expanding, QSizePolicy.Preferred,
         )
         self._layout.addWidget(self._summary_label)
 
@@ -484,6 +696,9 @@ class _ScrollContent(QWidget):
             f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
         )
         self._context_header.setText("为什么这里提到它")
+        self._context_header.setContentsMargins(
+            _pl_scaled_px(2), _pl_scaled_px(4), 0, 0,
+        )
         self._layout.addWidget(self._context_header)
 
         self._context_label = QLabel(self)
@@ -491,11 +706,15 @@ class _ScrollContent(QWidget):
             f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
             f"font-family: '{theme.FONT_FAMILY}'; "
             f"font-size: {_pl_font_px(10)}pt; "
-            f"line-height: 160%;"
+            f"line-height: 170%;"
+        )
+        self._context_label.setContentsMargins(
+            _pl_scaled_px(2), _pl_scaled_px(4),
+            _pl_scaled_px(2), _pl_scaled_px(8),
         )
         self._context_label.setWordWrap(True)
         self._context_label.setSizePolicy(
-            QSizePolicy.Fixed, QSizePolicy.Expanding,
+            QSizePolicy.Expanding, QSizePolicy.Preferred,
         )
         self._layout.addWidget(self._context_label)
 
@@ -514,10 +733,15 @@ class _ScrollContent(QWidget):
             f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
         )
         self._related_header.setText("相关概念")
+        self._related_header.setContentsMargins(
+            _pl_scaled_px(2), _pl_scaled_px(4), 0, 0,
+        )
         self._layout.addWidget(self._related_header)
 
-        self._related_layout = QHBoxLayout()
-        self._related_layout.setSpacing(_pl_scaled_px(7))
+        self._related_layout = _FlowLayout(
+            horizontal_spacing=_pl_scaled_px(7),
+            vertical_spacing=_pl_scaled_px(7),
+        )
         self._related_widgets: list[QWidget] = []
         self._layout.addLayout(self._related_layout)
 
@@ -536,6 +760,9 @@ class _ScrollContent(QWidget):
             f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
         )
         self._questions_header.setText("继续探索")
+        self._questions_header.setContentsMargins(
+            _pl_scaled_px(2), _pl_scaled_px(4), 0, 0,
+        )
         self._layout.addWidget(self._questions_header)
 
         self._questions_layout = QVBoxLayout()
@@ -543,7 +770,16 @@ class _ScrollContent(QWidget):
         self._question_widgets: list[QWidget] = []
         self._layout.addLayout(self._questions_layout)
 
-        self._layout.addStretch(1)
+        self._concept_section_widgets = (
+            self._summary_label,
+            sep2,
+            self._context_header,
+            self._context_label,
+            sep3,
+            self._related_header,
+            sep4,
+            self._questions_header,
+        )
 
         # --- Question view elements (hidden by default) ---
         self._question_parent_label = QLabel(self)
@@ -581,11 +817,11 @@ class _ScrollContent(QWidget):
             f"color: {theme.css_color(theme.TEXT_PRIMARY)}; "
             f"font-family: '{theme.FONT_FAMILY}'; "
             f"font-size: {_pl_font_px(10.5)}pt; "
-            f"line-height: 160%;"
+            f"line-height: 170%;"
         )
         self._question_answer_label.setWordWrap(True)
         self._question_answer_label.setSizePolicy(
-            QSizePolicy.Fixed, QSizePolicy.Expanding,
+            QSizePolicy.Expanding, QSizePolicy.Preferred,
         )
         self._question_answer_label.setVisible(False)
         self._layout.addWidget(self._question_answer_label)
@@ -617,6 +853,8 @@ class _ScrollContent(QWidget):
         for w in self._related_widgets:
             w.deleteLater()
         self._related_widgets.clear()
+        while self._related_layout.count():
+            self._related_layout.takeAt(0)
         for text in card.get("related", []):
             chip = _RelatedChip(text, self)
             chip.clicked.connect(lambda t=text: self._emit_related(t))
@@ -636,7 +874,7 @@ class _ScrollContent(QWidget):
         self._question_widgets.clear()
         for text in card.get("questions", []):
             qitem = _QuestionItem(text, self)
-            qitem.clicked.connect(lambda t=text: self._emit_question(t))
+            qitem.clicked.connect(self._emit_question)
             self._questions_layout.addWidget(qitem)
             self._question_widgets.append(qitem)
 
@@ -650,6 +888,8 @@ class _ScrollContent(QWidget):
         for w in self._related_widgets:
             w.deleteLater()
         self._related_widgets.clear()
+        while self._related_layout.count():
+            self._related_layout.takeAt(0)
         for w in self._question_widgets:
             w.deleteLater()
         self._question_widgets.clear()
@@ -664,6 +904,8 @@ class _ScrollContent(QWidget):
         for w in self._related_widgets:
             w.deleteLater()
         self._related_widgets.clear()
+        while self._related_layout.count():
+            self._related_layout.takeAt(0)
         for w in self._question_widgets:
             w.deleteLater()
         self._question_widgets.clear()
@@ -701,16 +943,10 @@ class _ScrollContent(QWidget):
         self._back_btn.hidden = False
         self._term_label.setVisible(True)
         self._english_label.setVisible(True)
-        # Show all concept sections
-        for child in self._layout.children():
-            if isinstance(child, QFrame) and child.height() == 1:
-                child.setVisible(True)
-            elif isinstance(child, QLabel) and child not in (
-                self._question_parent_label, self._question_title_label,
-                self._question_status_label, self._question_answer_label,
-                self._idle_label,
-            ):
-                child.setVisible(True)
+        for widget in self._concept_section_widgets:
+            widget.setVisible(True)
+        for widget in (*self._related_widgets, *self._question_widgets):
+            widget.setVisible(True)
         # Hide question view
         self._question_parent_label.setVisible(False)
         self._question_title_label.setVisible(False)
@@ -728,15 +964,12 @@ class _ScrollContent(QWidget):
 
     def _hide_concept_sections(self) -> None:
         """Hide all concept card sections (summary, context, related, questions)."""
-        for child in self._layout.children():
-            if isinstance(child, QFrame) and child.height() == 1:
-                child.setVisible(False)
-            elif isinstance(child, QLabel) and child in (
-                self._term_label, self._english_label,
-                self._summary_label, self._context_header, self._context_label,
-                self._related_header, self._questions_header,
-            ):
-                child.setVisible(False)
+        self._term_label.setVisible(False)
+        self._english_label.setVisible(False)
+        for widget in self._concept_section_widgets:
+            widget.setVisible(False)
+        for widget in (*self._related_widgets, *self._question_widgets):
+            widget.setVisible(False)
 
     def _emit_related(self, text: str) -> None:
         log.info("[PageLensPanel] related: %s", text)
@@ -812,11 +1045,18 @@ class _RelatedChip(QFrame):
     def __init__(self, text: str, parent: QWidget | None = None):
         super().__init__(parent)
         self._text = text
-        self.setFixedSize(_pl_scaled_px(64), _pl_scaled_px(26))
+        self.setFixedHeight(_pl_scaled_px(26))
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setToolTip(text)
         self.setCursor(Qt.PointingHandCursor)
         self._hovered = False
         self._selected = False
         self.setObjectName("pageLensRelatedChip")
+
+    def sizeHint(self) -> QSize:
+        text_width = QFontMetrics(self.font()).horizontalAdvance(self._text)
+        width = max(_pl_scaled_px(56), min(text_width + _pl_scaled_px(22), _pl_scaled_px(200)))
+        return QSize(width, _pl_scaled_px(26))
 
     def enterEvent(self, event) -> None:
         self._hovered = True
@@ -853,7 +1093,11 @@ class _RelatedChip(QFrame):
 
         painter.drawPath(path)
         painter.setPen(theme.qcolor(theme.TEXT_PRIMARY if self._selected else theme.TEXT_SECONDARY))
-        painter.drawText(self.rect(), Qt.AlignCenter, self._text)
+        text_rect = self.rect().adjusted(_pl_scaled_px(8), 0, -_pl_scaled_px(8), 0)
+        text = QFontMetrics(painter.font()).elidedText(
+            self._text, Qt.ElideRight, text_rect.width()
+        )
+        painter.drawText(text_rect, Qt.AlignCenter, text)
         painter.end()
 
 
@@ -869,10 +1113,27 @@ class _QuestionItem(QFrame):
     def __init__(self, text: str, parent: QWidget | None = None):
         super().__init__(parent)
         self._text = text
-        self.setFixedHeight(_pl_scaled_px(32))
+        policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+        self.setMinimumHeight(_pl_scaled_px(32))
         self.setCursor(Qt.PointingHandCursor)
         self._hovered = False
         self.setObjectName("pageLensQuestionItem")
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        text_rect = QRect(0, 0, max(1, width - _pl_scaled_px(16)), 10000)
+        bounds = QFontMetrics(self.font()).boundingRect(
+            text_rect, Qt.TextWordWrap, "> " + self._text
+        )
+        return max(_pl_scaled_px(32), bounds.height() + _pl_scaled_px(12))
+
+    def sizeHint(self) -> QSize:
+        width = _pl_scaled_px(theme.PAGELENS_WIDTH - 40)
+        return QSize(width, self.heightForWidth(width))
 
     def enterEvent(self, event) -> None:
         self._hovered = True
@@ -883,6 +1144,14 @@ class _QuestionItem(QFrame):
         self._hovered = False
         self.update()
         super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            # Accept the press so a real click inside QScrollArea keeps this
+            # widget as the mouse receiver through release.
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
@@ -900,7 +1169,11 @@ class _QuestionItem(QFrame):
             painter.fillPath(path, theme.qcolor(theme.GLASS_BACKGROUND_HOVER))
 
         painter.setPen(theme.qcolor(theme.TEXT_PRIMARY if self._hovered else theme.TEXT_SECONDARY))
-        painter.drawText(8, self.height() // 2 + 5, "> " + self._text)
+        painter.drawText(
+            self.rect().adjusted(_pl_scaled_px(8), _pl_scaled_px(4), -_pl_scaled_px(8), -_pl_scaled_px(4)),
+            Qt.AlignVCenter | Qt.TextWordWrap,
+            "> " + self._text,
+        )
         painter.end()
 
 
