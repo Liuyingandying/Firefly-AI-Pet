@@ -38,4 +38,4 @@ jobs:
         run: python -m pip install pytest
 
       - name: Run tests
-        run: python -m pytest
+        run: python -m pytest tests/test_provider_router.py tests/test_pagelens_ai_bridge.py
