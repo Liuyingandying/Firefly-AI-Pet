@@ -1,33 +1,117 @@
-# Firefly AI Companion — Core v1 + Phase 7A
+# Firefly AI Pet
 
-A frameless, transparent, always-on-top Windows desktop companion built with
-Python 3 and PySide6. A pure-Python state broker merges per-agent source
-states (Claude, Codex, manual) into one display state that drives a looping
-GIF animation. A short click now opens an interactive Companion panel for
-workspace selection, launching Codex / Claude / ChatGPT, and local Quick Ask.
+> A desktop AI companion powered by multi-agent orchestration.
 
-## Companion panel (Phase 7A)
+Firefly AI Pet is a **desktop AI companion framework** that brings agent workflows, browser context, and LLM provider routing into one interactive desktop experience. It began as the Codex Firefly Desktop Pet prototype and has evolved into an AI Companion Platform for coordinating agents, understanding web content, and supporting automated workflows.
 
-- **Short left-click:** show/hide the Companion panel.
-- **Left-drag:** move Firefly without opening the panel.
-- Pick a workspace and keep up to five recent workspaces.
-- Open **Codex** or **Claude Code** in the selected workspace.
-- Open **ChatGPT** through the system URL handler.
-- Quick Ask with Codex or Claude without adding any API key.
-- Optional in-memory chat context makes successive Quick Asks conversational.
+Firefly AI Pet explores how AI agents can evolve from task-oriented tools into persistent digital companions.
 
-Quick Ask is intentionally conservative: Codex runs with a read-only sandbox;
-Claude starts in plan permission mode. Use the full Codex/Claude buttons when
-you want an agent to edit a project. See `README_PHASE7A.md` for the Windows
-acceptance checklist and implementation notes.
+Firefly remains the project's visual identity and personality: a friendly presence on the desktop that makes AI activity visible and approachable, while the framework beneath it handles substantially more than a traditional desktop pet.
 
-## Requirements
+## Project Evolution
+
+```text
+Codex Firefly Pet (Prototype)
+              ↓
+       Firefly AI Pet
+              ↓
+Multi-Agent Desktop Companion
+```
+
+The project started as a desktop companion that visualized Codex status. It has since grown into a platform integrating AI agents, browser understanding, provider-independent model access, and automated workflows.
+
+## Features
+
+### AI Agent Integration
+
+- Codex agent integration
+- Claude Code status integration
+- Multi-provider LLM routing
+- DeepSeek API provider
+- TJU Qwen API provider
+- Extensible provider architecture
+
+### Browser Intelligence
+
+PageLens is the browser context-awareness module. It provides:
+
+- Webpage context extraction
+- Concept discovery
+- AI-assisted explanation
+- Follow-up question exploration
+
+PageLens collects and structures browser context, then sends it through the AI routing layer. It is not an AI model itself.
+
+### Desktop Companion
+
+- Firefly-themed UI and project personality
+- Frameless, always-on-top desktop overlay
+- Agent status visualization
+- Interactive AI companion panel
+
+### Workflow System
+
+- Task orchestration
+- Session management
+- Workspace management
+
+## Architecture Overview
+
+```text
+Firefly Desktop Companion
+          |
+      Agent Router
+          |
+          +-- Agent Integration
+          |   +-- Codex
+          |   `-- Claude Code status
+          |
+          +-- LLM Providers
+          |   +-- DeepSeek API
+          |   +-- TJU Qwen API
+          |   `-- Extensible providers
+          |
+          `-- PageLens Context Layer
+              `-- Webpage context -> concepts -> questions
+```
+
+At runtime, Firefly connects the desktop interface to three distinct layers: agent integrations, configured LLM providers, and PageLens browser context. Claude Code currently contributes lifecycle and status information; this does not imply that the Claude API is configured as an LLM provider.
+
+## Supported Providers
+
+| Integration | Purpose |
+|---|---|
+| Codex | Coding agent integration |
+| Claude Code | Agent status integration |
+| DeepSeek API | LLM provider |
+| TJU Qwen API | Knowledge/explanation provider |
+| Others | Extensible provider architecture |
+
+Provider availability depends on the local environment and configuration. Credentials and private runtime configuration are intentionally kept outside version control.
+
+## Demo Screenshots
+
+Demo screenshots will be added under [`docs/screenshots/`](docs/screenshots/).
+
+Recommended structure:
+
+```text
+docs/
+`-- screenshots/
+    +-- desktop-companion.png
+    +-- pagelens-browser-context.png
+    `-- workflow-session.png
+```
+
+## Getting Started
+
+### Requirements
 
 - Windows
-- Python 3 (tested on 3.13.9)
-- PySide6 (installed into the project `.venv`)
+- Python 3 (tested on Python 3.13.9)
+- PySide6 and the dependencies in `requirements.txt`
 
-## Setup
+### Setup
 
 ```powershell
 cd E:\Firefly_AI_Pet
@@ -35,155 +119,73 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-## Run
+### Run
 
 ```powershell
 .\start_pet.ps1
 ```
 
-The pet appears at the bottom-right of the primary monitor. It is
-frameless, transparent, always on top, and can be dragged with the left
-mouse button. Short-click it to open the Companion panel.
+Firefly appears as a transparent, always-on-top companion near the bottom-right of the primary monitor. Drag it to reposition the overlay or click it to open the companion interface.
 
-## Stop
+### Stop
 
 ```powershell
 .\stop_pet.ps1
 ```
 
-## Right-click menu
+## Companion Interaction
 
-| Item            | Action                              |
-|-----------------|-------------------------------------|
-| Open Companion Panel | Show/hide the AI launcher and Quick Ask UI |
-| Open Codex / Claude / ChatGPT | Launch the selected AI entry point |
-| Pause / Resume  | Freeze / resume the current animation |
-| Reset position  | Move back to bottom-right of screen |
-| Quit            | Exit the pet                        |
+| Interaction | Action |
+|---|---|
+| Short left-click | Show or hide the companion panel |
+| Left-drag | Move Firefly without opening the panel |
+| Workspace selection | Select and reopen recent workspaces |
+| Agent launch | Open supported agent entry points in the selected workspace |
+| Quick Ask | Ask a configured agent without leaving the desktop |
+| Right-click menu | Pause, resume, reset position, or quit |
 
-## Simulating state changes
+Quick Ask uses conservative agent modes for lightweight questions. Use the full agent workflow when a task needs to modify a project.
 
-```powershell
-# manual override (writes runtime/sources/manual.json, effective ~10 s)
-.\.venv\Scripts\python.exe tools\simulate_event.py working
+## Agent Status Visualization
 
-# per-agent
-.\.venv\Scripts\python.exe tools\simulate_event.py working --agent claude
-.\.venv\Scripts\python.exe tools\simulate_event.py waiting --agent codex
-.\.venv\Scripts\python.exe tools\simulate_event.py error --agent claude --source hook --silent
-```
+Firefly resolves status updates from supported agents into one visible desktop state.
 
-## Claude Code Hooks
+| State | Companion behavior |
+|---|---|
+| `idle` | Waiting for activity |
+| `thinking` | Reviewing or reasoning |
+| `working` | Executing an active task |
+| `waiting` | Waiting for user input or permission |
+| `success` | Task completed |
+| `error` | Task failed |
+| `sleeping` | Session inactive |
 
-Hooks are configured in the user-global `~/.claude/settings.json`, so the
-pet responds to Claude Code in every project and directory. They observe
-Claude Code lifecycle events and write the matching pet state. They never
-block Claude and never change its permission decisions.
+Each agent writes its own runtime source state. The state broker combines those sources by priority and timestamp, ignores incomplete state files safely, and expires transient states to keep the desktop indicator accurate.
 
-| Event                | State      | Animation          |
-|----------------------|------------|--------------------|
-| `SessionStart`       | `idle`     | `idle.gif`         |
-| `UserPromptSubmit`   | `thinking` | `review.gif`       |
-| `PreToolUse`         | `working`  | `running.gif`      |
-| `PermissionRequest`  | `waiting`  | `waiting.gif`      |
-| `PostToolUseFailure` | `error`    | `failed.gif`       |
-| `StopFailure`        | `error`    | `failed.gif`       |
-| `Stop`               | `success`  | `waving.gif`       |
-| `SessionEnd`         | `sleeping` | `idle.gif` (frozen) |
+## Evolution History
 
-`PreToolUse` is limited by `matcher: Edit|Write|Bash|NotebookEdit`, so
-read-only tools (`Read`, `Glob`, `Grep`) do not trigger `working`.
+### v0.1 prototype
 
-Hook commands use absolute forward-slash paths to the venv Python and
-`simulate_event.py`, so they keep working regardless of the session cwd.
-Each hook runs `simulate_event.py <state> --agent claude --source hook --silent`,
-writing `runtime/sources/claude.json`, printing nothing, and always exiting 0.
+- Codex Firefly Pet
+- Desktop visualization of Codex activity
 
-## State → animation mapping
+### v0.1.0
 
-| State      | Animation      | Notes                          |
-|------------|----------------|--------------------------------|
-| `idle`     | `idle.gif`     |                                |
-| `thinking` | `review.gif`   |                                |
-| `working`  | `running.gif`  |                                |
-| `waiting`  | `waiting.gif`  |                                |
-| `success`  | `waving.gif`   | auto-returns to `idle` after ~3 s |
-| `error`    | `failed.gif`   | auto-returns to `idle` after ~4 s |
-| `sleeping` | `idle.gif`     | frozen on the first idle frame |
+- Firefly AI Pet demo
+- Interactive desktop companion foundation
 
-## Project structure
+### v0.1.1
 
-```text
-E:\Firefly_AI_Pet
-├── .claude
-│   └── settings.local.json # empty; hooks live in user-global settings.json
-├── assets
-│   └── animations          # copied GIF assets
-├── runtime
-│   ├── sources             # per-agent source states
-│   │   ├── claude.json
-│   │   ├── codex.json
-│   │   └── manual.json
-│   └── state.json          # resolved display state (written by app.py)
-├── ui
-│   ├── companion_panel.py  # interactive launcher + Quick Ask UI
-│   ├── process_launcher.py # safe QProcess launch / Quick Ask
-│   └── workspace_store.py  # recent workspace persistence
-├── config                  # local UI settings (created at runtime)
-├── tools
-│   ├── run_cli.ps1         # safe Windows .cmd/.bat argv bridge
-│   ├── simulate_event.py   # write a state into runtime/sources/<agent>.json
-│   ├── stop_pet.py         # graceful shutdown client
-│   ├── test_phase7a_core.py # Qt-free Phase 7A core tests
-│   └── test_state_broker.py # broker unit tests
-├── state_broker.py         # pure-Python multi-agent resolver
-├── app.py                  # the desktop pet
-├── start_pet.ps1           # launch the pet
-├── stop_pet.ps1            # stop the pet
-├── requirements.txt
-└── .gitignore
-```
-
-## How it works
-
-- Each agent (Claude, Codex, manual) writes only its own
-  `runtime/sources/<agent>.json` atomically.
-- `app.py` polls the sources every 150 ms and calls `state_broker.resolve()`,
-  which merges them into one display state by priority + newest timestamp.
-- `app.py` writes the resolved result to `runtime/state.json` and plays the
-  matching animation. It only acts when the resolved state changes.
-- Corrupt / half-written / missing source files are ignored without crashing.
-
-## State broker
-
-`state_broker.py` merges per-agent source states into one display state.
-
-- Priority (high → low): `waiting`, `error`, `success`, `working`,
-  `thinking`, `idle`, `sleeping`.
-- Same priority: the agent with the newer timestamp wins.
-- Transient TTL: `success` → `idle` after ~3 s, `error` → `idle` after ~4 s.
-- Manual override TTL: the `manual` source stops affecting resolution after 10 s.
-- Stale fallback: `working`/`thinking`/`waiting` older than 30 min are
-  demoted to `idle` (crash recovery; normal `SessionEnd` → `sleeping` is the
-  primary path).
-
-## Process management
-
-- Single instance is enforced with a Windows named mutex (auto-released by
-  the OS on exit, so there is never a stale lock).
-- `start_pet.ps1` launches `app.py` detached via `pythonw.exe` and returns
-  immediately; the pet keeps running after the launching shell exits.
-- `stop_pet.ps1` sends a `quit` command over the pet's `QLocalServer`
-  control channel — it never kills processes by PID or guesses at
-  `python.exe`.
-- `runtime/pet.pid` records the running instance's PID for observability and
-  is removed on graceful shutdown.
+- PageLens question loop
+- Browser-context exploration from the desktop companion
 
 ## Roadmap
 
-- **Done (Phase 4):** `error` → `failed.gif` is wired to the official
-  `PostToolUseFailure` and `StopFailure` events (no Bash-output parsing).
+- More agent integrations
+- Better memory system
+- Plugin ecosystem
+- Improved companion interaction
 
-## Releases
+## Project Status
 
-### [v0.1.0-firefly-demo — Birth of Companion](docs/releases/v0.1.0-firefly-demo.md)
+Firefly AI Pet is under active development. Interfaces, provider support, and workflow behavior may continue to evolve as the companion framework matures.
