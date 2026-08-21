@@ -91,17 +91,29 @@ Provider availability depends on the local environment and configuration. Creden
 
 ## Demo Screenshots
 
-Demo screenshots will be added under [`docs/screenshots/`](docs/screenshots/).
+### 1. Desktop AI Companion
 
-Recommended structure:
+Firefly's desktop presence and the interactive AI Companion interface.
 
-```text
-docs/
-`-- screenshots/
-    +-- desktop-companion.png
-    +-- pagelens-browser-context.png
-    `-- workflow-session.png
-```
+![Desktop AI Companion](docs/screenshots/desktop-companion.png)
+
+### 2. Browser Context Understanding
+
+PageLens extracts and organizes webpage context for AI-assisted understanding.
+
+![Browser Context Understanding with PageLens](docs/screenshots/pagelens.png)
+
+### 3. Concept Exploration
+
+Concept cards support focused discovery and deeper explanations of ideas found on a page.
+
+![PageLens Concept Exploration](docs/screenshots/concept-card.png)
+
+### 4. Interactive Question Loop
+
+Follow-up questions extend the current context into an interactive exploration flow.
+
+![Interactive Question Loop](docs/screenshots/question-loop.png)
 
 ## Getting Started
 
