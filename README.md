@@ -1,8 +1,12 @@
 # Firefly AI Pet
 
+![Python Version](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+![Project Status](https://img.shields.io/badge/status-alpha-orange)
+
 > A desktop AI companion powered by multi-agent orchestration.
 
-Firefly AI Pet is a **desktop AI companion framework** that brings agent workflows, browser context, and LLM provider routing into one interactive desktop experience. It began as the Codex Firefly Desktop Pet prototype and has evolved into an AI Companion Platform for coordinating agents, understanding web content, and supporting automated workflows.
+Firefly AI Pet is a **desktop AI companion framework** that brings agent workflows, browser context, and LLM provider routing into one interactive desktop experience. It began as the Codex Firefly Desktop Pet prototype and has evolved into a multi-agent platform for coordinating agents, understanding web content, and supporting automated workflows.
 
 Firefly AI Pet explores how AI agents can evolve from task-oriented tools into persistent digital companions.
 
@@ -193,10 +197,23 @@ Each agent writes its own runtime source state. The state broker combines those 
 
 ## Roadmap
 
-- More agent integrations
-- Better memory system
+### Completed
+
+- Desktop AI Companion prototype
+- Agent Router
+- Codex agent integration
+- Claude Code status integration
+- Multi-provider LLM routing
+- PageLens context layer
+- Concept exploration workflow
+- Interactive question loop
+
+### Planned
+
+- Workflow automation
 - Plugin ecosystem
-- Improved companion interaction
+- Local model support
+- Cross-platform desktop support
 
 ## Project Status
 
