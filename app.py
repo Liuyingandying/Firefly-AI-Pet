@@ -200,6 +200,14 @@ class VisualShell(QObject):
         self.pagelens_bridge.concept_card.connect(self.pagelens.set_concept)
         self.pagelens_bridge.concept_error.connect(self.pagelens.show_error)
         self.pagelens_bridge.concepts.connect(self.pagelens.set_top_concepts)
+        self.pagelens_bridge.question_loading.connect(
+            lambda payload: self.pagelens.show_question_loading(
+                payload.get("parent_term", ""), payload.get("question", "")
+            )
+        )
+        self.pagelens_bridge.question_delta.connect(self.pagelens.append_question_delta)
+        self.pagelens_bridge.question_done.connect(self.pagelens.finish_question)
+        self.pagelens_bridge.question_error.connect(self.pagelens.show_question_error)
         self.pagelens_bridge.bridge_connected.connect(self.pagelens.set_bridge_connected)
         self.pagelens_bridge.bridge_disconnected.connect(self.pagelens.set_bridge_connected)
         # Connect panel signals to bridge

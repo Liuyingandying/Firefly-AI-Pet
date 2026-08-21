@@ -183,3 +183,7 @@ E:\Firefly_AI_Pet
 
 - **Done (Phase 4):** `error` → `failed.gif` is wired to the official
   `PostToolUseFailure` and `StopFailure` events (no Bash-output parsing).
+
+## Releases
+
+### [v0.1.0-firefly-demo — Birth of Companion](docs/releases/v0.1.0-firefly-demo.md)

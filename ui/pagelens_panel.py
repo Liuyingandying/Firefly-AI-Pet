@@ -923,10 +923,12 @@ class _ScrollContent(QWidget):
         self._question_answer_label.setText("")
         self._question_answer_label.setVisible(True)
         self._hide_concept_sections()
+        self._refresh_question_answer_geometry()
 
     def append_question_delta(self, delta: str) -> None:
         current = self._question_answer_label.text()
         self._question_answer_label.setText(current + delta)
+        self._refresh_question_answer_geometry()
 
     def finish_question(self) -> None:
         self._question_status_label.setText("完成")
@@ -936,6 +938,7 @@ class _ScrollContent(QWidget):
         self._question_status_label.setText("回答失败")
         self._question_answer_label.setText(message)
         self._question_answer_label.setVisible(True)
+        self._refresh_question_answer_geometry()
 
     # -- Helpers --------------------------------------------------------
 
@@ -961,6 +964,33 @@ class _ScrollContent(QWidget):
         self._english_label.setVisible(False)
         self._hide_concept_sections()
         self._idle_label.setVisible(False)
+
+    def _refresh_question_answer_geometry(self) -> None:
+        """Propagate the wrapped answer height through the scroll hierarchy."""
+        answer = self._question_answer_label
+        layout_margins = self._layout.contentsMargins()
+        available_width = answer.width()
+        if available_width <= 0:
+            available_width = max(
+                1,
+                self.width() - layout_margins.left() - layout_margins.right(),
+            )
+
+        required_height = answer.heightForWidth(available_width) if answer.text() else 0
+        answer.setMinimumHeight(max(0, required_height))
+        answer.updateGeometry()
+
+        self._layout.invalidate()
+        self._layout.activate()
+        self.adjustSize()
+        self.updateGeometry()
+
+        panel = self._parent_panel
+        if panel is not None:
+            panel._scroll.widget().updateGeometry()
+            panel._scroll.viewport().updateGeometry()
+            panel._scroll.viewport().update()
+            panel._scroll.verticalScrollBar().updateGeometry()
 
     def _hide_concept_sections(self) -> None:
         """Hide all concept card sections (summary, context, related, questions)."""
