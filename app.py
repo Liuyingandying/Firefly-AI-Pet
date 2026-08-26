@@ -59,6 +59,7 @@ from core.workflow_models import (
 from core.workspace_manager import WorkspaceManager
 from ui import theme
 from ui.agent_dock import AgentDock
+from ui.character_conversation_runner import CharacterConversationRunner
 from ui.overlay_coordinator import OverlayCoordinator
 from ui.permission_card import PermissionCard
 from ui.pet_overlay import PetOverlay
@@ -175,6 +176,7 @@ class VisualShell(QObject):
         self.settings_popover = SettingsPopover(self.settings)
         self.ask_pill = AskPill()
         self.short_ask = ShortAskPanel()
+        self.character_conversation = CharacterConversationRunner(parent=self)
         self.recommendation_card = RecommendationCard()
         self.workflow_coordinator = WorkflowCoordinator()
         self.artifact_store = (
@@ -286,6 +288,7 @@ class VisualShell(QObject):
         self.short_ask.retry_requested.connect(self._on_short_ask_retry)
         self.short_ask.stop_requested.connect(self._on_short_ask_stop)
         self.short_ask.open_agent_requested.connect(self._on_short_ask_open_agent)
+        self.character_conversation.agent_event.connect(self.short_ask.on_agent_event)
         self.recommendation_card.send_requested.connect(self._on_recommendation_send)
         self.recommendation_card.open_native_requested.connect(self._on_recommendation_open_native)
         self.recommendation_card.plan_with_claude_requested.connect(
@@ -330,6 +333,7 @@ class VisualShell(QObject):
         self.state_monitor.stop()
         self.keep_awake.shutdown()
         self.quick_ask.shutdown()
+        self.character_conversation.stop()
         self._persist_ui_scale()
         if self.plan_executor.running:
             self.plan_executor.stop()
@@ -445,23 +449,10 @@ class VisualShell(QObject):
         if self.short_ask.has_pending_state():
             self.coordinator.show_short_ask()
             return
-        agent = self.dock.selected_agent
-        workspace = self.workspace_manager.current()
-        if agent == "codex":
-            # Codex Short Talk is ephemeral single-turn (read-only): no resume.
-            self.short_ask.show_input("codex", resume=False)
-            self.coordinator.show_short_ask()
-            return
-        if agent == "chatgpt":
-            self.short_ask.show_notice(
-                "chatgpt",
-                "Direct ChatGPT talk isn't available yet.",
-                open_label="Open ChatGPT",
-            )
-            self.coordinator.show_short_ask()
-            return
-        resuming = self.session_manager.has(agent, workspace)
-        self.short_ask.show_input("claude", resume=resuming)
+        self.short_ask.show_input(
+            "firefly",
+            resume=self.character_conversation.has_history,
+        )
         self.coordinator.show_short_ask()
 
     def _task_request(self, prompt: str, requested_agent: str | None = None) -> TaskRequest:
@@ -478,6 +469,9 @@ class VisualShell(QObject):
     def _on_short_ask_send(self, prompt: str) -> None:
         if self.short_ask.running:
             return  # never launch a second concurrent internal ask
+        if self.short_ask.agent == "firefly":
+            self._do_character_ask(prompt)
+            return
         self._resume_fallbacks_this_cycle = 0
         # Ask Codex is an explicit agent choice; Ask Claude stays prompt-routed.
         requested = self.short_ask.agent if self.short_ask.agent == "codex" else None
@@ -859,6 +853,9 @@ class VisualShell(QObject):
     def _on_short_ask_force_send(self, prompt: str) -> None:
         if self.short_ask.running:
             return
+        if self.short_ask.agent == "firefly":
+            self._do_character_ask(prompt)
+            return
         self._resume_fallbacks_this_cycle = 0
         self._do_short_ask(self.short_ask.agent, prompt)
 
@@ -867,7 +864,16 @@ class VisualShell(QObject):
         prompt = self._last_short_ask_prompt
         if not prompt or self.short_ask.running:
             return
+        if self.short_ask.agent == "firefly":
+            self._do_character_ask(prompt)
+            return
         self._do_short_ask(self.short_ask.agent, prompt)
+
+    def _do_character_ask(self, prompt: str) -> None:
+        self._last_short_ask_prompt = prompt
+        self.short_ask.set_running("Thinking…")
+        if not self.character_conversation.ask(prompt):
+            self.short_ask.reset_with_note("Firefly is already responding.")
 
     def _do_short_ask(self, agent: str, prompt: str) -> None:
         workspace = self.workspace_manager.current()
@@ -888,6 +894,10 @@ class VisualShell(QObject):
         self.short_ask.set_running("Connecting…")
 
     def _on_short_ask_stop(self) -> None:
+        if self.short_ask.agent == "firefly":
+            self.character_conversation.stop()
+            self.short_ask.begin_cancel()
+            return
         self.quick_ask.stop()
         self.short_ask.begin_cancel()
 
@@ -923,6 +933,12 @@ class VisualShell(QObject):
             self.short_ask.show_error(message)
 
     def _on_short_ask_open_agent(self, agent: str) -> None:
+        if agent == "firefly":
+            self.short_ask.show_input(
+                "firefly",
+                resume=self.character_conversation.has_history,
+            )
+            return
         if agent == "chatgpt":
             ProcessLauncher.open_chatgpt()
         else:

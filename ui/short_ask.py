@@ -43,7 +43,12 @@ from . import theme
 from .popover_base import PopoverBase
 
 
-AGENT_DISPLAY = {"claude": "Claude", "codex": "Codex", "chatgpt": "ChatGPT"}
+AGENT_DISPLAY = {
+    "firefly": "Firefly",
+    "claude": "Claude",
+    "codex": "Codex",
+    "chatgpt": "ChatGPT",
+}
 MAX_ANSWER_HEIGHT = 110
 
 SLOW_AFTER_MS = 8_000  # no first token yet -> "Still working…"
@@ -759,6 +764,8 @@ class ShortAskPanel(PopoverBase):
             ShortTalkState.CANCELLING,
             ShortTalkState.STREAMING,
         ):
+            if self._agent == "firefly":
+                return
             self._secondary_btn.setText(self._open_label())
             self._secondary_btn.setVisible(True)
             self._secondary_action = "open_agent"
@@ -775,9 +782,13 @@ class ShortAskPanel(PopoverBase):
         self._status.setToolTip("")
         self._primary_btn.setText("Retry")
         self._primary_btn.setVisible(True)
-        self._secondary_btn.setText(self._open_label())
-        self._secondary_btn.setVisible(True)
-        self._secondary_action = "open_agent"
+        if self._agent == "firefly":
+            self._secondary_btn.setVisible(False)
+            self._secondary_action = ""
+        else:
+            self._secondary_btn.setText(self._open_label())
+            self._secondary_btn.setVisible(True)
+            self._secondary_action = "open_agent"
         self._input.setEnabled(True)
         self.adjustSize()
         self.stop_requested.emit()
