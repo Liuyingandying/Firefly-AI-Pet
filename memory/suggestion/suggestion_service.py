@@ -68,6 +68,10 @@ class SuggestionService:
         security_guard: MemorySecurityGuard | None = None,
         semantic_dedup_enabled: bool = True,
         semantic_dedup_threshold: float = 0.85,
+        # P5A-3: explicit auto-approve settings
+        explicit_auto_approve_enabled: bool = False,
+        explicit_auto_approve_min_confidence: float = 0.95,
+        explicit_auto_approve_allowed_categories: Sequence[str] | None = None,
     ) -> None:
         self.memory_service = memory_service
         self.detector = detector or MemoryCandidateDetector()
@@ -85,6 +89,15 @@ class SuggestionService:
             else None
         )
         self._pending: list[MemorySuggestion] = []
+
+        # P5A-3: explicit auto-approve config
+        self.explicit_auto_approve_enabled = explicit_auto_approve_enabled
+        self.explicit_auto_approve_min_confidence = explicit_auto_approve_min_confidence
+        self.explicit_auto_approve_allowed_categories: set[str] = (
+            set(explicit_auto_approve_allowed_categories)
+            if explicit_auto_approve_allowed_categories is not None
+            else {MemoryCategory.PREFERENCE.value, MemoryCategory.PROJECT.value}
+        )
 
     # ------------------------------------------------------------------ extract
     def extract_candidates(
@@ -230,6 +243,11 @@ class SuggestionService:
             logger.debug("Explicit remember suppressed: duplicate existing memory")
             return []
 
+        # P5A-3: Auto-approve check (runs after all guards + dedup)
+        auto_approved = self._try_auto_approve(suggestion)
+        if auto_approved:
+            return []  # Already written, no longer pending
+
         self._pending.append(suggestion)
         logger.info("SuggestionService: created explicit pending suggestion")
         return [suggestion]
@@ -256,6 +274,82 @@ class SuggestionService:
     def reject(self, suggestion: MemorySuggestion) -> None:
         if suggestion in self._pending:
             self._pending.remove(suggestion)
+
+    # --------------------------------------------------------- P5A-3 auto-approve
+    def _try_auto_approve(self, suggestion: MemorySuggestion) -> bool:
+        """Attempt to auto-approve an explicit remember suggestion.
+
+        Auto-approve only runs when ALL conditions are met:
+        1. Feature is enabled (explicit_auto_approve_enabled=True)
+        2. Suggestion has explicit_remember reason
+        3. Confidence >= explicit_auto_approve_min_confidence
+        4. Category is in explicit_auto_approve_allowed_categories
+        5. Privacy/security guards already passed (caller ensures this)
+        6. Dedup already passed (caller ensures this)
+
+        If any condition fails, the suggestion stays in pending.
+
+        Returns True if the suggestion was auto-approved and written.
+        """
+        if not self.explicit_auto_approve_enabled:
+            logger.debug("Auto-approve disabled, keeping as pending")
+            return False
+
+        # Must be an explicit remember (not auto-extracted)
+        if suggestion.reason != "explicit_remember":
+            logger.debug(
+                "Non-explicit suggestion (reason=%s), keeping as pending",
+                suggestion.reason,
+            )
+            return False
+
+        # Confidence threshold
+        if suggestion.confidence < self.explicit_auto_approve_min_confidence:
+            logger.debug(
+                "Confidence %.2f < threshold %.2f, keeping as pending",
+                suggestion.confidence,
+                self.explicit_auto_approve_min_confidence,
+            )
+            return False
+
+        # Category allowlist
+        if suggestion.category.value not in self.explicit_auto_approve_allowed_categories:
+            logger.debug(
+                "Category %s not in allowlist, keeping as pending",
+                suggestion.category.value,
+            )
+            return False
+
+        # Security guard: double-check before writing
+        security_decision = self.security_guard.guard(suggestion.content)
+        if security_decision.action == "block":
+            logger.debug(
+                "Security guard blocked auto-approve, keeping as pending"
+            )
+            return False
+
+        # Auto-approve: use existing accept() path (never direct repo write)
+        logger.info(
+            "Auto-approving explicit remember: %s (conf=%.2f, cat=%s)",
+            suggestion.content[:60],
+            suggestion.confidence,
+            suggestion.category.value,
+        )
+        try:
+            result = self.accept(suggestion)
+            if result is not None:
+                return True
+            logger.warning(
+                "Auto-approve accept() returned None, keeping as pending"
+            )
+            return False
+        except Exception as exc:
+            logger.warning(
+                "Auto-approve write failed (%s), keeping as pending: %s",
+                type(exc).__name__,
+                exc,
+            )
+            return False
 
     # --------------------------------------------------------- internal helpers
     def _is_privacy_violation(self, content: str) -> bool:

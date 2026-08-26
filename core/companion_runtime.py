@@ -170,6 +170,10 @@ class CompanionRuntime:
                 max_candidates_per_turn=config.suggestion.max_candidates_per_turn,
                 semantic_dedup_enabled=config.suggestion.semantic_dedup_enabled,
                 semantic_dedup_threshold=config.suggestion.semantic_dedup_threshold,
+                # P5A-3: explicit auto-approve config
+                explicit_auto_approve_enabled=config.suggestion.explicit_auto_approve_enabled,
+                explicit_auto_approve_min_confidence=config.suggestion.explicit_auto_approve_min_confidence,
+                explicit_auto_approve_allowed_categories=config.suggestion.explicit_auto_approve_allowed_categories,
             )
         else:
             self.suggestion_service = None
