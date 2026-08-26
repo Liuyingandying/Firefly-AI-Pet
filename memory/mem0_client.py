@@ -42,7 +42,7 @@ class LocalMem0Client:
         vector_id = self._adapter.add(content, metadata)
         return {"results": [{"id": vector_id, "memory": content.strip()}]}
 
-    def search(self, query: str, *, limit: int = 5) -> list[dict[str, Any]]:
+    def search(self, query: str, *, limit: int = 5, threshold: float = 0.0) -> list[dict[str, Any]]:
         return [
             {
                 "id": hit.vector_id,
@@ -83,7 +83,7 @@ class LegacyClientSemanticAdapter:
             return f"legacy-index-{record_id}"
         raise RuntimeError("legacy semantic client returned no vector ID")
 
-    def search(self, query: str, *, limit: int = 5) -> list[Hit]:
+    def search(self, query: str, *, limit: int = 5, threshold: float = 0.0) -> list[Hit]:
         raw = self.client.search(query)
         self.last_raw_results = [item for item in raw if isinstance(item, dict)]
         hits: list[Hit] = []
