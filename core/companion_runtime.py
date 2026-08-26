@@ -191,6 +191,7 @@ class CompanionRuntime:
         *,
         character_loader: CharacterLoader | None = None,
         conversation_store: ConversationStore | None = None,
+        _bond_path: str | None = None,
     ) -> CompanionRuntime:
         """Build the graph for the ConversationRuntime compatibility facade."""
         manager = memory_manager if memory_manager is not None else MemoryManager()
@@ -203,7 +204,7 @@ class CompanionRuntime:
             character=loader.load(),
             memory_service=_LegacyMemoryReader(manager),
             conversation_store=conversation_store,
-            bond_state_engine=BondStateEngine(),
+            bond_state_engine=BondStateEngine(_bond_path),
             provider_router=provider_router,
         )
 

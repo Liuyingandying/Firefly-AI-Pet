@@ -88,7 +88,12 @@ def test_manual_memory_is_retrieved_and_injected_on_second_message(tmp_path) -> 
         repository=JsonMemoryRepository(tmp_path / "records.json"),
     )
     provider = CapturingProviderRouter()
-    runtime = ConversationRuntime(manager, provider)
+    bond_path = tmp_path / "bond.json"
+    runtime = ConversationRuntime(
+        manager,
+        provider,
+        _bond_path=str(bond_path),
+    )
 
     # First message is saved explicitly by the caller. Runtime never performs
     # this operation on its own.
@@ -129,11 +134,13 @@ def test_manual_memory_is_retrieved_and_injected_on_second_message(tmp_path) -> 
     ]
 
 
-def test_chat_does_not_automatically_write_user_messages() -> None:
+def test_chat_does_not_automatically_write_user_messages(tmp_path) -> None:
     client = FakeMemoryClient()
+    bond_path = tmp_path / "bond.json"
     runtime = ConversationRuntime(
         MemoryManager(client=client),
         CapturingProviderRouter(),
+        _bond_path=str(bond_path),
     )
 
     runtime.chat(FIRST_MESSAGE)
@@ -143,11 +150,16 @@ def test_chat_does_not_automatically_write_user_messages() -> None:
     assert client.search_queries == [FIRST_MESSAGE]
 
 
-def test_history_follows_system_layers_and_precedes_current_user_message() -> None:
+def test_history_followes_system_layers_and_precedes_current_user_message(tmp_path) -> None:
     client = FakeMemoryClient()
     client.add(FIRST_MESSAGE, {"category": "project"})
+    bond_path = tmp_path / "bond.json"
     provider = CapturingProviderRouter()
-    runtime = ConversationRuntime(MemoryManager(client=client), provider)
+    runtime = ConversationRuntime(
+        MemoryManager(client=client),
+        provider,
+        _bond_path=str(bond_path),
+    )
 
     messages = runtime.build_messages(
         SECOND_MESSAGE,
@@ -168,10 +180,12 @@ def test_history_follows_system_layers_and_precedes_current_user_message() -> No
     assert messages[-1]["content"] == SECOND_MESSAGE
 
 
-def test_empty_retrieval_omits_memory_system_message() -> None:
+def test_empty_retrieval_omits_memory_system_message(tmp_path) -> None:
+    bond_path = tmp_path / "bond.json"
     runtime = ConversationRuntime(
         MemoryManager(client=FakeMemoryClient()),
         CapturingProviderRouter(),
+        _bond_path=str(bond_path),
     )
 
     messages = runtime.build_messages(SECOND_MESSAGE)
@@ -186,10 +200,12 @@ def test_empty_retrieval_omits_memory_system_message() -> None:
     assert messages[2] == {"role": "user", "content": SECOND_MESSAGE}
 
 
-def test_history_cannot_override_runtime_owned_system_layers() -> None:
+def test_history_cannot_override_runtime_owned_system_layers(tmp_path) -> None:
+    bond_path = tmp_path / "bond.json"
     runtime = ConversationRuntime(
         MemoryManager(client=FakeMemoryClient()),
         CapturingProviderRouter(),
+        _bond_path=str(bond_path),
     )
 
     with pytest.raises(ValueError, match="must not contain a system message"):

@@ -43,8 +43,12 @@ def _make_runtime(
     conv_path: Path | None = None,
     fake_memory: bool = True,
 ) -> tuple[CompanionRuntime, BondStateEngine, _FakeProvider]:
-    bond = BondStateEngine(bond_path) if bond_path else BondStateEngine()
-    conv = ConversationStore(conv_path) if conv_path else ConversationStore()
+    if bond_path is None:
+        bond_path = Path("/tmp/_firefly_test_bond_none.json")
+    if conv_path is None:
+        conv_path = Path("/tmp/_firefly_test_conv_none.json")
+    bond = BondStateEngine(bond_path)
+    conv = ConversationStore(conv_path)
     provider = _FakeProvider()
 
     # Use a fake memory reader to avoid Qdrant lock issues

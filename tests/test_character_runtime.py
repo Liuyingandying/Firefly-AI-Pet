@@ -43,12 +43,21 @@ class CapturingProvider:
 
 def _runtime(
     memories: list[dict[str, Any]] | None = None,
+    tmp_path: Any = None,
 ) -> tuple[ConversationRuntime, CapturingProvider]:
     provider = CapturingProvider()
-    runtime = ConversationRuntime(
-        MemoryManager(client=FakeMemoryClient(memories)),
-        provider,
-    )
+    if tmp_path is not None:
+        bond_path = tmp_path / "bond.json"
+        runtime = ConversationRuntime(
+            MemoryManager(client=FakeMemoryClient(memories)),
+            provider,
+            _bond_path=str(bond_path),
+        )
+    else:
+        runtime = ConversationRuntime(
+            MemoryManager(client=FakeMemoryClient(memories)),
+            provider,
+        )
     return runtime, provider
 
 
@@ -74,12 +83,12 @@ def test_relationship_policy_is_included_in_system_messages() -> None:
     assert character.relationship_policy_prompt in policy_message
 
 
-def test_character_and_memory_are_three_independent_system_messages() -> None:
+def test_character_and_memory_are_three_independent_system_messages(tmp_path) -> None:
     memory = {
         "memory": "用户正在开发 Firefly AI Pet",
         "metadata": {"category": "project"},
     }
-    runtime, _ = _runtime([memory])
+    runtime, _ = _runtime([memory], tmp_path=tmp_path)
 
     messages = runtime.build_messages("我最近在做什么？")
 
@@ -110,8 +119,8 @@ def test_user_message_cannot_replace_runtime_owned_character_layers() -> None:
     assert provider.messages[-1] == {"role": "user", "content": attack}
 
 
-def test_empty_memory_still_runs_with_character_and_user_layers() -> None:
-    runtime, provider = _runtime()
+def test_empty_memory_still_runs_with_character_and_user_layers(tmp_path) -> None:
+    runtime, provider = _runtime(tmp_path=tmp_path)
 
     result = runtime.chat("你好，流萤。")
 

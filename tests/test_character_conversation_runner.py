@@ -72,7 +72,11 @@ def _runner(tmp_path=None) -> tuple[
     )
     manager = MemoryManager(client=client, repository=repository)
     provider = CharacterAwareProvider()
-    runtime = ConversationRuntime(manager, provider)
+    if tmp_path is not None:
+        bond_path = tmp_path / "bond.json"
+        runtime = ConversationRuntime(manager, provider, _bond_path=str(bond_path))
+    else:
+        runtime = ConversationRuntime(manager, provider)
     return CharacterConversationRunner(runtime), manager, client, provider
 
 
