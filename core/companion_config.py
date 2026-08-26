@@ -34,6 +34,7 @@ class MemorySettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     search_top_k: int = Field(default=5, ge=1, le=100)
+    search_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
     write_policy: WritePolicy = WritePolicy.EXPLICIT_ONLY
     dedup_enabled: bool = True
     dedup_similarity_threshold: float = Field(default=0.85, ge=0.0, le=1.0)

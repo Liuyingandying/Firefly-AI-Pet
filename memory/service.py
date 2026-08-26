@@ -9,6 +9,7 @@ from typing import Any, Mapping, Protocol
 from .mem0_adapter import Hit, Mem0Adapter
 from .records import MemoryCategory, MemoryRecord, MemorySource, WritePolicy
 from .repository import MemoryRepository
+from .ranking import re_rank_results
 from .security_guard import (
     MemorySecurityGuard,
     MemorySecurityViolation,
@@ -22,7 +23,9 @@ class SemanticIndex(Protocol):
 
     def add(self, text: str, metadata: Mapping[str, Any] | None = None) -> str: ...
 
-    def search(self, query: str, *, limit: int = 5) -> list[Hit]: ...
+    def search(
+        self, query: str, *, limit: int = 5, threshold: float = 0.0
+    ) -> list[Hit]: ...
 
     def delete(self, vector_id: str) -> bool: ...
 
@@ -64,6 +67,7 @@ class MemoryService:
         *,
         write_policy: WritePolicy | str = WritePolicy.EXPLICIT_ONLY,
         search_top_k: int = 5,
+        search_threshold: float = 0.0,
         security_guard: MemorySecurityGuard | None = None,
         dedup_enabled: bool = True,
         dedup_similarity_threshold: float = 0.85,
@@ -72,6 +76,7 @@ class MemoryService:
         self.adapter = adapter
         self.write_policy = WritePolicy(write_policy)
         self.search_top_k = search_top_k
+        self.search_threshold = search_threshold
         self.security_guard: MemorySecurityGuard = (
             security_guard if security_guard is not None else NoopMemorySecurityGuard()
         )
@@ -87,6 +92,7 @@ class MemoryService:
         user_id: str | None = None,
         write_policy: WritePolicy | str = WritePolicy.EXPLICIT_ONLY,
         search_top_k: int = 5,
+        search_threshold: float = 0.0,
         security_guard: MemorySecurityGuard | None = None,
         dedup_enabled: bool = True,
         dedup_similarity_threshold: float = 0.85,
@@ -102,6 +108,7 @@ class MemoryService:
             adapter,
             write_policy=write_policy,
             search_top_k=search_top_k,
+            search_threshold=search_threshold,
             security_guard=security_guard,
             dedup_enabled=dedup_enabled,
             dedup_similarity_threshold=dedup_similarity_threshold,
@@ -282,15 +289,28 @@ class MemoryService:
             ) from exc
 
     def search(self, query: str, *, limit: int | None = None) -> list[MemoryRecord]:
-        """Resolve semantic hits back to authoritative MemoryRecords."""
+        """Resolve semantic hits back to authoritative MemoryRecords with ranking.
+
+        The pipeline is:
+        1. Mem0 semantic search (server-side threshold filter)
+        2. Resolve hits to authoritative MemoryRecords
+        3. Deterministic re-ranking (category weight x importance x temporal decay)
+        4. Client-side threshold filter on final_score
+        5. Deduplicate by record id, return top-N
+        """
         effective_limit = self.search_top_k if limit is None else limit
-        hits = self.adapter.search(query, limit=effective_limit)
+        hits = self.adapter.search(
+            query, limit=effective_limit, threshold=self.search_threshold
+        )
         by_vector_id = {
             record.vector_id: record.id
             for record in self.repository.list()
             if record.vector_id is not None
         }
-        records: list[MemoryRecord] = []
+
+        # Resolve hits to MemoryRecords and collect semantic scores
+        semantic_scores: dict[str, float] = {}
+        resolved: list[MemoryRecord] = []
         seen: set[str] = set()
         for hit in hits:
             record_id = hit.metadata.get("record_id")
@@ -301,9 +321,19 @@ class MemoryService:
             record = self.repository.get(record_id)
             if record is None:
                 continue
-            records.append(record)
+            semantic_scores[record.id] = hit.score
+            resolved.append(record)
             seen.add(record.id)
-        return records
+
+        # Deterministic re-ranking
+        ranked = re_rank_results(resolved, semantic_scores)
+
+        # Client-side threshold on final_score
+        filtered = [
+            rh for rh in ranked if rh.final_score >= self.search_threshold
+        ]
+
+        return [rh.record for rh in filtered][:effective_limit]
 
     def delete(self, record_id: str) -> bool:
         """Delete semantic index entry first, then authoritative record."""

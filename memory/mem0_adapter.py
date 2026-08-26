@@ -86,24 +86,32 @@ class Mem0Adapter:
             raise Mem0AdapterError("Mem0 add response did not contain a vector ID")
         return vector_id
 
-    def search(self, query: str, *, limit: int = 5) -> list[Hit]:
-        """Return normalized semantic hits ordered by descending score."""
+    def search(self, query: str, *, limit: int = 5, threshold: float = 0.0) -> list[Hit]:
+        """Return normalized semantic hits ordered by descending score.
+
+        ``threshold`` is passed through to Mem0 as a server-side filter so that
+        low-confidence results are never materialized in Python.
+        """
         normalized_query = _required_text(query, "query")
         if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
             raise ValueError("limit must be a positive integer")
+        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+            raise ValueError("threshold must be a finite number between 0 and 1")
         try:
             response = self._client().search(
                 normalized_query,
                 filters={"user_id": self.user_id},
                 top_k=limit,
+                threshold=float(threshold),
             )
         except Mem0AdapterError:
             raise
         except Exception as exc:
             raise Mem0AdapterError("semantic search failed") from exc
         hits = [_to_hit(item) for item in _result_items(response)]
-        normalized = [hit for hit in hits if hit is not None]
-        return sorted(normalized, key=lambda hit: hit.score, reverse=True)[:limit]
+        # Client-side safety net: Mem0 may ignore threshold in some versions.
+        filtered = [hit for hit in hits if hit.score >= threshold]
+        return sorted(filtered, key=lambda hit: hit.score, reverse=True)[:limit]
 
     def delete(self, vector_id: str) -> bool:
         """Delete one vector only; authoritative MemoryRecords are untouched."""

@@ -102,6 +102,7 @@ class CompanionRuntime:
                 JsonMemoryRepository(),
                 write_policy=config.memory.write_policy,
                 search_top_k=config.memory.search_top_k,
+                search_threshold=config.memory.search_threshold,
             )
         if conversation_store is _MISSING:
             conversation_store = ConversationStore(

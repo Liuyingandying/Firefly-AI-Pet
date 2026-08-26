@@ -9,6 +9,14 @@ from .memory_prompt_builder import (
     MemoryPromptBuilder,
     PromptLayers,
 )
+from .ranking import (
+    RankedHit,
+    calculate_category_weight,
+    calculate_final_score,
+    calculate_importance_factor,
+    calculate_temporal_decay,
+    re_rank_results,
+)
 from .records import (
     CATEGORY_DEFAULTS,
     MemoryCategory,
@@ -71,6 +79,12 @@ __all__ = [
     "MemorySource",
     "MemorySynchronizationError",
     "ReconcileResult",
+    "RankedHit",
+    "calculate_category_weight",
+    "calculate_final_score",
+    "calculate_importance_factor",
+    "calculate_temporal_decay",
+    "re_rank_results",
     "WriteOutcome",
     "WriteResult",
     "MemoryWriteDeniedError",
