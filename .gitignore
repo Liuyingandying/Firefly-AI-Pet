@@ -21,6 +21,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# Repo-local pytest temp directories (from --basetemp)
+.pytest_tmp*/
+
 
 # ----------------------------
 # Runtime state / generated data
@@ -53,6 +56,9 @@ config/pet_preferences.json.tmp
 
 .claude/
 .codex/
+
+# Qwen Code project configuration
+.qwen/
 
 
 # ----------------------------
