@@ -44,6 +44,8 @@ class SuggestionSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     enabled: bool = False
+    auto_extract_enabled: bool = False
+    max_candidates_per_turn: int = Field(default=3, ge=0, le=10)
 
 
 class SecuritySettings(BaseModel):

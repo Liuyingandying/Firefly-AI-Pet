@@ -20,6 +20,7 @@ from core.conversation_store import ConversationStore
 from memory.memory_manager import MemoryManager
 from memory.repository import JsonMemoryRepository
 from memory.service import MemoryService
+from memory.suggestion.suggestion_service import SuggestionService
 from providers.base import ChatCompletion
 
 
@@ -52,6 +53,15 @@ class TurnStage(str, Enum):
     CONVERSATION_LOAD = "conversation_load"
     CONVERSATION_SAVE = "conversation_save"
     NARRATIVE_READ = "narrative_read"
+
+
+@dataclass(frozen=True, slots=True)
+class TurnResult:
+    """Result of a companion turn including suggestion metadata."""
+
+    response: Any
+    suggestion_status: str = "none"
+    suggestions_created: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +101,7 @@ class CompanionRuntime:
         provider_router: ConversationProvider | None = None,
         narrative_reader: NarrativeReader | None = None,
         config: CompanionConfig | None = None,
+        suggestion_service: SuggestionService | None = None,
     ) -> None:
         if config is None:
             config = load_companion_config()
@@ -147,6 +158,19 @@ class CompanionRuntime:
         self.last_bond_state: BondState | None = None
         self.last_turn_errors: tuple[TurnError, ...] = ()
         self._turn_errors: list[TurnError] = []
+
+        # P5A-1: suggestion service for auto memory formation
+        if suggestion_service is not None:
+            self.suggestion_service: SuggestionService | None = suggestion_service
+        elif config.suggestion.enabled:
+            self.suggestion_service = SuggestionService(
+                memory_service,
+                enabled=config.suggestion.enabled,
+                auto_extract_enabled=config.suggestion.auto_extract_enabled,
+                max_candidates_per_turn=config.suggestion.max_candidates_per_turn,
+            )
+        else:
+            self.suggestion_service = None
 
     @classmethod
     def create_default(cls) -> CompanionRuntime:
@@ -214,6 +238,10 @@ class CompanionRuntime:
                     self.conversation_store.append_exchange(user_text, assistant_text)
                 except Exception as exc:
                     self._record_error(TurnStage.CONVERSATION_SAVE, exc)
+
+            # P5A-1: Post-reply memory candidate extraction (non-blocking)
+            self._try_extract_suggestions(user_text, assistant_text or "")
+
             return response
         finally:
             self._finish_turn()
@@ -256,6 +284,46 @@ class CompanionRuntime:
             exc,
             exc_info=True,
         )
+
+    # ------------------------------------------------------------------ P5A-1
+    def _try_extract_suggestions(
+        self, user_message: str, assistant_reply: str
+    ) -> None:
+        """Run post-reply candidate extraction, safely degraded on any failure."""
+        if self.suggestion_service is None:
+            return
+        try:
+            self.suggestion_service.extract_candidates(
+                user_message,
+                assistant_reply,
+                context=list(self._get_recent_context()) if self.conversation_store else None,
+            )
+        except Exception as exc:
+            # Extraction failure must never affect the user-visible response.
+            logger.debug(
+                "Post-reply suggestion extraction failed: %s: %s",
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+
+    def _get_recent_context(
+        self,
+    ) -> Sequence[dict[str, str]]:
+        """Return recent conversation messages for extraction context."""
+        if self.conversation_store is None:
+            return []
+        try:
+            turns = self.conversation_store.load_working_window()
+            result: list[dict[str, str]] = []
+            for turn in turns[-6:]:  # last 3 turns
+                if hasattr(turn, "to_chat_message"):
+                    result.append(turn.to_chat_message())
+                elif isinstance(turn, dict):
+                    result.append(turn)
+            return result
+        except Exception:
+            return []
 
 
 def _required_text(value: str, name: str) -> str:
