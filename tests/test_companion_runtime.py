@@ -33,7 +33,7 @@ class FakeMemoryService:
         self.fail = fail
         self.queries: list[str] = []
 
-    def search(self, query: str, *, limit: int = 5) -> list[dict[str, str]]:
+    def search(self, query: str, *, limit: int = 5, threshold: float = 0.0) -> list[dict[str, str]]:
         self.calls.append("memory")
         self.queries.append(query)
         if self.fail:

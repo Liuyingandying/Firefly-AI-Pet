@@ -66,7 +66,7 @@ class CountingAdapter:
         self.add_count += 1
         return "vec-1"
 
-    def search(self, query, *, limit=5):
+    def search(self, query, *, limit=5, threshold=0.0):
         return []
 
     def delete(self, vector_id):

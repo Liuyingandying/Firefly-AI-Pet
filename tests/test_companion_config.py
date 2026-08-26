@@ -119,7 +119,7 @@ class RecordingAdapter:
     def add(self, text, metadata=None):
         return "vec-1"
 
-    def search(self, query, *, limit=5):
+    def search(self, query, *, limit=5, threshold=0.0):
         self.limits.append(limit)
         return []
 

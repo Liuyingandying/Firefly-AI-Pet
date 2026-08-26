@@ -34,7 +34,7 @@ class FakeSemanticIndex:
         }
         return vector_id
 
-    def search(self, query: str, *, limit: int = 5) -> list[Hit]:
+    def search(self, query: str, *, limit: int = 5, threshold: float = 0.0) -> list[Hit]:
         return [
             Hit(
                 vector_id,

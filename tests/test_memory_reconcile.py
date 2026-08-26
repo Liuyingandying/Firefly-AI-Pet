@@ -22,7 +22,7 @@ class FakeIndex:
         self.entries[vid] = {"text": text, "metadata": dict(metadata or {})}
         return vid
 
-    def search(self, query, *, limit=5):
+    def search(self, query, *, limit=5, threshold=0.0):
         return []
 
     def delete(self, vector_id):
