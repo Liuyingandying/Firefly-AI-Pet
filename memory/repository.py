@@ -269,12 +269,28 @@ class JsonMemoryRepository(MemoryRepository):
                 json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
-            os.replace(temporary, self.path)
+            self._atomic_replace(temporary, self.path)
         finally:
             try:
                 temporary.unlink(missing_ok=True)
             except OSError:
                 pass
+
+    @staticmethod
+    def _atomic_replace(src: Path, dst: Path) -> None:
+        """Atomic replace with Windows WinError 5 retry."""
+        import time
+
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                os.replace(src, dst)
+                return
+            except PermissionError:
+                if attempt < max_retries - 1:
+                    time.sleep(0.1 * (attempt + 1))
+                else:
+                    raise
 
     @staticmethod
     def _ordered(records: Mapping[str, MemoryRecord]) -> list[MemoryRecord]:
