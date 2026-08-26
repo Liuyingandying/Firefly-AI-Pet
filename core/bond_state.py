@@ -150,12 +150,34 @@ class BondStateEngine:
                 json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
-            os.replace(temporary, self.path)
+            self._atomic_replace(temporary, self.path)
         finally:
             try:
                 temporary.unlink(missing_ok=True)
             except OSError:
                 pass
+
+    @staticmethod
+    def _atomic_replace(src: Path, dst: Path) -> None:
+        """Atomic replace with Windows WinError 5 retry.
+
+        On Windows, os.replace can fail with PermissionError [WinError 5]
+        when the destination file is briefly locked by another process or
+        the OS (antivirus, indexing, etc.). Retry a few times with short
+        backoff before giving up.
+        """
+        import time
+
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                os.replace(src, dst)
+                return
+            except PermissionError:
+                if attempt < max_retries - 1:
+                    time.sleep(0.1 * (attempt + 1))
+                else:
+                    raise
 
 
 def _level(value: Any, name: str) -> float:

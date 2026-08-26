@@ -245,6 +245,9 @@ class CompanionRuntime:
                 except Exception as exc:
                     self._record_error(TurnStage.CONVERSATION_SAVE, exc)
 
+            # P7: Advance bond state after a successful turn
+            self._try_advance_bond(user_text)
+
             # P5A-1: Post-reply memory candidate extraction (non-blocking)
             self._try_extract_suggestions(user_text, assistant_text or "")
 
@@ -308,6 +311,24 @@ class CompanionRuntime:
             # Extraction failure must never affect the user-visible response.
             logger.debug(
                 "Post-reply suggestion extraction failed: %s: %s",
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+
+    # ------------------------------------------------------------------ P7
+    def _try_advance_bond(self, user_message: str) -> None:
+        """Advance bond state after a successful companion turn."""
+        if self.bond_state_engine is None:
+            return
+        try:
+            from core.bond_rules import BondSignal, BondSignalType
+
+            signal = BondSignal(BondSignalType.TURN_COMPLETED)
+            self.bond_state_engine.apply(signal)
+        except Exception as exc:
+            logger.debug(
+                "Bond state advance failed: %s: %s",
                 type(exc).__name__,
                 exc,
                 exc_info=True,
