@@ -14,6 +14,7 @@ from typing import Any, Mapping, Protocol, Sequence
 
 from character.character_loader import CharacterLoader, CharacterProfile
 from core.bond_state import BondState, BondStateEngine
+from core.companion_config import CompanionConfig, load_companion_config
 from core.companion_context_builder import CompanionContextBuilder, NarrativeReader
 from core.conversation_store import ConversationStore
 from memory.memory_manager import MemoryManager
@@ -89,13 +90,23 @@ class CompanionRuntime:
         bond_state_engine: BondStateEngine | None | object = _MISSING,
         provider_router: ConversationProvider | None = None,
         narrative_reader: NarrativeReader | None = None,
+        config: CompanionConfig | None = None,
     ) -> None:
+        if config is None:
+            config = load_companion_config()
+        self.config = config
         if character is None:
             character = CharacterLoader().load()
         if memory_service is None:
-            memory_service = MemoryService.local(JsonMemoryRepository())
+            memory_service = MemoryService.local(
+                JsonMemoryRepository(),
+                write_policy=config.memory.write_policy,
+                search_top_k=config.memory.search_top_k,
+            )
         if conversation_store is _MISSING:
-            conversation_store = ConversationStore()
+            conversation_store = ConversationStore(
+                max_messages=config.conversation.max_messages
+            )
         if bond_state_engine is _MISSING:
             bond_state_engine = BondStateEngine()
         if provider_router is None:

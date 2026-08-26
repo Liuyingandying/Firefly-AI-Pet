@@ -10,6 +10,7 @@ import pytest
 from core.conversation_runtime import ConversationRuntime
 from core.conversation_store import ConversationStore
 from memory.memory_manager import MemoryManager
+from memory.repository import JsonMemoryRepository
 
 
 FIRST_MESSAGE = "我正在开发 Firefly AI Pet，希望它成为长期 AI Companion。"
@@ -80,9 +81,12 @@ def _memory_payload(memory_system_message: str) -> dict[str, Any]:
     return json.loads(json_text)
 
 
-def test_manual_memory_is_retrieved_and_injected_on_second_message() -> None:
+def test_manual_memory_is_retrieved_and_injected_on_second_message(tmp_path) -> None:
     client = FakeMemoryClient()
-    manager = MemoryManager(client=client)
+    manager = MemoryManager(
+        client=client,
+        repository=JsonMemoryRepository(tmp_path / "records.json"),
+    )
     provider = CapturingProviderRouter()
     runtime = ConversationRuntime(manager, provider)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from memory.mem0_adapter import Hit
 from memory.mem0_client import LocalMem0Client
 from memory.memory_manager import MemoryManager
+from memory.repository import JsonMemoryRepository
 
 
 class FakeAdapter:
@@ -30,6 +31,7 @@ def test_add_search_and_context_recall(tmp_path) -> None:
     adapter = FakeAdapter(tmp_path / "memory-store", user_id)
     manager = MemoryManager(
         client=LocalMem0Client(adapter=adapter),
+        repository=JsonMemoryRepository(tmp_path / "memory_records.json"),
     )
     content = "用户正在开发 Firefly AI Pet，希望它成为长期记忆型 AI Companion"
 

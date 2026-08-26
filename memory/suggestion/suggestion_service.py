@@ -15,13 +15,22 @@ from .memory_candidate_detector import MemoryCandidateDetector, MemorySuggestion
 class SuggestionService:
     """Accumulate and resolve candidate memories for one conversation."""
 
-    def __init__(self, memory_service: Any, detector: MemoryCandidateDetector | None = None) -> None:
+    def __init__(
+        self,
+        memory_service: Any,
+        detector: MemoryCandidateDetector | None = None,
+        *,
+        enabled: bool = True,
+    ) -> None:
         self.memory_service = memory_service
         self.detector = detector or MemoryCandidateDetector()
+        self.enabled = enabled
         self._pending: list[MemorySuggestion] = []
 
     def detect(self, user_message: str) -> list[MemorySuggestion]:
         """Detect suggestions from a message and queue them as pending."""
+        if not self.enabled:
+            return []
         suggestions = self.detector.detect(user_message)
         self._pending.extend(suggestions)
         return suggestions

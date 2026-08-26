@@ -14,6 +14,7 @@ from app import VisualShell
 from core.agent_events import AgentEvent, AgentEventType
 from core.conversation_runtime import ConversationRuntime
 from memory.memory_manager import MemoryManager
+from memory.repository import JsonMemoryRepository
 from ui.character_conversation_runner import CharacterConversationRunner
 from ui.short_ask import ShortAskPanel, ShortTalkState
 
@@ -57,14 +58,19 @@ class CharacterAwareProvider:
         }
 
 
-def _runner() -> tuple[
+def _runner(tmp_path=None) -> tuple[
     CharacterConversationRunner,
     MemoryManager,
     FakeMemoryClient,
     CharacterAwareProvider,
 ]:
     client = FakeMemoryClient()
-    manager = MemoryManager(client=client)
+    repository = (
+        JsonMemoryRepository(tmp_path / "records.json")
+        if tmp_path is not None
+        else None
+    )
+    manager = MemoryManager(client=client, repository=repository)
     provider = CharacterAwareProvider()
     runtime = ConversationRuntime(manager, provider)
     return CharacterConversationRunner(runtime), manager, client, provider
@@ -83,8 +89,8 @@ def test_who_are_you_uses_character_prompt_and_returns_firefly_reply() -> None:
     assert client.add_calls == 0
 
 
-def test_recent_project_reads_manual_memory_into_independent_context() -> None:
-    runner, manager, client, provider = _runner()
+def test_recent_project_reads_manual_memory_into_independent_context(tmp_path) -> None:
+    runner, manager, client, provider = _runner(tmp_path)
     memory = "我正在开发 Firefly AI Pet，希望它成为长期 AI Companion。"
     manager.add_memory(memory, {"category": "project", "source": "manual"})
 

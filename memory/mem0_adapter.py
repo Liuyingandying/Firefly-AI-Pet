@@ -53,11 +53,17 @@ class Mem0Adapter:
         *,
         user_id: str = DEFAULT_USER_ID,
         backend_factory: BackendFactory | None = None,
+        model_cache_dir: str | Path | None = None,
     ) -> None:
         self.storage_dir = Path(storage_dir or DEFAULT_STORAGE_DIR).resolve()
         self.user_id = _required_text(user_id, "user_id")
         self._backend_factory = backend_factory or _default_backend_factory
         self._backend: Any | None = None
+        self.model_cache_dir = (
+            Path(model_cache_dir).resolve()
+            if model_cache_dir is not None
+            else self.storage_dir / "models"
+        )
 
     def add(self, text: str, metadata: Mapping[str, Any] | None = None) -> str:
         """Index raw text and metadata, always bypassing Mem0 LLM inference."""
@@ -144,6 +150,35 @@ class Mem0Adapter:
             return False
         return True
 
+    def list_entries(self, *, limit: int = 1000) -> list[Hit]:
+        """Return every indexed entry for this user (for reconciliation)."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise ValueError("limit must be a positive integer")
+        try:
+            response = self._client().get_all(
+                filters={"user_id": self.user_id},
+                top_k=limit,
+            )
+        except Mem0AdapterError:
+            raise
+        except Exception as exc:
+            raise Mem0AdapterError("failed to list semantic index entries") from exc
+        hits = [_to_hit(item) for item in _result_items(response)]
+        return [hit for hit in hits if hit is not None]
+
+    def close(self) -> None:
+        """Release the local backend so another instance can open the storage."""
+        backend = self._backend
+        self._backend = None
+        if backend is None:
+            return
+        try:
+            client = getattr(getattr(backend, "vector_store", None), "client", None)
+            if client is not None:
+                client.close()
+        except Exception:
+            pass
+
     def _client(self) -> Any:
         if self._backend is not None:
             return self._backend
@@ -152,7 +187,7 @@ class Mem0Adapter:
         # Mem0 import (inside _default_backend_factory).
         os.environ["MEM0_TELEMETRY"] = "false"
         os.environ["MEM0_DIR"] = str(self.storage_dir / "mem0-home")
-        os.environ["FASTEMBED_CACHE_PATH"] = str(self.storage_dir / "models")
+        os.environ["FASTEMBED_CACHE_PATH"] = str(self.model_cache_dir)
         try:
             self.storage_dir.mkdir(parents=True, exist_ok=True)
             self._backend = self._backend_factory(self._config())
