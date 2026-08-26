@@ -33,6 +33,7 @@ from memory.suggestion.memory_candidate_detector import (
     MemoryCandidateDetector,
     MemorySuggestion,
 )
+from memory.suggestion.semantic_dedup import SemanticDedup
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,8 @@ class SuggestionService:
         auto_extract_enabled: bool = False,
         max_candidates_per_turn: int = 3,
         security_guard: MemorySecurityGuard | None = None,
+        semantic_dedup_enabled: bool = True,
+        semantic_dedup_threshold: float = 0.85,
     ) -> None:
         self.memory_service = memory_service
         self.detector = detector or MemoryCandidateDetector()
@@ -74,6 +77,12 @@ class SuggestionService:
         self.max_candidates_per_turn = max_candidates_per_turn
         self.security_guard: MemorySecurityGuard = (
             security_guard if security_guard is not None else NoopMemorySecurityGuard()
+        )
+        self.semantic_dedup_enabled = semantic_dedup_enabled
+        self.semantic_dedup = (
+            SemanticDedup(threshold=semantic_dedup_threshold)
+            if semantic_dedup_enabled
+            else None
         )
         self._pending: list[MemorySuggestion] = []
 
@@ -277,7 +286,13 @@ class SuggestionService:
     def _dedup_candidates(
         self, candidates: list[MemorySuggestion]
     ) -> list[MemorySuggestion]:
-        """Remove candidates that duplicate existing pending suggestions or MemoryRecords."""
+        """Remove candidates that duplicate existing pending suggestions or MemoryRecords.
+
+        Dedup pipeline:
+        1. Layer 1: normalised exact dedup (existing).
+        2. Layer 2: semantic dedup within same category (new).
+        3. Also checks existing MemoryRecords for semantic duplicates.
+        """
         if not candidates:
             return []
 
@@ -288,6 +303,7 @@ class SuggestionService:
 
         # Also check existing MemoryRecords if memory_service supports it
         existing_records_norm: set[str] = set()
+        existing_records: list[MemoryRecord] = []
         try:
             list_method = getattr(self.memory_service, "list", None)
             if callable(list_method):
@@ -296,6 +312,7 @@ class SuggestionService:
                         existing_records_norm.add(
                             self._normalize_for_compare(record.content)
                         )
+                        existing_records.append(record)
         except Exception:
             pass  # Best-effort; don't fail dedup on memory_service errors
 
@@ -305,18 +322,57 @@ class SuggestionService:
             norm = self._normalize_for_compare(candidate.content)
             if norm in existing_pending_norm or norm in existing_records_norm:
                 logger.debug(
-                    "Candidate suppressed (duplicate): %s", candidate.content[:50]
+                    "Candidate suppressed (exact duplicate): %s", candidate.content[:50]
                 )
                 continue
             if norm in normalized_seen:
                 continue
             normalized_seen.add(norm)
+
+            # Layer 2: semantic dedup
+            if self.semantic_dedup is not None:
+                try:
+                    # Check against existing pending (same category)
+                    same_cat_pending = [
+                        s for s in self._pending
+                        if s.category == candidate.category
+                    ]
+                    semantic_match = self.semantic_dedup.check_pending(
+                        candidate, same_cat_pending
+                    )
+                    if semantic_match is not None and semantic_match.is_duplicate:
+                        logger.debug(
+                            "Candidate suppressed (semantic duplicate of pending): %s",
+                            candidate.content[:50],
+                        )
+                        continue
+
+                    # Check against existing MemoryRecords (same category)
+                    same_cat_records = [
+                        r for r in existing_records
+                        if r.category == candidate.category
+                    ]
+                    semantic_match = self.semantic_dedup.check_existing_records(
+                        candidate, same_cat_records
+                    )
+                    if semantic_match is not None and semantic_match.is_duplicate:
+                        logger.debug(
+                            "Candidate suppressed (semantic duplicate of record): %s",
+                            candidate.content[:50],
+                        )
+                        continue
+                except Exception as exc:
+                    logger.debug(
+                        "Semantic dedup comparison failed, falling back to exact dedup: %s",
+                        exc,
+                    )
+
             deduped.append(candidate)
 
         return deduped
 
     def _has_existing_memory(self, suggestion: MemorySuggestion) -> bool:
-        """Check if a suggestion duplicates any existing MemoryRecord."""
+        """Check if a suggestion duplicates any existing MemoryRecord (exact + semantic)."""
         try:
             list_method = getattr(self.memory_service, "list", None)
             if not callable(list_method):
@@ -328,6 +384,28 @@ class SuggestionService:
                         return True
         except Exception:
             pass
+
+        # Layer 2: semantic check against existing records
+        if self.semantic_dedup is not None:
+            try:
+                existing_records: list[MemoryRecord] = []
+                list_method = getattr(self.memory_service, "list", None)
+                if callable(list_method):
+                    for record in list_method():
+                        if isinstance(record, MemoryRecord):
+                            existing_records.append(record)
+                same_cat_records = [
+                    r for r in existing_records
+                    if r.category == suggestion.category
+                ]
+                semantic_match = self.semantic_dedup.check_existing_records(
+                    suggestion, same_cat_records
+                )
+                if semantic_match is not None and semantic_match.is_duplicate:
+                    return True
+            except Exception:
+                pass  # Best-effort; don't fail
+
         return False
 
     @staticmethod

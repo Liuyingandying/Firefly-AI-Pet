@@ -168,6 +168,8 @@ class CompanionRuntime:
                 enabled=config.suggestion.enabled,
                 auto_extract_enabled=config.suggestion.auto_extract_enabled,
                 max_candidates_per_turn=config.suggestion.max_candidates_per_turn,
+                semantic_dedup_enabled=config.suggestion.semantic_dedup_enabled,
+                semantic_dedup_threshold=config.suggestion.semantic_dedup_threshold,
             )
         else:
             self.suggestion_service = None

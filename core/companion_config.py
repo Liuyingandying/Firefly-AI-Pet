@@ -46,6 +46,8 @@ class SuggestionSettings(BaseModel):
     enabled: bool = False
     auto_extract_enabled: bool = False
     max_candidates_per_turn: int = Field(default=3, ge=0, le=10)
+    semantic_dedup_enabled: bool = True
+    semantic_dedup_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
 
 
 class SecuritySettings(BaseModel):
