@@ -138,6 +138,14 @@ core/provider_state.json*
 
 
 # ----------------------------
+# Third-party extracted / raw migration input
+# ----------------------------
+
+competitor_analysis/
+tools/firefly_memory_importer/data/
+
+
+# ----------------------------
 # Release bundles
 # ----------------------------
 
