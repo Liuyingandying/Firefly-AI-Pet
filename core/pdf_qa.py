@@ -167,28 +167,70 @@ class PdfQa:
         *,
         source_page: int,
         consent: bool = False,
+        image_ocr_text: str | None = None,
     ) -> ExplainEntry:
         """Explain only text the user explicitly selected.
 
         No PDF is opened here and no surrounding/full-document context is sent.
         The caller must obtain explicit consent immediately before this call.
+
+        Args:
+            selected_text: User-selected text from the PDF.
+            source_page: 1-based page number.
+            consent: Explicit user consent for external provider call.
+            image_ocr_text: Optional OCR text from an attached image.
+                When present, the prompt includes both selected_text and
+                image_ocr_text as clearly separated context sections.
+
+        Raises:
+            ValueError: If selected_text is empty AND image_ocr_text is empty.
         """
         self._require_external_consent(consent)
         selection = selected_text.strip() if isinstance(selected_text, str) else ""
-        if not selection:
-            raise ValueError("selected_text must be non-empty")
+        ocr = image_ocr_text.strip() if isinstance(image_ocr_text, str) else ""
+        if not selection and not ocr:
+            raise ValueError("selected_text and image_ocr_text are both empty")
         if len(selection) > 2_000:
             raise ValueError("selected_text must not exceed 2000 characters")
         if isinstance(source_page, bool) or not isinstance(source_page, int) or source_page < 1:
             raise ValueError("source_page must be a positive integer")
 
-        prompt = (
-            "你是 Firefly，一个友好的学术助手。用户已明确选择并授权解释"
-            "下面这段 PDF 文本。只解释所给文本，不推测或索取全文。\n\n"
-            f"页码：{source_page}\n"
-            f"选中文本：\n{selection}\n\n"
-            "请用简洁中文说明其含义；必要时保留原文术语。"
-        )
+        # Build context sections and choose prompt tone
+        context_parts: list[str] = []
+        if selection:
+            context_parts.append(f"页码：{source_page}")
+            context_parts.append(f"选中文本：\n{selection}")
+        if ocr:
+            context_parts.append(f"图片 OCR 上下文：\n{ocr}")
+
+        if selection and ocr:
+            prompt = (
+                "你是 Firefly，一个友好的学术助手。用户已明确选择并授权"
+                "解释以下 PDF 选中文本及关联图片 OCR 内容。"
+                "只解释所给内容，不推测或索取全文。\n\n"
+                + "\n\n".join(context_parts)
+                + "\n\n"
+                "请用简洁中文说明其含义；必要时保留原文术语。"
+            )
+            label = "选中文本 + OCR"
+        elif ocr:
+            prompt = (
+                "你是 Firefly，一个友好的学术助手。用户已授权解释以下"
+                "图片 OCR 识别出的文本。只解释所给内容，不推测原文。\n\n"
+                + "\n\n".join(context_parts)
+                + "\n\n"
+                "请用简洁中文说明其含义；必要时保留原文术语。"
+            )
+            label = "OCR 文本"
+        else:
+            prompt = (
+                "你是 Firefly，一个友好的学术助手。用户已明确选择并授权解释"
+                "下面这段 PDF 文本。只解释所给文本，不推测或索取全文。\n\n"
+                + "\n\n".join(context_parts)
+                + "\n\n"
+                "请用简洁中文说明其含义；必要时保留原文术语。"
+            )
+            label = "选中文本"
         chat = self._get_chat()
         try:
             response = chat([{"role": "user", "content": prompt}], temperature=0.2)
@@ -198,7 +240,7 @@ class PdfQa:
             explanation = f"无法解释选中文本：{exc}"
         return ExplainEntry(
             kind="paragraph",
-            label="选中文本",
+            label=label,
             explanation=explanation,
             source_page=source_page,
             source_text=selection,

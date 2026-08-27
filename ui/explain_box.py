@@ -21,8 +21,8 @@ import logging
 from pathlib import Path
 from typing import Any, Sequence
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal
-from PySide6.QtGui import QFont, QFontMetrics
+from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtGui import QFont, QFontMetrics, QPixmap
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -32,9 +32,11 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QApplication,
     QSizePolicy,
+    QFileDialog,
 )
 
 from . import theme
+from .image_ocr_worker import ImageOcrSignalRelay, ImageOcrWorker
 from core.pdf_qa import ExplainEntry, PdfQa, PdfQaResult
 
 log = logging.getLogger("firefly.explain_box")
@@ -61,12 +63,14 @@ class _ExplainWorker(QObject):
         selected_text: str,
         source_page: int,
         consent: bool,
+        image_ocr_text: str = "",
     ) -> None:
         super().__init__()
         self._qa = qa
         self._selected_text = selected_text
         self._source_page = source_page
         self._consent = consent
+        self._image_ocr_text = image_ocr_text
 
     def run(self) -> None:
         try:
@@ -74,10 +78,20 @@ class _ExplainWorker(QObject):
                 self._selected_text,
                 source_page=self._source_page,
                 consent=self._consent,
+                image_ocr_text=self._image_ocr_text or None,
             )
             self.finished.emit(entry)
         except Exception as exc:
             self.error.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Async worker: runs RapidOCR on an image file outside the Qt main thread
+# ---------------------------------------------------------------------------
+
+# Public, shared worker — also used by PageLensPanel.
+# ExplainBox keeps a backwards-compatible alias for existing imports in tests.
+_ImageOcrWorker = ImageOcrWorker
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +132,17 @@ class ExplainBox(QWidget):
         self._worker: _ExplainWorker | None = None
         self._running = False
 
+        # Image attachment state
+        self._image_path: str | None = None
+        self._ocr_text: str = ""
+        self._ocr_status: str = "未识别"  # 未识别/识别中/已识别/OCR失败
+        self._ocr_generation: int = 0  # generation counter for race prevention
+        self._ocr_thread: QThread | None = None
+        self._ocr_worker: _ImageOcrWorker | None = None
+        self._ocr_relay = ImageOcrSignalRelay(self)
+        self._ocr_relay.finished.connect(self._on_ocr_finished)
+        self._ocr_relay.error.connect(self._on_ocr_error)
+
         # Root layout
         root = QVBoxLayout(self)
         shadow = theme.SHADOW_MARGIN - 2
@@ -141,6 +166,10 @@ class ExplainBox(QWidget):
         sep.setFixedHeight(1)
         sep.setStyleSheet(f"background: {theme.css_color(theme.GLASS_BORDER)};")
         inner.addWidget(sep)
+
+        # Image attachment toolbar
+        self._image_toolbar = self._build_image_toolbar()
+        inner.addWidget(self._image_toolbar)
 
         # Scroll area
         self._scroll = QScrollArea(self._glass)
@@ -184,6 +213,73 @@ class ExplainBox(QWidget):
         layout.addWidget(close_btn)
 
         return header
+
+    def _build_image_toolbar(self) -> QFrame:
+        """Build the image attachment toolbar below the header."""
+        toolbar = QFrame(self._glass)
+        toolbar.setFixedHeight(44)
+        toolbar.setObjectName("imageToolbar")
+
+        layout = QHBoxLayout(toolbar)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(8)
+
+        # Add image button
+        add_btn = _IconButton("📷", "添加图片", self._glass)
+        add_btn.clicked.connect(self._on_add_image)
+        layout.addWidget(add_btn)
+
+        # Image preview label (hidden until an image is attached)
+        self._image_preview = QLabel(self._glass)
+        self._image_preview.setFixedSize(32, 32)
+        self._image_preview.setVisible(False)
+        layout.addWidget(self._image_preview)
+
+        # Remove image button (hidden until an image is attached)
+        self._remove_btn = _IconButton("✕", "移除", self._glass)
+        self._remove_btn.setVisible(False)
+        self._remove_btn.clicked.connect(self._on_remove_image)
+        layout.addWidget(self._remove_btn)
+
+        # Spacer
+        layout.addStretch(1)
+
+        # OCR status label
+        self._ocr_status_label = QLabel("未识别", toolbar)
+        self._ocr_status_label.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: 8pt;"
+        )
+        self._ocr_status_label.setVisible(False)
+        layout.addWidget(self._ocr_status_label)
+
+        # Collapsible OCR text panel (hidden by default)
+        self._ocr_text_panel = QFrame(self._glass)
+        self._ocr_text_panel.setVisible(False)
+        self._ocr_text_panel.setFixedHeight(0)
+        self._ocr_text_panel.setStyleSheet(
+            f"background: {theme.css_color(theme.GLASS_BACKGROUND_HOVER)}; "
+            f"border: 1px solid {theme.css_color(theme.GLASS_BORDER)}; "
+            f"border-radius: 6px;"
+        )
+        ocr_inner = QVBoxLayout(self._ocr_text_panel)
+        ocr_inner.setContentsMargins(6, 4, 6, 4)
+        ocr_inner.setSpacing(2)
+
+        self._ocr_text_label = QLabel("", self._ocr_text_panel)
+        self._ocr_text_label.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: 8pt;"
+        )
+        self._ocr_text_label.setWordWrap(True)
+        self._ocr_text_label.setMaximumHeight(60)
+        ocr_inner.addWidget(self._ocr_text_label)
+
+        layout.addWidget(self._ocr_text_panel)
+
+        return toolbar
 
     def load_pdf(self, file_path: str | Path) -> None:
         """Load and parse a PDF locally without contacting any provider."""
@@ -249,7 +345,145 @@ class ExplainBox(QWidget):
         """Set consent only from an explicit user-facing confirmation action."""
         self._external_provider_consent = granted is True
 
-    def explain_selection(self, selected_text: str, *, source_page: int) -> None:
+    # ------------------------------------------------------------------
+    # Image attachment
+    # ------------------------------------------------------------------
+
+    def _on_add_image(self) -> None:
+        """Open file dialog to attach an image for OCR context."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择图片",
+            "",
+            "图片文件 (*.png *.jpg *.jpeg *.webp)",
+        )
+        if not path:
+            return
+        self._attach_image(str(Path(path).resolve()))
+
+    def _attach_image(self, image_path: str) -> None:
+        """Attach an image and start OCR."""
+        # Cancel any in-flight OCR
+        self._cancel_ocr()
+        self._image_path = image_path
+        self._ocr_text = ""
+        self._ocr_status = "识别中"
+        self._ocr_generation += 1
+        gen = self._ocr_generation
+
+        # Show preview
+        pixmap = QPixmap(image_path)
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(
+                32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            self._image_preview.setPixmap(scaled)
+            self._image_preview.setVisible(True)
+            self._remove_btn.setVisible(True)
+
+        # Show status
+        self._ocr_status_label.setVisible(True)
+        self._update_ocr_status()
+
+        # Hide OCR text panel
+        self._ocr_text_panel.setVisible(False)
+        self._ocr_text_panel.setFixedHeight(0)
+
+        # Run OCR in background
+        thread = QThread(self)
+        worker = _ImageOcrWorker(image_path, generation=gen)
+        worker.moveToThread(thread)
+
+        worker.finished.connect(
+            self._ocr_relay.forward_finished, Qt.QueuedConnection,
+        )
+        worker.error.connect(
+            self._ocr_relay.forward_error, Qt.QueuedConnection,
+        )
+        worker.finished.connect(thread.quit)
+        worker.error.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+        worker.finished.connect(worker.deleteLater)
+        worker.error.connect(worker.deleteLater)
+
+        thread.started.connect(worker.run)
+        thread.start()
+
+        self._ocr_thread = thread
+        self._ocr_worker = worker
+
+    @Slot(int, str)
+    def _on_ocr_finished(self, gen: int, ocr_text: str) -> None:
+        """Handle OCR completion (runs in Qt main thread via QueuedConnection)."""
+        if gen != self._ocr_generation:
+            return
+        self._ocr_worker = None
+        self._ocr_text = ocr_text
+        self._ocr_status = "已识别" if ocr_text else "OCR失败"
+        self._update_ocr_status()
+
+        if ocr_text:
+            self._ocr_text_label.setText(ocr_text)
+            self._ocr_text_panel.setVisible(True)
+            self._ocr_text_panel.setFixedHeight(70)
+
+    @Slot(int, str)
+    def _on_ocr_error(self, gen: int, message: str) -> None:
+        """Handle OCR error (runs in Qt main thread via QueuedConnection)."""
+        if gen != self._ocr_generation:
+            return
+        self._ocr_worker = None
+        self._ocr_status = "OCR失败"
+        self._update_ocr_status()
+        log.warning("[ExplainBox] OCR error gen=%d: %s", gen, message)
+
+    def _update_ocr_status(self) -> None:
+        status_colors = {
+            "未识别": theme.TEXT_SECONDARY,
+            "识别中": theme.CLAUDE_ORANGE,
+            "已识别": theme.CHATGPT_GREEN,
+            "OCR失败": theme.ERROR_STATUS,
+        }
+        color = status_colors.get(self._ocr_status, theme.TEXT_SECONDARY)
+        self._ocr_status_label.setStyleSheet(
+            f"color: {theme.css_color(color)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: 8pt;"
+        )
+        self._ocr_status_label.setText(self._ocr_status)
+
+    def _on_remove_image(self) -> None:
+        """Remove the attached image and clear OCR state."""
+        self._ocr_generation += 1
+        self._cancel_ocr()
+        self._image_path = None
+        self._ocr_text = ""
+        self._ocr_status = "未识别"
+        self._image_preview.setVisible(False)
+        self._remove_btn.setVisible(False)
+        self._ocr_status_label.setVisible(False)
+        self._ocr_text_panel.setVisible(False)
+        self._ocr_text_panel.setFixedHeight(0)
+
+    def _cancel_ocr(self) -> None:
+        """Stop accepting the current job and ask its event loop to exit."""
+        self._ocr_worker = None
+        if self._ocr_thread is not None:
+            thread = self._ocr_thread
+            self._ocr_thread = None
+            try:
+                if thread.isRunning():
+                    thread.quit()
+            except RuntimeError:
+                pass
+
+    # ------------------------------------------------------------------
+    # explain_selection (extended with image OCR context)
+    # ------------------------------------------------------------------
+
+    def explain_selection(
+        self, selected_text: str, *, source_page: int
+    ) -> None:
         """Explain one explicitly selected passage; never sends the full PDF.
 
         Runs asynchronously in a background thread.  The UI returns
@@ -272,6 +506,7 @@ class ExplainBox(QWidget):
             selected_text=selected_text,
             source_page=source_page,
             consent=self._external_provider_consent,
+            image_ocr_text=self._ocr_text,
         )
         worker.moveToThread(thread)
 
@@ -539,19 +774,69 @@ class _ExplainChip(QFrame):
         path.addRoundedRect(QRectF(self.rect()), 11, 11)
 
         if self._hovered:
-            painter.fillPath(path, QColor(theme.GLASS_BACKGROUND_HOVER))
-            painter.setPen(QColor(theme.CYAN_ACCENT))
+            painter.fillPath(path, theme.qcolor(theme.GLASS_BACKGROUND_HOVER))
+            painter.setPen(theme.qcolor(theme.CYAN_ACCENT))
         else:
-            painter.fillPath(path, QColor(theme.GLASS_BACKGROUND))
-            painter.setPen(QColor(theme.GLASS_BORDER))
+            painter.fillPath(path, theme.qcolor(theme.GLASS_BACKGROUND))
+            painter.setPen(theme.qcolor(theme.GLASS_BORDER))
 
         painter.drawPath(path)
-        painter.setPen(QColor(theme.TEXT_SECONDARY))
+        painter.setPen(theme.qcolor(theme.TEXT_SECONDARY))
         text_rect = self.rect().adjusted(8, 0, -8, 0)
         text = QFontMetrics(painter.font()).elidedText(
             self._text, Qt.ElideRight, text_rect.width()
         )
         painter.drawText(text_rect, Qt.AlignCenter, text)
+        painter.end()
+
+
+class _IconButton(QFrame):
+    """Compact icon button for the image toolbar."""
+
+    clicked = Signal()
+
+    def __init__(self, icon: str, tooltip: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._icon = icon
+        self._tooltip = tooltip
+        self.setFixedSize(36, 32)
+        self.setCursor(Qt.PointingHandCursor)
+        self._hovered = False
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:
+        from PySide6.QtGui import QPainter
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        if self._hovered:
+            painter.fillRect(
+                self.rect(), theme.qcolor(theme.GLASS_BACKGROUND_HOVER)
+            )
+        else:
+            painter.fillRect(self.rect(), Qt.transparent)
+
+        painter.setPen(theme.qcolor(theme.TEXT_SECONDARY))
+        painter.drawText(
+            self.rect(), Qt.AlignCenter, self._icon
+        )
         painter.end()
 
 
