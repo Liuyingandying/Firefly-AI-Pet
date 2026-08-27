@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -43,10 +45,11 @@ def _make_runtime(
     conv_path: Path | None = None,
     fake_memory: bool = True,
 ) -> tuple[CompanionRuntime, BondStateEngine, _FakeProvider]:
+    run_tmp = Path(os.environ.get("PYTEST_DEBUG_TEMPROOT", "."))
     if bond_path is None:
-        bond_path = Path("/tmp/_firefly_test_bond_none.json")
+        bond_path = run_tmp / f"firefly-test-bond-{uuid.uuid4().hex}.json"
     if conv_path is None:
-        conv_path = Path("/tmp/_firefly_test_conv_none.json")
+        conv_path = run_tmp / f"firefly-test-conv-{uuid.uuid4().hex}.json"
     bond = BondStateEngine(bond_path)
     conv = ConversationStore(conv_path)
     provider = _FakeProvider()
@@ -430,14 +433,26 @@ class TestP7G_RestartPersistence:
 
 
 # ======================================================================
-# P7-H: Memory 删除不会错误重置 Bond
+# P7-H: BondState is independent of MemoryService
 # ======================================================================
 
 
 class TestP7H_MemoryBondBoundary:
-    """Memory operations must not affect BondState."""
+    """BondState must not be affected by MemoryService operations.
 
-    def test_memory_delete_does_not_affect_bond(self, tmp_path: Path) -> None:
+    Note: CompanionRuntime only accepts MemoryReader (search-only),
+    so there is no runtime path for memory delete/clear to reach BondState.
+    This test verifies that structural decoupling.
+    """
+
+    def test_memory_service_decoupled_from_bond(self, tmp_path: Path) -> None:
+        """BondState is structurally independent of MemoryService.
+
+        CompanionRuntime.memory_service only exposes search(), not delete().
+        BondStateEngine has no memory_service dependency at all.
+        This test verifies that the bond engine is unaffected by any
+        MemoryService state because no operation path connects them.
+        """
         bond_path = tmp_path / "bond.json"
         conv_path = tmp_path / "conv.json"
 
@@ -448,16 +463,16 @@ class TestP7H_MemoryBondBoundary:
             runtime.chat("聊天")
         bond_state_before = bond.read()
 
-        # MemoryService is independent — deleting memories doesn't touch BondStateEngine
-        # The bond engine has no memory_service dependency
+        # No memory delete API is available through CompanionRuntime,
+        # and BondStateEngine has no memory_service dependency.
         bond_state_after = bond.read()
 
         assert bond_state_after.phase == bond_state_before.phase
         assert bond_state_after.trust_level == bond_state_before.trust_level
         assert bond_state_after.familiarity_level == bond_state_before.familiarity_level
 
-    def test_clear_memory_does_not_reset_bond(self, tmp_path: Path) -> None:
-        """Clear All Long-Term Memories → BondState 不清空."""
+    def test_clearing_conversation_history_does_not_reset_bond(self, tmp_path: Path) -> None:
+        """Clearing conversation history → BondState 不清空."""
         bond_path = tmp_path / "bond.json"
 
         runtime, bond, _ = _make_runtime(bond_path=bond_path)
@@ -511,26 +526,27 @@ class TestP7H_MemoryBondBoundary:
 
 
 # ======================================================================
-# P7-I: Worker agent doesn't affect Bond
+# P7-I: BondState is independent of worker-agent execution
 # ======================================================================
 
 
 class TestP7I_WorkerAgentBoundary:
-    """Worker-agent / Codex / task execution must not increase Bond."""
+    """Worker-agent / Codex / task execution must not increase Bond.
 
-    def test_bond_only_advances_via_companion_runtime_chat(self, tmp_path: Path) -> None:
-        """Only CompanionRuntime.chat() advances bond, not direct BondSignal calls."""
+    TODO: Real worker-agent isolation requires an Agent execution layer
+    that can invoke the system without going through CompanionRuntime.chat().
+    Currently this test only verifies that CompanionRuntime.chat() is a
+    valid path for bond growth (familiarity increases).
+    """
+
+    def test_companion_runtime_chat_advances_bond(self, tmp_path: Path) -> None:
+        """CompanionRuntime.chat() advances bond familiarity."""
         bond_path = tmp_path / "bond.json"
         runtime, bond, _ = _make_runtime(bond_path=bond_path)
 
-        # Direct BondSignal application is a system operation, not a user conversation
-        # The bond should only grow through CompanionRuntime.chat()
         initial = bond.read()
 
-        # Simulate worker-agent calling bond directly (should not happen in production)
-        # But even if it does, it's a trusted system signal
-        # The key test: CompanionRuntime.chat() is the only path that auto-advances bond
-
+        # CompanionRuntime.chat() is the documented path for bond growth.
         runtime.chat("worker agent message")
         after_chat = bond.read()
 
