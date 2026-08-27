@@ -5,6 +5,9 @@ Architecture:
   - Integrates with existing PageLens concept cards via shared theme
   - Supports: term explanation, formula explanation, chart explanation,
     paragraph summary, concept cards, and recommended questions
+  - Async: explain_selection runs in a background thread to avoid blocking
+    the Qt main thread.  Uses QThread + worker signal pattern (same family
+    as ``ui.character_conversation_runner``).
 
 Dependencies:
   - core.pdf_qa (this project)
@@ -16,9 +19,9 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QObject, QThread, Qt, Signal
 from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QWidget,
@@ -37,6 +40,50 @@ from core.pdf_qa import ExplainEntry, PdfQa, PdfQaResult
 log = logging.getLogger("firefly.explain_box")
 
 
+# ---------------------------------------------------------------------------
+# Async worker: runs PdfQa.explain_selection outside the Qt main thread
+# ---------------------------------------------------------------------------
+
+class _ExplainWorker(QObject):
+    """Runs PdfQa.explain_selection in a background thread.
+
+    Signals
+        finished(ExplainEntry): successful explanation
+        error(str): provider / runtime error message
+    """
+
+    finished = Signal(object)  # ExplainEntry
+    error = Signal(str)
+
+    def __init__(
+        self,
+        qa: PdfQa,
+        selected_text: str,
+        source_page: int,
+        consent: bool,
+    ) -> None:
+        super().__init__()
+        self._qa = qa
+        self._selected_text = selected_text
+        self._source_page = source_page
+        self._consent = consent
+
+    def run(self) -> None:
+        try:
+            entry = self._qa.explain_selection(
+                self._selected_text,
+                source_page=self._source_page,
+                consent=self._consent,
+            )
+            self.finished.emit(entry)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Explain Box widget
+# ---------------------------------------------------------------------------
+
 class ExplainBox(QWidget):
     """PDF Explain Box — terminology, formula, chart explanations.
 
@@ -44,6 +91,10 @@ class ExplainBox(QWidget):
         term_requested(str): user clicked a term chip to explain
         question_requested(str): user clicked a recommended question
         close_requested(): user clicked the close button
+
+    Async behaviour:
+        explain_selection() spawns a background worker.  The UI returns
+        immediately and updates when the worker emits ``finished`` / ``error``.
     """
 
     term_requested = Signal(str)
@@ -60,6 +111,12 @@ class ExplainBox(QWidget):
         self._pdf_path: str | None = None
         self._qa: PdfQa | None = None
         self._visible = False
+        self._external_provider_consent = False
+
+        # Async worker (QThread + QObject)
+        self._worker_thread: QThread | None = None
+        self._worker: _ExplainWorker | None = None
+        self._running = False
 
         # Root layout
         root = QVBoxLayout(self)
@@ -129,9 +186,10 @@ class ExplainBox(QWidget):
         return header
 
     def load_pdf(self, file_path: str | Path) -> None:
-        """Load a PDF and extract initial concepts/summary."""
+        """Load and parse a PDF locally without contacting any provider."""
         self._pdf_path = str(file_path)
         self._qa = PdfQa()
+        self._external_provider_consent = False
 
         self._content.show_loading()
 
@@ -141,13 +199,19 @@ class ExplainBox(QWidget):
             result = self._qa.process(file_path)
             log.info("[ExplainBox] PDF loaded: %d pages, %d chars", result.total_pages, result.text_length)
 
-            # Extract concepts for top chips
-            concepts = self._qa.extract_concepts(file_path)
-            self._content.show_concepts(concepts)
-
-            # Generate summary
-            qa_result = self._qa.summarize(file_path)
-            self._content.show_summary(qa_result.summary, qa_result.recommended_questions)
+            source_counts: dict[str, int] = {}
+            for page in result.pages:
+                source_counts[page.extraction_source] = (
+                    source_counts.get(page.extraction_source, 0) + 1
+                )
+            details = "，".join(
+                f"{source} {count} 页" for source, count in sorted(source_counts.items())
+            )
+            self._content.show_summary(
+                f"已在本地解析 {result.total_pages} 页（{details}）。"
+                "选择需要解释的文本后，再明确授权发送该段文本。",
+                [],
+            )
 
         except Exception as exc:
             log.warning("[ExplainBox] Failed to load PDF: %s", exc)
@@ -158,7 +222,11 @@ class ExplainBox(QWidget):
         if not self._qa or not self._pdf_path:
             return
         try:
-            entry = self._qa.explain_term(self._pdf_path, term)
+            entry = self._qa.explain_term(
+                self._pdf_path,
+                term,
+                consent=self._external_provider_consent,
+            )
             self._content.show_explain(entry)
         except Exception as exc:
             self._content.show_error(f"无法解释术语：{exc}")
@@ -168,10 +236,75 @@ class ExplainBox(QWidget):
         if not self._qa or not self._pdf_path:
             return
         try:
-            result = self._qa.answer(self._pdf_path, question)
+            result = self._qa.answer(
+                self._pdf_path,
+                question,
+                consent=self._external_provider_consent,
+            )
             self._content.show_answer(result.answer, result.terms)
         except Exception as exc:
             self._content.show_error(f"无法回答：{exc}")
+
+    def set_external_provider_consent(self, granted: bool) -> None:
+        """Set consent only from an explicit user-facing confirmation action."""
+        self._external_provider_consent = granted is True
+
+    def explain_selection(self, selected_text: str, *, source_page: int) -> None:
+        """Explain one explicitly selected passage; never sends the full PDF.
+
+        Runs asynchronously in a background thread.  The UI returns
+        immediately and updates when the worker finishes or fails.
+        """
+        if not self._qa:
+            return
+        # Duplicate-click protection: reject if a request is already in flight.
+        if self._running:
+            log.debug("[ExplainBox] explain_selection already running, ignoring")
+            return
+
+        self._running = True
+        self._content.show_loading()
+
+        # Create worker + thread (QThread ensures signals fire in main thread).
+        thread = QThread(self)
+        worker = _ExplainWorker(
+            qa=self._qa,
+            selected_text=selected_text,
+            source_page=source_page,
+            consent=self._external_provider_consent,
+        )
+        worker.moveToThread(thread)
+
+        # Wire signals: worker finished → UI update; worker error → UI update.
+        worker.finished.connect(self._on_explain_finished)
+        worker.error.connect(self._on_explain_error)
+
+        # When thread finishes, clean up worker.
+        thread.finished.connect(thread.deleteLater)
+        worker.finished.connect(worker.deleteLater)
+        worker.error.connect(worker.deleteLater)
+
+        # Start the worker.
+        thread.started.connect(worker.run)
+        thread.start()
+
+        # Store references so we can guard against reuse.
+        self._worker_thread = thread
+        self._worker = worker
+
+    def _on_explain_finished(self, entry: ExplainEntry) -> None:
+        """Handle successful explanation result (runs in Qt main thread)."""
+        self._running = False
+        self._worker_thread = None
+        self._worker = None
+        self._content.show_explain(entry)
+
+    def _on_explain_error(self, message: str) -> None:
+        """Handle provider/runtime error (runs in Qt main thread)."""
+        self._running = False
+        self._worker_thread = None
+        self._worker = None
+        self._content.show_error(f"无法解释选中文本：{message}")
 
     def show_panel(self) -> None:
         self._visible = True
@@ -188,7 +321,7 @@ class ExplainBox(QWidget):
             return False
         else:
             self.show_panel()
-            return True
+            return False
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +401,7 @@ class _ExplainContent(QWidget):
         self._layout.addWidget(self._questions_frame)
 
     def show_loading(self) -> None:
-        self._title_label.setText("正在加载 PDF...")
+        self._title_label.setText("解释中…")
         self._body_label.setText("")
         self._chips_frame.hide()
         self._questions_label.hide()

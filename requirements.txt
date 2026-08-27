@@ -10,15 +10,8 @@ pydantic-settings>=2.2,<3
 # ---------------------------------------------------------------------------
 # PDF Multimodal Processing (Phase 10)
 # ---------------------------------------------------------------------------
-# Core PDF handling (already installed: PyMuPDF via pymupdf)
-# Optional: install one OCR engine for scanned/image PDFs
-
-# RapidOCR — fast, CPU-friendly, recommended default
-# pip install rapidocr_onnxruntime
-#
-# EasyOCR — more accurate but slower, larger model
-# pip install easyocr
-#
-# Choose one. Both are optional — the pipeline degrades gracefully
-# (image PDFs without OCR return rendered images for vision model).
-rapidocr_onnxruntime>=1.3,<2
+# PDF/OCR dependencies for Phase 8 — installed via requirements.txt.
+PyMuPDF>=1.24,<2
+# Canonical OCR: rapidocr 3.x is the official unified package.
+# Code also has legacy fallback to rapidocr_onnxruntime 1.x.
+rapidocr>=3.9,<4

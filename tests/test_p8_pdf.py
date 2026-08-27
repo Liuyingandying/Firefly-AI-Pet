@@ -186,7 +186,7 @@ class TestP8C_PdfQa:
         qa, mock_chat = self._make_fake_qa()
         pdf_path = _make_text_pdf(tmp_path / "test.pdf", "Test content for QA.")
 
-        result = qa.answer(pdf_path, "What is this about?")
+        result = qa.answer(pdf_path, "What is this about?", consent=True)
 
         assert isinstance(result, PdfQaResult)
         assert result.answer == "测试回答"
@@ -199,7 +199,7 @@ class TestP8C_PdfQa:
             "The quick brown fox jumps over the lazy dog.",
         )
 
-        qa.answer(pdf_path, "What does the fox do?")
+        qa.answer(pdf_path, "What does the fox do?", consent=True)
 
         # Verify chat was called with a prompt containing PDF context
         call_args = mock_chat.call_args
@@ -211,7 +211,7 @@ class TestP8C_PdfQa:
         qa, mock_chat = self._make_fake_qa()
         pdf_path = _make_text_pdf(tmp_path / "test.pdf", "Summary test content.")
 
-        result = qa.summarize(pdf_path)
+        result = qa.summarize(pdf_path, consent=True)
 
         assert isinstance(result, PdfQaResult)
         assert result.summary == "测试回答"
@@ -224,7 +224,7 @@ class TestP8C_PdfQa:
         }
         pdf_path = _make_text_pdf(tmp_path / "test.pdf", "Concept extraction test.")
 
-        concepts = qa.extract_concepts(pdf_path)
+        concepts = qa.extract_concepts(pdf_path, consent=True)
 
         assert isinstance(concepts, list)
         assert len(concepts) <= 8
@@ -236,7 +236,7 @@ class TestP8C_PdfQa:
             "The term MachineLearning is important in this paper.",
         )
 
-        entry = qa.explain_term(pdf_path, "MachineLearning")
+        entry = qa.explain_term(pdf_path, "MachineLearning", consent=True)
 
         assert isinstance(entry, ExplainEntry)
         assert entry.kind == "term"

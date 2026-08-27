@@ -44,6 +44,10 @@ class PdfQaResult:
     terms: list[str] = field(default_factory=list)
 
 
+class ExternalProviderConsentRequired(PermissionError):
+    """Raised before PDF-derived text can reach an external provider."""
+
+
 class PdfQa:
     """PDF question answering with explain box integration.
 
@@ -75,6 +79,7 @@ class PdfQa:
         question: str,
         *,
         top_k_pages: int = 3,
+        consent: bool = False,
     ) -> PdfQaResult:
         """Answer a question about a PDF.
 
@@ -86,6 +91,7 @@ class PdfQa:
         Returns:
             PdfQaResult with answer, explanations, and follow-up questions.
         """
+        self._require_external_consent(consent)
         result = self.process(file_path)
         context = self._build_context(result, top_k_pages=top_k_pages)
 
@@ -113,6 +119,8 @@ class PdfQa:
         self,
         file_path: str | Path,
         term: str,
+        *,
+        consent: bool = False,
     ) -> ExplainEntry:
         """Explain a specific term found in a PDF.
 
@@ -123,6 +131,7 @@ class PdfQa:
         Returns:
             ExplainEntry with explanation.
         """
+        self._require_external_consent(consent)
         result = self.process(file_path)
         context = self._find_term_context(result, term)
 
@@ -152,7 +161,52 @@ class PdfQa:
             explanation=explanation,
         )
 
-    def summarize(self, file_path: str | Path) -> PdfQaResult:
+    def explain_selection(
+        self,
+        selected_text: str,
+        *,
+        source_page: int,
+        consent: bool = False,
+    ) -> ExplainEntry:
+        """Explain only text the user explicitly selected.
+
+        No PDF is opened here and no surrounding/full-document context is sent.
+        The caller must obtain explicit consent immediately before this call.
+        """
+        self._require_external_consent(consent)
+        selection = selected_text.strip() if isinstance(selected_text, str) else ""
+        if not selection:
+            raise ValueError("selected_text must be non-empty")
+        if len(selection) > 2_000:
+            raise ValueError("selected_text must not exceed 2000 characters")
+        if isinstance(source_page, bool) or not isinstance(source_page, int) or source_page < 1:
+            raise ValueError("source_page must be a positive integer")
+
+        prompt = (
+            "你是 Firefly，一个友好的学术助手。用户已明确选择并授权解释"
+            "下面这段 PDF 文本。只解释所给文本，不推测或索取全文。\n\n"
+            f"页码：{source_page}\n"
+            f"选中文本：\n{selection}\n\n"
+            "请用简洁中文说明其含义；必要时保留原文术语。"
+        )
+        chat = self._get_chat()
+        try:
+            response = chat([{"role": "user", "content": prompt}], temperature=0.2)
+            explanation = self._extract_content(response, default="")
+        except Exception as exc:
+            log.warning("[PdfQa] AI chat failed for selected text: %s", exc)
+            explanation = f"无法解释选中文本：{exc}"
+        return ExplainEntry(
+            kind="paragraph",
+            label="选中文本",
+            explanation=explanation,
+            source_page=source_page,
+            source_text=selection,
+        )
+
+    def summarize(
+        self, file_path: str | Path, *, consent: bool = False
+    ) -> PdfQaResult:
         """Generate a summary of a PDF.
 
         Args:
@@ -161,6 +215,7 @@ class PdfQa:
         Returns:
             PdfQaResult with summary and recommended questions.
         """
+        self._require_external_consent(consent)
         result = self.process(file_path)
         full_text = result.full_text[:15000]  # Limit for token budget
 
@@ -195,7 +250,9 @@ class PdfQa:
             recommended_questions=recommended_questions,
         )
 
-    def extract_concepts(self, file_path: str | Path) -> list[str]:
+    def extract_concepts(
+        self, file_path: str | Path, *, consent: bool = False
+    ) -> list[str]:
         """Extract key concepts from a PDF for PageLens concept chips.
 
         Args:
@@ -204,6 +261,7 @@ class PdfQa:
         Returns:
             List of concept names (top 8).
         """
+        self._require_external_consent(consent)
         result = self.process(file_path)
         context = result.full_text[:8000]
 
@@ -231,6 +289,14 @@ class PdfQa:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _require_external_consent(consent: bool) -> None:
+        if consent is not True:
+            raise ExternalProviderConsentRequired(
+                "Explicit consent is required before sending PDF-derived text "
+                "to an external provider"
+            )
 
     def _build_context(self, result: PdfResult, *, top_k_pages: int = 3) -> str:
         """Build context string from top-k most relevant pages."""
@@ -304,4 +370,5 @@ __all__ = [
     "PdfQa",
     "PdfQaResult",
     "ExplainEntry",
+    "ExternalProviderConsentRequired",
 ]

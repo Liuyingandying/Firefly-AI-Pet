@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 log = logging.getLogger("firefly.pdf_processor")
 
@@ -36,6 +37,10 @@ class PdfPage:
     width: float = 0.0
     height: float = 0.0
     has_text_layer: bool = True
+    extraction_source: str = "text_layer"
+    ocr_attempted: bool = False
+    ocr_succeeded: bool = False
+    ocr_error: str | None = None
 
 
 @dataclass
@@ -48,6 +53,9 @@ class PdfResult:
     is_scanned: bool = False
     has_text_layer: bool = True
     ocr_used: bool = False
+    ocr_attempted: bool = False
+    ocr_backend: str | None = None
+    errors: list[str] = field(default_factory=list)
 
     @property
     def full_text(self) -> str:
@@ -58,6 +66,89 @@ class PdfResult:
         return sum(len(p.text) for p in self.pages)
 
 
+class RapidOcrBackend:
+    """Small compatibility wrapper around the installed RapidOCR API."""
+
+    def __init__(self) -> None:
+        self.engine: Any = None
+        self.name: str | None = None
+        self.version: str | None = None
+        self.error: str | None = None
+        try:
+            from rapidocr import RapidOCR
+
+            self.engine = RapidOCR()
+            self.name = "rapidocr"
+            self.version = _package_version("rapidocr")
+            return
+        except (ImportError, OSError, RuntimeError) as exc:
+            self.error = f"rapidocr initialization failed: {type(exc).__name__}: {exc}"
+
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+
+            self.engine = RapidOCR()
+            self.name = "rapidocr_onnxruntime"
+            self.version = _package_version("rapidocr-onnxruntime")
+            self.error = None
+        except (ImportError, OSError, RuntimeError) as exc:
+            self.error = (
+                "RapidOCR backend unavailable: "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+    @property
+    def available(self) -> bool:
+        return self.engine is not None
+
+    @property
+    def label(self) -> str | None:
+        if self.name is None:
+            return None
+        return f"{self.name}=={self.version}" if self.version else self.name
+
+    def extract_text(self, image_bytes: bytes) -> str:
+        if self.engine is None:
+            raise RuntimeError(self.error or "RapidOCR backend unavailable")
+        return parse_rapidocr_text(self.engine(image_bytes))
+
+
+def parse_rapidocr_text(raw_result: Any) -> str:
+    """Extract recognized strings from current and legacy RapidOCR outputs."""
+    if raw_result is None:
+        return ""
+
+    modern_texts = getattr(raw_result, "txts", None)
+    if modern_texts is not None:
+        return "\n".join(
+            text.strip() for text in modern_texts
+            if isinstance(text, str) and text.strip()
+        )
+
+    lines = raw_result
+    if isinstance(raw_result, tuple) and len(raw_result) == 2:
+        lines = raw_result[0]
+    if not lines:
+        return ""
+    if not isinstance(lines, Sequence) or isinstance(lines, (str, bytes)):
+        raise ValueError("RapidOCR returned an unsupported result type")
+
+    texts: list[str] = []
+    for line in lines:
+        # rapidocr_onnxruntime 1.x: [box, text, score]
+        if isinstance(line, Sequence) and not isinstance(line, (str, bytes)):
+            if len(line) >= 2 and isinstance(line[1], str) and line[1].strip():
+                texts.append(line[1].strip())
+    return "\n".join(texts)
+
+
+def _package_version(package: str) -> str | None:
+    try:
+        return version(package)
+    except PackageNotFoundError:
+        return None
+
+
 class PdfProcessor:
     """PDF processing with text layer + OCR fallback.
 
@@ -65,23 +156,23 @@ class PdfProcessor:
     Uses RapidOCR as OCR fallback for scanned/image PDFs.
     """
 
-    # Minimum text length to consider a page as having a text layer
-    MIN_TEXT_LENGTH = 50
-
-    def __init__(self, use_ocr: bool = True) -> None:
+    def __init__(
+        self,
+        use_ocr: bool = True,
+        *,
+        ocr_backend: RapidOcrBackend | None = None,
+    ) -> None:
         self._use_ocr = use_ocr
+        self._ocr_backend: RapidOcrBackend | None = None
         self._ocr: Any = None
+        self._ocr_init_error: str | None = None
         if use_ocr:
-            self._ocr = self._init_ocr()
-
-    def _init_ocr(self) -> Any:
-        """Lazy-initialize OCR engine. Returns None if not available."""
-        try:
-            from rapidocr_onnxruntime import RapidOCR
-            return RapidOCR()
-        except ImportError:
-            log.warning("[PdfProcessor] rapidocr_onnxruntime not available, OCR disabled")
-            return None
+            self._ocr_backend = ocr_backend or RapidOcrBackend()
+            if self._ocr_backend.available:
+                self._ocr = self._ocr_backend
+            else:
+                self._ocr_init_error = self._ocr_backend.error
+                log.warning("[PdfProcessor] %s", self._ocr_init_error)
 
     def process(self, file_path: str | Path) -> PdfResult:
         """Process a PDF file, extracting text and optionally running OCR.
@@ -92,57 +183,76 @@ class PdfProcessor:
         Returns:
             PdfResult with extracted text per page.
         """
-        import fitz  # PyMuPDF
-
         file_path = Path(file_path)
         if not file_path.exists():
             raise FileNotFoundError(f"PDF not found: {file_path}")
+
+        import fitz  # PyMuPDF
 
         doc = fitz.open(str(file_path))
         pages: list[PdfPage] = []
         has_text_layer = False
         ocr_used = False
+        ocr_attempted = False
+        errors: list[str] = []
 
-        for page_idx in range(len(doc)):
-            page = doc[page_idx]
-            text = page.get_text().strip()
+        try:
+            for page_idx in range(len(doc)):
+                page = doc[page_idx]
+                text = page.get_text().strip()
+                page_has_text = bool(text)
+                img_bytes: bytes | None = None
+                page_ocr_attempted = False
+                page_ocr_succeeded = False
+                page_ocr_error: str | None = None
+                extraction_source = "text_layer" if page_has_text else "empty"
 
-            # Check if this page has a usable text layer
-            page_has_text = len(text) >= self.MIN_TEXT_LENGTH
-
-            if page_has_text:
-                has_text_layer = True
-            else:
-                # Try OCR fallback
-                if self._ocr is not None:
-                    # Render page to image
-                    mat = fitz.Matrix(2.0, 2.0)  # 2x zoom for better OCR
-                    pix = page.get_pixmap(matrix=mat)
-                    img_bytes = pix.tobytes("png")
-
-                    # Run OCR
-                    try:
-                        result, elapse = self._ocr(img_bytes)
-                        if result:
-                            ocr_text = "\n".join(line[0] for line in result if line)
+                if page_has_text:
+                    has_text_layer = True
+                elif self._use_ocr:
+                    if self._ocr is None:
+                        page_ocr_error = self._ocr_init_error or "RapidOCR backend unavailable"
+                    else:
+                        mat = fitz.Matrix(2.0, 2.0)
+                        pix = page.get_pixmap(matrix=mat, alpha=False)
+                        img_bytes = pix.tobytes("png")
+                        page_ocr_attempted = True
+                        ocr_attempted = True
+                        try:
+                            ocr_text = self._ocr.extract_text(img_bytes)
+                        except Exception as exc:
+                            page_ocr_error = f"{type(exc).__name__}: {exc}"
+                            log.warning(
+                                "[PdfProcessor] OCR failed on page %d: %s",
+                                page_idx + 1,
+                                page_ocr_error,
+                            )
+                        else:
                             if ocr_text.strip():
-                                text = ocr_text
+                                text = ocr_text.strip()
+                                extraction_source = "ocr"
+                                page_ocr_succeeded = True
                                 ocr_used = True
-                    except Exception as exc:
-                        log.debug("[PdfProcessor] OCR failed on page %d: %s", page_idx, exc)
 
-            pages.append(PdfPage(
-                page_index=page_idx,
-                text=text,
-                image=img_bytes if not page_has_text and self._ocr else None,
-                width=float(page.rect.width),
-                height=float(page.rect.height),
-                has_text_layer=page_has_text,
-            ))
+                if page_ocr_error:
+                    errors.append(f"page {page_idx + 1}: {page_ocr_error}")
 
-        doc.close()
+                pages.append(PdfPage(
+                    page_index=page_idx,
+                    text=text,
+                    image=img_bytes,
+                    width=float(page.rect.width),
+                    height=float(page.rect.height),
+                    has_text_layer=page_has_text,
+                    extraction_source=extraction_source,
+                    ocr_attempted=page_ocr_attempted,
+                    ocr_succeeded=page_ocr_succeeded,
+                    ocr_error=page_ocr_error,
+                ))
+        finally:
+            doc.close()
 
-        is_scanned = not has_text_layer and ocr_used
+        is_scanned = bool(pages) and all(not page.has_text_layer for page in pages)
 
         return PdfResult(
             file_path=str(file_path),
@@ -151,6 +261,9 @@ class PdfProcessor:
             is_scanned=is_scanned,
             has_text_layer=has_text_layer,
             ocr_used=ocr_used,
+            ocr_attempted=ocr_attempted,
+            ocr_backend=self._ocr_backend.label if self._ocr_backend else None,
+            errors=errors,
         )
 
     def extract_images(self, file_path: str | Path, *, max_count: int = 10) -> list[dict]:
@@ -191,4 +304,6 @@ __all__ = [
     "PdfProcessor",
     "PdfResult",
     "PdfPage",
+    "RapidOcrBackend",
+    "parse_rapidocr_text",
 ]
