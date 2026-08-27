@@ -24,9 +24,10 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 
-from PySide6.QtCore import Qt, QRect, QRectF, QPoint, QSize, QTimer, Signal
-from PySide6.QtGui import QPainter, QPainterPath, QFont, QFontMetrics
+from PySide6.QtCore import Qt, QRect, QRectF, QPoint, QSize, QTimer, Signal, Slot, QThread
+from PySide6.QtGui import QPainter, QPainterPath, QFont, QFontMetrics, QPixmap
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -37,9 +38,12 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QApplication,
     QSizePolicy,
+    QFileDialog,
+    QTextBrowser,
 )
 
 from . import theme
+from .image_ocr_worker import ImageOcrSignalRelay, ImageOcrWorker
 
 log = logging.getLogger("firefly.pagelens")
 
@@ -171,6 +175,17 @@ class PageLensPanel(QWidget):
         self._anchor_side = "left"
         self._bridge_connected = False
 
+        # Image attachment state (Stage 1A)
+        self._image_path: str | None = None
+        self._ocr_text: str = ""
+        self._ocr_status: str = "未识别"
+        self._ocr_generation: int = 0
+        self._ocr_thread: QThread | None = None
+        self._ocr_worker: ImageOcrWorker | None = None
+        self._ocr_relay = ImageOcrSignalRelay(self)
+        self._ocr_relay.finished.connect(self._on_ocr_finished)
+        self._ocr_relay.error.connect(self._on_ocr_error)
+
         # Root layout with shadow
         root = QVBoxLayout(self)
         shadow = theme.SHADOW_MARGIN - 2
@@ -189,6 +204,39 @@ class PageLensPanel(QWidget):
         # Header
         self._header = self._build_header()
         inner.addWidget(self._header)
+
+        # Image attachment toolbar (Stage 1A)
+        self._image_toolbar = self._build_image_toolbar()
+        inner.addWidget(self._image_toolbar)
+
+        # Standalone collapsible OCR text panel (between toolbar and concepts)
+        self._ocr_text_panel = QFrame(self._glass)
+        self._ocr_text_panel.setVisible(False)
+        self._ocr_text_panel.setMaximumHeight(_pl_scaled_px(220))
+        self._ocr_text_panel.setStyleSheet(
+            f"background: {theme.css_color(theme.GLASS_BACKGROUND_HOVER)}; "
+            f"border: 1px solid {theme.css_color(theme.GLASS_BORDER)}; "
+            f"border-radius: {_pl_scaled_px(6)}px;"
+        )
+        ocr_inner = QVBoxLayout(self._ocr_text_panel)
+        ocr_inner.setContentsMargins(_pl_scaled_px(8), _pl_scaled_px(6), _pl_scaled_px(8), _pl_scaled_px(6))
+        ocr_inner.setSpacing(_pl_scaled_px(2))
+
+        # Scrollable read-only text browser
+        self._ocr_text_browser = QTextBrowser(self._ocr_text_panel)
+        self._ocr_text_browser.setReadOnly(True)
+        self._ocr_text_browser.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_PRIMARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(9)}pt; "
+            f"background: transparent; "
+            f"border: none;"
+        )
+        self._ocr_text_browser.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._ocr_text_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        ocr_inner.addWidget(self._ocr_text_browser, 1)
+
+        inner.addWidget(self._ocr_text_panel)
 
         # Compact context bar: concepts support wrapping without taking over the panel.
         self._top_concepts = self._build_top_concepts()
@@ -291,6 +339,237 @@ class PageLensPanel(QWidget):
     def set_bridge_connected(self, connected: bool) -> None:
         self._bridge_connected = connected
         self._update_status_badge()
+
+    # ------------------------------------------------------------------
+    # Image attachment (Stage 1A)
+    # ------------------------------------------------------------------
+
+    def _build_image_toolbar(self) -> QFrame:
+        """Build the image attachment toolbar between header and OCR panel."""
+        toolbar = QFrame(self._glass)
+        toolbar.setFixedHeight(_pl_scaled_px(44))
+        toolbar.setObjectName("pageLensImageToolbar")
+
+        layout = QHBoxLayout(toolbar)
+        layout.setContentsMargins(_pl_scaled_px(10), _pl_scaled_px(6), _pl_scaled_px(10), _pl_scaled_px(6))
+        layout.setSpacing(_pl_scaled_px(8))
+
+        # Add image button
+        self._add_img_btn = _PlIconButton("📷", "添加图片", self._glass)
+        self._add_img_btn.clicked.connect(self._on_add_image)
+        layout.addWidget(self._add_img_btn)
+
+        # Image preview (hidden until attached)
+        self._img_preview = QLabel(self._glass)
+        self._img_preview.setFixedSize(_pl_scaled_px(32), _pl_scaled_px(32))
+        self._img_preview.setVisible(False)
+        layout.addWidget(self._img_preview)
+
+        # Filename label (elided, hidden until attached)
+        self._img_filename = QLabel("", toolbar)
+        self._img_filename.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(8)}pt;"
+        )
+        self._img_filename.setVisible(False)
+        self._img_filename.setWordWrap(False)
+        self._img_filename.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Preferred,
+        )
+        layout.addWidget(self._img_filename)
+
+        # Spacer
+        layout.addStretch(1)
+
+        # OCR status label
+        self._ocr_status_label = QLabel("未识别", toolbar)
+        self._ocr_status_label.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(8)}pt;"
+        )
+        self._ocr_status_label.setVisible(False)
+        layout.addWidget(self._ocr_status_label)
+
+        # Toggle OCR text button (hidden until OCR succeeds)
+        self._ocr_view_btn = _PlIconButton("🔍", "查看 OCR", self._glass)
+        self._ocr_view_btn.setVisible(False)
+        self._ocr_view_btn.clicked.connect(self._on_toggle_ocr)
+        layout.addWidget(self._ocr_view_btn)
+
+        # Remove image button (hidden until attached)
+        self._remove_img_btn = _PlIconButton("✕", "移除", self._glass)
+        self._remove_img_btn.setVisible(False)
+        self._remove_img_btn.clicked.connect(self._on_remove_image)
+        layout.addWidget(self._remove_img_btn)
+
+        return toolbar
+
+    def _on_add_image(self) -> None:
+        """Open file dialog to attach an image for local OCR."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择图片",
+            "",
+            "图片文件 (*.png *.jpg *.jpeg *.webp)",
+        )
+        if not path:
+            return
+        self._attach_image(str(Path(path).resolve()))
+
+    def _attach_image(self, image_path: str) -> None:
+        """Attach an image and start OCR. Replaces any previously attached image."""
+        # Cancel any in-flight OCR
+        self._cancel_ocr()
+        self._image_path = image_path
+        self._ocr_text = ""
+        self._ocr_status = "识别中"
+        self._ocr_generation += 1
+        gen = self._ocr_generation
+
+        # Show preview + filename
+        pixmap = QPixmap(image_path)
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(
+                _pl_scaled_px(32), _pl_scaled_px(32),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation,
+            )
+            self._img_preview.setPixmap(scaled)
+            self._img_preview.setVisible(True)
+
+        # Elide filename
+        name = Path(image_path).name
+        metrics = QFontMetrics(self.font())
+        max_width = self.width() - _pl_scaled_px(200)
+        if max_width > 0:
+            display_name = metrics.elidedText(name, Qt.ElideMiddle, max_width)
+        else:
+            display_name = name
+        self._img_filename.setText(display_name)
+        self._img_filename.setVisible(True)
+
+        # Show remove button
+        self._remove_img_btn.setVisible(True)
+
+        # Show status
+        self._ocr_status_label.setVisible(True)
+        self._update_ocr_status()
+
+        # Hide OCR text panel
+        self._ocr_text_panel.setVisible(False)
+        self._ocr_view_btn.setVisible(False)
+
+        # Run OCR in background
+        thread = QThread(self)
+        worker = ImageOcrWorker(image_path, generation=gen)
+        worker.moveToThread(thread)
+
+        # PySide Python callables must not rely on AutoConnection here: an
+        # explicit queued connection is the native-crash safety boundary for
+        # every QWidget update below.
+        worker.finished.connect(
+            self._ocr_relay.forward_finished, Qt.QueuedConnection,
+        )
+        worker.error.connect(
+            self._ocr_relay.forward_error, Qt.QueuedConnection,
+        )
+        worker.finished.connect(thread.quit)
+        worker.error.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+        worker.finished.connect(worker.deleteLater)
+        worker.error.connect(worker.deleteLater)
+
+        thread.started.connect(worker.run)
+        thread.start()
+
+        self._ocr_thread = thread
+        self._ocr_worker = worker
+
+    @Slot(int, str)
+    def _on_ocr_finished(self, gen: int, ocr_text: str) -> None:
+        """Handle OCR completion (runs in Qt main thread via QueuedConnection)."""
+        if gen != self._ocr_generation:
+            # Stale result from an old image; ignore.
+            return
+        self._ocr_worker = None
+        self._ocr_text = ocr_text
+        self._ocr_status = "已识别" if ocr_text else "OCR失败"
+        self._update_ocr_status()
+
+        if ocr_text:
+            # Set text but do NOT auto-expand — user must click "查看 OCR"
+            self._ocr_text_browser.setPlainText(ocr_text)
+            self._ocr_view_btn.setVisible(True)
+
+    @Slot(int, str)
+    def _on_ocr_error(self, gen: int, message: str) -> None:
+        """Handle OCR error (runs in Qt main thread via QueuedConnection)."""
+        if gen != self._ocr_generation:
+            return
+        self._ocr_worker = None
+        self._ocr_status = "OCR失败"
+        self._update_ocr_status()
+        log.warning("[PageLensPanel] OCR error gen=%d: %s", gen, message)
+
+    def _update_ocr_status(self) -> None:
+        status_colors = {
+            "未识别": theme.TEXT_SECONDARY,
+            "识别中": theme.CLAUDE_ORANGE,
+            "已识别": theme.CHATGPT_GREEN,
+            "OCR失败": theme.ERROR_STATUS,
+        }
+        color = status_colors.get(self._ocr_status, theme.TEXT_SECONDARY)
+        self._ocr_status_label.setStyleSheet(
+            f"color: {theme.css_color(color)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(8)}pt;"
+        )
+        self._ocr_status_label.setText(self._ocr_status)
+
+    def _on_remove_image(self) -> None:
+        """Remove the attached image and clear OCR state."""
+        # Invalidate any result already queued by the current worker.
+        self._ocr_generation += 1
+        self._cancel_ocr()
+        self._image_path = None
+        self._ocr_text = ""
+        self._ocr_status = "未识别"
+        self._img_preview.setVisible(False)
+        self._img_filename.setVisible(False)
+        self._img_filename.setText("")
+        self._remove_img_btn.setVisible(False)
+        self._ocr_status_label.setVisible(False)
+        self._ocr_text_panel.setVisible(False)
+        self._ocr_view_btn.setVisible(False)
+        self._ocr_text_browser.setPlainText("")
+
+    def _on_toggle_ocr(self) -> None:
+        """Toggle the collapsible OCR text panel visibility."""
+        if self._ocr_text_panel.isHidden():
+            self._ocr_text_panel.setVisible(True)
+            self._ocr_view_btn._icon = "收起"
+            self._ocr_view_btn.setToolTip("收起 OCR")
+        else:
+            self._ocr_text_panel.setVisible(False)
+            self._ocr_view_btn._icon = "🔍"
+            self._ocr_view_btn.setToolTip("查看 OCR")
+        self._ocr_view_btn.update()
+
+    def _cancel_ocr(self) -> None:
+        """Stop accepting the current job and ask its event loop to exit."""
+        self._ocr_worker = None
+        if self._ocr_thread is not None:
+            thread = self._ocr_thread
+            self._ocr_thread = None
+            try:
+                if thread.isRunning():
+                    # RapidOCR itself is not interruptible.  quit() takes effect
+                    # as soon as worker.run() returns; its result is generation-
+                    # guarded and the normal finished/error wiring owns cleanup.
+                    thread.quit()
+            except RuntimeError:
+                pass
 
     # ------------------------------------------------------------------
     # Top concepts area
@@ -400,6 +679,15 @@ class PageLensPanel(QWidget):
             root_margins.top()
             + root_margins.bottom()
             + self._header.sizeHint().height()
+            + self._image_toolbar.sizeHint().height()
+        )
+
+        # Include OCR panel height only when visible
+        if hasattr(self, "_ocr_text_panel") and not self._ocr_text_panel.isHidden():
+            natural_height += self._ocr_text_panel.sizeHint().height()
+
+        natural_height += (
+            1
             + self._top_concepts.sizeHint().height()
             + 1
             + self._content.sizeHint().height()
@@ -1203,6 +1491,62 @@ class _QuestionItem(QFrame):
             self.rect().adjusted(_pl_scaled_px(8), _pl_scaled_px(4), -_pl_scaled_px(8), -_pl_scaled_px(4)),
             Qt.AlignVCenter | Qt.TextWordWrap,
             "> " + self._text,
+        )
+        painter.end()
+
+
+# ---------------------------------------------------------------------------
+# Image toolbar icon button
+# ---------------------------------------------------------------------------
+
+class _PlIconButton(QFrame):
+    """Compact icon button for the image toolbar."""
+
+    clicked = Signal()
+
+    def __init__(self, icon: str, tooltip: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._icon = icon
+        self._tooltip = tooltip
+        self.setFixedSize(_pl_scaled_px(36), _pl_scaled_px(32))
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(tooltip)
+        self._hovered = False
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:
+        from PySide6.QtGui import QPainter
+        from PySide6.QtCore import QRect
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        if self._hovered:
+            painter.fillRect(
+                self.rect(), theme.qcolor(theme.GLASS_BACKGROUND_HOVER)
+            )
+        else:
+            painter.fillRect(self.rect(), Qt.transparent)
+
+        painter.setPen(theme.qcolor(theme.TEXT_SECONDARY))
+        painter.drawText(
+            self.rect(), Qt.AlignCenter, self._icon
         )
         painter.end()
 
