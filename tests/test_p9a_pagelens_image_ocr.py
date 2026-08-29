@@ -32,6 +32,7 @@ from core.pdf_qa import PdfQa
 from ui.explain_box import ExplainBox, _ExplainWorker
 from ui.image_ocr_worker import ImageOcrWorker
 from ui.pagelens_panel import PageLensPanel
+from conftest import teardown_qt_widget
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +120,7 @@ def test_pagelens_has_image_toolbar(qapp: QApplication) -> None:
     assert panel._ocr_status_label.isHidden()
     # Image filename is hidden by default
     assert panel._img_filename.isHidden()
-    panel.close()
+    teardown_qt_widget(panel)
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +159,7 @@ def test_pagelens_attach_image_triggers_ocr(qapp: QApplication) -> None:
         assert panel._ocr_status in ("已识别", "OCR失败"), (
             f"OCR still running after 15s, status={panel._ocr_status}"
         )
-        panel.close()
+        teardown_qt_widget(panel)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -190,7 +191,7 @@ def test_pagelens_replace_image_ignores_old_result(qapp: QApplication) -> None:
         # Final should be from second image
         if panel._ocr_status == "已识别":
             assert "FIRST_IMAGE" not in panel._ocr_text or "SECOND_IMAGE" in panel._ocr_text
-        panel.close()
+        teardown_qt_widget(panel)
     finally:
         tmp1.unlink(missing_ok=True)
         tmp2.unlink(missing_ok=True)
@@ -219,7 +220,7 @@ def test_pagelens_remove_image_clears_state(qapp: QApplication) -> None:
         assert panel._image_path is None
         assert panel._ocr_text == ""
         assert panel._ocr_status == "未识别"
-        panel.close()
+        teardown_qt_widget(panel)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -252,7 +253,7 @@ def test_pagelens_ocr_text_shown_in_panel(qapp: QApplication) -> None:
             assert "DISPLAY" in panel._ocr_text_browser.toPlainText()
             assert "TEST" in panel._ocr_text_browser.toPlainText()
             assert "123" in panel._ocr_text_browser.toPlainText()
-        panel.close()
+        teardown_qt_widget(panel)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -275,7 +276,7 @@ def test_pagelens_corrupt_image_graceful(qapp: QApplication) -> None:
 
         # Should have error status, not crash
         assert panel._ocr_status == "OCR失败"
-        panel.close()
+        teardown_qt_widget(panel)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -311,7 +312,7 @@ def test_pagelens_ocr_does_not_use_bridge(qapp: QApplication) -> None:
         bridge_mock.send_sync_request.assert_not_called()
     finally:
         tmp.unlink(missing_ok=True)
-        panel.close()
+        teardown_qt_widget(panel)
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +367,7 @@ def test_explain_box_still_works(qapp: QApplication) -> None:
     worker.run()
 
     assert chat.called
-    box.close()
+    teardown_qt_widget(box)
 
 
 # ---------------------------------------------------------------------------
@@ -401,7 +402,7 @@ def test_pagelens_show_panel_paints_without_crash(qapp: QApplication) -> None:
     # Verify panel is visible
     assert panel.visible
 
-    panel.close()
+    teardown_qt_widget(panel)
     QApplication.instance().processEvents()
 
 
@@ -436,7 +437,7 @@ def test_pagelens_ocr_panel_toggle(qapp: QApplication) -> None:
             panel._on_toggle_ocr()
             assert panel._ocr_text_panel.isHidden()
             assert panel._ocr_view_btn._icon == "🔍"
-        panel.close()
+        teardown_qt_widget(panel)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -474,7 +475,7 @@ def test_pagelens_long_ocr_text_scrollable(qapp: QApplication) -> None:
 
             # Fixed header layout not changed (toolbar height unchanged)
             assert panel._image_toolbar.height() > 0
-        panel.close()
+        teardown_qt_widget(panel)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -508,7 +509,7 @@ def test_pagelens_real_qthread_ocr_no_crash(qapp: QApplication) -> None:
             assert "QTHREAD" in panel._ocr_text_browser.toPlainText()
             assert "TEST" in panel._ocr_text_browser.toPlainText()
             assert panel._ocr_generation == 1
-        panel.close()
+        teardown_qt_widget(panel)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -530,7 +531,7 @@ def test_pagelens_real_qthread_ocr_error_in_gui_thread(qapp: QApplication) -> No
 
         assert panel._ocr_status == "OCR失败"
         assert panel.ocr_callback_thread is qapp.thread()
-        panel.close()
+        teardown_qt_widget(panel)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -551,7 +552,7 @@ def test_pagelens_remove_invalidates_queued_callbacks(qapp: QApplication) -> Non
     assert panel._ocr_status == "未识别"
     assert panel._ocr_text_browser.toPlainText() == ""
     assert panel._ocr_view_btn.isHidden()
-    panel.close()
+    teardown_qt_widget(panel)
 
 
 # ---------------------------------------------------------------------------

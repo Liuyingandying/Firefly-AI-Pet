@@ -33,6 +33,7 @@ from PySide6.QtWidgets import QApplication
 from core.pdf_processor import PdfProcessor
 from core.pdf_qa import ExplainEntry, ExternalProviderConsentRequired, PdfQa
 from ui.explain_box import ExplainBox, _ExplainWorker
+from conftest import teardown_qt_widget
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +245,7 @@ def test_async_explain_selection_returns_immediately(qapp: QApplication) -> None
 
     # Now the explanation should be visible.
     assert "async explanation" in box._content._body_label.text()
+    teardown_qt_widget(box)
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +281,7 @@ def test_duplicate_explain_selection_ignored(qapp: QApplication) -> None:
     loop.exec()
 
     assert chat.call_count == 1
+    teardown_qt_widget(box)
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +308,7 @@ def test_worker_error_shows_controlled_error(qapp: QApplication) -> None:
     body = box._content._body_label.text()
     assert "provider unavailable" in body or "无法解释" in body
     assert box._running is False
+    teardown_qt_widget(box)
 
 
 # ---------------------------------------------------------------------------
@@ -382,3 +386,4 @@ def test_async_consent_false_no_provider_call(qapp: QApplication) -> None:
     chat.assert_not_called()
     body = box._content._body_label.text()
     assert "无法解释" in body or "consent" in body.lower() or "Explicit" in body
+    teardown_qt_widget(box)

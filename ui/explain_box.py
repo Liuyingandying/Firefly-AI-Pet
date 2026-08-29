@@ -140,8 +140,12 @@ class ExplainBox(QWidget):
         self._ocr_thread: QThread | None = None
         self._ocr_worker: _ImageOcrWorker | None = None
         self._ocr_relay = ImageOcrSignalRelay(self)
-        self._ocr_relay.finished.connect(self._on_ocr_finished)
-        self._ocr_relay.error.connect(self._on_ocr_error)
+        self._ocr_relay.finished.connect(
+            self._on_ocr_finished, Qt.QueuedConnection,
+        )
+        self._ocr_relay.error.connect(
+            self._on_ocr_error, Qt.QueuedConnection,
+        )
 
         # Root layout
         root = QVBoxLayout(self)
@@ -455,7 +459,7 @@ class ExplainBox(QWidget):
     def _on_remove_image(self) -> None:
         """Remove the attached image and clear OCR state."""
         self._ocr_generation += 1
-        self._cancel_ocr()
+        self._stop_ocr_thread()
         self._image_path = None
         self._ocr_text = ""
         self._ocr_status = "未识别"
@@ -476,6 +480,39 @@ class ExplainBox(QWidget):
                     thread.quit()
             except RuntimeError:
                 pass
+
+    def _stop_ocr_thread(self) -> None:
+        """Cooperatively stop the OCR thread and wait for it to finish."""
+        self._cancel_ocr()
+        if self._ocr_thread is not None:
+            thread = self._ocr_thread
+            self._ocr_thread = None
+            try:
+                if thread.isRunning():
+                    thread.wait(5000)
+            except RuntimeError:
+                pass
+            self._ocr_worker = None
+
+    def _stop_explain_thread(self) -> None:
+        """Cooperatively stop the explain provider thread and wait for it to finish."""
+        self._running = False
+        if self._worker_thread is not None:
+            thread = self._worker_thread
+            self._worker_thread = None
+            try:
+                if thread.isRunning():
+                    thread.quit()
+                    thread.wait(5000)
+            except RuntimeError:
+                pass
+            self._worker = None
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        """Gracefully shut down background threads before closing."""
+        self._stop_ocr_thread()
+        self._stop_explain_thread()
+        super().closeEvent(event)
 
     # ------------------------------------------------------------------
     # explain_selection (extended with image OCR context)
@@ -511,10 +548,15 @@ class ExplainBox(QWidget):
         worker.moveToThread(thread)
 
         # Wire signals: worker finished → UI update; worker error → UI update.
-        worker.finished.connect(self._on_explain_finished)
-        worker.error.connect(self._on_explain_error)
+        worker.finished.connect(
+            self._on_explain_finished, Qt.QueuedConnection,
+        )
+        worker.error.connect(
+            self._on_explain_error, Qt.QueuedConnection,
+        )
 
-        # When thread finishes, clean up worker.
+        # When thread finishes, clean up worker and reset running flag.
+        thread.finished.connect(self._stop_explain_thread)
         thread.finished.connect(thread.deleteLater)
         worker.finished.connect(worker.deleteLater)
         worker.error.connect(worker.deleteLater)

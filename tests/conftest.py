@@ -7,6 +7,8 @@ import uuid
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QEvent, QEventLoop
+from PySide6.QtWidgets import QApplication
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
@@ -49,3 +51,21 @@ def _pytest_local_temproot(
 def project_tmp_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Return the unique repo-local temp directory for this test run."""
     return tmp_path_factory.getbasetemp()
+
+
+def teardown_qt_widget(widget) -> None:
+    """Close a Qt widget and drain the event loop so closeEvent handlers run.
+
+    This prevents ``QThread: Destroyed while thread is still running`` errors
+    at pytest teardown by ensuring that:
+      1. closeEvent() fires and runs (e.g. _stop_ocr_thread, _stop_explain_thread)
+      2. All queued signals are processed
+      3. QApplication processes pending events
+    """
+    if widget is None:
+        return
+    widget.close()
+    # Process closeEvent and any queued signal callbacks
+    QApplication.processEvents()
+    # Small yield to let thread.quit() / thread.wait() wiring finish
+    QApplication.processEvents()

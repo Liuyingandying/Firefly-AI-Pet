@@ -30,6 +30,7 @@ from PySide6.QtWidgets import QApplication
 from core.pdf_processor import PdfProcessor, RapidOcrBackend
 from core.pdf_qa import PdfQa
 from ui.explain_box import ExplainBox, _ImageOcrWorker
+from conftest import teardown_qt_widget
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +248,7 @@ def test_explain_box_remove_invalidates_queued_callbacks(qapp: QApplication) -> 
     assert box._ocr_text == ""
     assert box._ocr_status == "未识别"
     assert box._ocr_text_panel.isHidden()
-    box.close()
+    teardown_qt_widget(box)
 
 
 def test_explain_box_real_qthread_callback_runs_in_gui_thread(
@@ -265,7 +266,7 @@ def test_explain_box_real_qthread_callback_runs_in_gui_thread(
 
         assert box._ocr_status == "OCR失败"
         assert box.ocr_callback_thread is qapp.thread()
-        box.close()
+        teardown_qt_widget(box)
     finally:
         tmp.unlink(missing_ok=True)
 

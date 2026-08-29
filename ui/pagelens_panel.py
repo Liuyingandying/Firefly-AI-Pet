@@ -183,8 +183,12 @@ class PageLensPanel(QWidget):
         self._ocr_thread: QThread | None = None
         self._ocr_worker: ImageOcrWorker | None = None
         self._ocr_relay = ImageOcrSignalRelay(self)
-        self._ocr_relay.finished.connect(self._on_ocr_finished)
-        self._ocr_relay.error.connect(self._on_ocr_error)
+        self._ocr_relay.finished.connect(
+            self._on_ocr_finished, Qt.QueuedConnection,
+        )
+        self._ocr_relay.error.connect(
+            self._on_ocr_error, Qt.QueuedConnection,
+        )
 
         # Root layout with shadow
         root = QVBoxLayout(self)
@@ -531,7 +535,7 @@ class PageLensPanel(QWidget):
         """Remove the attached image and clear OCR state."""
         # Invalidate any result already queued by the current worker.
         self._ocr_generation += 1
-        self._cancel_ocr()
+        self._stop_ocr_thread()
         self._image_path = None
         self._ocr_text = ""
         self._ocr_status = "未识别"
@@ -570,6 +574,28 @@ class PageLensPanel(QWidget):
                     thread.quit()
             except RuntimeError:
                 pass
+
+    def _stop_ocr_thread(self) -> None:
+        """Cooperatively stop the OCR thread and wait for it to finish.
+
+        Called from closeEvent / remove / cancel to guarantee the native
+        QThread has exited before Python discards the widget.
+        """
+        self._cancel_ocr()
+        if self._ocr_thread is not None:
+            thread = self._ocr_thread
+            self._ocr_thread = None
+            try:
+                if thread.isRunning():
+                    thread.wait(5000)  # 5 s cooperative shutdown timeout
+            except RuntimeError:
+                pass
+            self._ocr_worker = None
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        """Gracefully shut down background threads before closing."""
+        self._stop_ocr_thread()
+        super().closeEvent(event)
 
     # ------------------------------------------------------------------
     # Top concepts area
