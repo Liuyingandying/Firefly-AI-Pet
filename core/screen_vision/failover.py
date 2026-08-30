@@ -50,6 +50,7 @@ class _FailoverBase:
         self._breaker = breaker or breaker_factory()
         self._meta_lock = threading.Lock()
         self.last_meta: dict = {}
+        self.last_remote_calls = 0
 
     def _meta(self, used: str, fallback_used: bool, failure_type: str | None,
               secondary_failure_type: str | None = None) -> dict:
@@ -66,21 +67,31 @@ class _FailoverBase:
         with self._meta_lock:
             self.last_meta = meta
 
-    def _run_with_failover(self, call_primary, call_fallbacks):
+    def _run_with_failover(self, call_primary, call_fallbacks, exclude_providers=()):
         """Primary once (breaker permitting), then each fallback once, in order.
 
         Non-transient primary errors propagate immediately. When no fallback
         exists, a transient primary failure (or an open breaker) surfaces as
         VisionTemporarilyUnavailable without further waiting.
         """
-        has_fallback = bool(self._fallbacks)
-        skip_primary = has_fallback and not self._breaker.allow_primary()
+        excluded = frozenset(exclude_providers)
+        available_fallbacks = tuple(
+            (index, fallback)
+            for index, fallback in enumerate(self._fallbacks)
+            if getattr(fallback, "name", "") not in excluded
+        )
+        has_fallback = bool(available_fallbacks)
+        primary_excluded = getattr(self._primary, "name", "") in excluded
+        skip_primary = primary_excluded or (has_fallback and not self._breaker.allow_primary())
         failure_type = None
+        attempts = 0
 
         if not skip_primary:
             try:
+                attempts += 1
                 result = call_primary()
                 self._breaker.record_success()
+                self.last_remote_calls = attempts
                 self._set_meta(
                     self._meta(getattr(self._primary, "name", "primary"), False, None)
                 )
@@ -102,11 +113,13 @@ class _FailoverBase:
 
         last_exc: Exception | None = None
         failure_chain = [failure_type] if failure_type else []
-        for index, fallback in enumerate(self._fallbacks):
+        for index, fallback in available_fallbacks:
             try:
+                attempts += 1
                 result = call_fallbacks(index, fallback)
                 used = getattr(fallback, "name", f"fallback_{index}")
                 secondary = failure_chain[1] if len(failure_chain) > 1 else None
+                self.last_remote_calls = attempts
                 self._set_meta(self._meta(used, True, failure_type, secondary))
                 return result
             except Exception as exc:  # noqa: BLE001 - classified below
@@ -127,7 +140,7 @@ class FailoverVisionProvider(_FailoverBase):
     _meta_key = "vision"
     _unavailable_error = VisionTemporarilyUnavailable
 
-    def inspect(self, frame, instruction=None):
+    def inspect(self, frame, instruction=None, exclude_providers=()):
         from core.screen_vision.vision.base import DEFAULT_VISION_INSTRUCTION
 
         instruction = instruction or DEFAULT_VISION_INSTRUCTION
@@ -138,7 +151,9 @@ class FailoverVisionProvider(_FailoverBase):
         def call_fallbacks(index, fallback):
             return fallback.inspect(frame, instruction)
 
-        return self._run_with_failover(call_primary, call_fallbacks)
+        return self._run_with_failover(
+            call_primary, call_fallbacks, exclude_providers=exclude_providers
+        )
 
 
 class FailoverReasoningProvider(_FailoverBase):

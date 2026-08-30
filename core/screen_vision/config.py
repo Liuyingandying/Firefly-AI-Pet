@@ -133,73 +133,121 @@ def load_glm_config() -> dict:
     }
 
 
-def build_vision_provider():
-    """Vision chain: TJU Qwen primary; Zhipu glm-4.6v-flash fallback
-    (verified VISION_CAPABLE) enabled whenever ZHIPU_API_KEY resolves."""
-    from core.screen_vision.failover import FailoverVisionProvider
-    from core.screen_vision.vision.qwen_vision import QwenVisionProvider
-
-    primary_choice = (os.environ.get("FIREFLY_VISION_PRIMARY") or "tju").strip().lower()
-    if primary_choice != "tju":
-        raise RuntimeError(
-            f"Unsupported FIREFLY_VISION_PRIMARY={primary_choice!r} (supported: tju)"
-        )
-    primary = QwenVisionProvider()
-
-    fallbacks = []
-    if glm_vision_fallback_enabled():
-        from core.screen_vision.vision.glm_vision import GlmVisionProvider
-
-        fallbacks.append(GlmVisionProvider())
-    if _resolve_credential("DEEPSEEK_API_KEY", ()):
-        from core.screen_vision.vision.deepseek_vision import DeepSeekVisionProvider
-
-        fallbacks.append(DeepSeekVisionProvider())
-    if not fallbacks:
-        return FailoverVisionProvider(primary=primary, fallback=None)
-    return FailoverVisionProvider(primary=primary, fallbacks=tuple(fallbacks))
+ROUTING_FAST = "fast"
+ROUTING_RESILIENT = "resilient"
+ROUTING_MODES = (ROUTING_FAST, ROUTING_RESILIENT)
 
 
-def build_reasoning_provider():
-    """Reasoning chain: TJU deepseek-v4-flash first (verified), Zhipu
-    glm-4.7-flash as the default transient-failure fallback (TEXT_ONLY is
-    correct — the reasoning stage only receives text). The official
-    providers.deepseek client stays available as an explicit extra layer but
-    is NOT auto-enabled, to avoid unintended paid calls."""
-    from core.screen_vision.brain.deepseek_brain import DeepSeekV4FlashProvider
-    from core.screen_vision.failover import ChainedReasoningProvider
-    from providers.zhipu_glm import ZhipuGLMProvider
+_vision_breaker = None
+_reasoning_breaker = None
+_provider_instances: dict = {}
 
-    primary_choice = (os.environ.get("FIREFLY_REASONING_PRIMARY") or "tju").strip().lower()
-    if primary_choice != "tju":
-        raise RuntimeError(
-            f"Unsupported FIREFLY_REASONING_PRIMARY={primary_choice!r} (supported: tju)"
-        )
-    primary = DeepSeekV4FlashProvider()
 
-    fallbacks = []
-    if _resolve_credential("ZHIPU_API_KEY", DEPRECATED_GLM_KEY_ALIASES):
-        from core.screen_vision.brain.glm_reasoning import GlmReasoningProvider
+def _shared_vision_breaker():
+    global _vision_breaker
+    if _vision_breaker is None:
+        from core.screen_vision.circuit_breaker import CircuitBreaker
 
-        fallbacks.append(GlmReasoningProvider())
-    if glm_reasoning_fallback_enabled():
-        glm = load_glm_config()
-        if glm["reasoning_model"]:
-            fallbacks.append(
-                GlmReasoningProvider(
-                    provider=ZhipuGLMProvider(
-                        api_key=glm["api_key"],
-                        base_url=glm["base_url"],
-                        model=glm["reasoning_model"],
-                    )
-                )
+        _vision_breaker = CircuitBreaker()
+    return _vision_breaker
+
+
+def _shared_reasoning_breaker():
+    global _reasoning_breaker
+    if _reasoning_breaker is None:
+        from core.screen_vision.circuit_breaker import CircuitBreaker
+
+        _reasoning_breaker = CircuitBreaker()
+    return _reasoning_breaker
+
+
+def get_shared_vision_breaker():
+    """Expose the one process-wide vision breaker to the FAST direct path."""
+    return _shared_vision_breaker()
+
+
+def _get_provider(name: str):
+    """Lazily build each provider once; instances are REUSED across modes so
+    switching routing never duplicates providers or resets their state."""
+    if name not in _provider_instances:
+        if name == "qwen_vision":
+            from core.screen_vision.vision.qwen_vision import QwenVisionProvider
+
+            _provider_instances[name] = QwenVisionProvider()
+        elif name == "glm_vision":
+            from core.screen_vision.vision.glm_vision import GlmVisionProvider
+
+            _provider_instances[name] = GlmVisionProvider()
+        elif name == "deepseek_vision":
+            from core.screen_vision.vision.deepseek_vision import DeepSeekVisionProvider
+
+            _provider_instances[name] = DeepSeekVisionProvider()
+        elif name == "tju_reasoning":
+            from core.screen_vision.brain.deepseek_brain import DeepSeekV4FlashProvider
+
+            _provider_instances[name] = DeepSeekV4FlashProvider()
+        elif name == "glm_reasoning":
+            from core.screen_vision.brain.glm_reasoning import GlmReasoningProvider
+
+            _provider_instances[name] = GlmReasoningProvider()
+        elif name == "deepseek_reasoning":
+            from core.screen_vision.brain.official_deepseek import (
+                OfficialDeepSeekReasoningProvider,
             )
-    if _resolve_credential("DEEPSEEK_API_KEY", ()):
-        from core.screen_vision.brain.official_deepseek import (
-            OfficialDeepSeekReasoningProvider,
-        )
 
-        fallbacks.append(OfficialDeepSeekReasoningProvider())
-    if not fallbacks:
-        return primary
-    return ChainedReasoningProvider(primary=primary, fallbacks=tuple(fallbacks))
+            _provider_instances[name] = OfficialDeepSeekReasoningProvider()
+        else:
+            raise RuntimeError(f"unknown screen vision provider {name!r}")
+    return _provider_instances[name]
+
+
+def get_fast_direct_provider():
+    """The existing DeepSeek vision client, reused for one-shot FAST turns."""
+    return _get_provider("deepseek_vision")
+
+
+def get_vision_provider_order(mode: str) -> tuple:
+    """Vision priority order. FAST = DeepSeek first; RESILIENT = the frozen
+    TJU-first fallback order."""
+    if mode == ROUTING_FAST:
+        return ("deepseek_vision", "qwen_vision", "glm_vision")
+    return ("qwen_vision", "glm_vision", "deepseek_vision")
+
+
+def get_reasoning_provider_order(mode: str) -> tuple:
+    if mode == ROUTING_FAST:
+        return ("deepseek_reasoning", "tju_reasoning", "glm_reasoning")
+    return ("tju_reasoning", "glm_reasoning", "deepseek_reasoning")
+
+
+def normalize_routing_mode(mode: str | None) -> str:
+    return mode if mode in ROUTING_MODES else ROUTING_FAST
+
+
+def build_vision_provider(mode: str | None = None):
+    """Vision chain for a routing mode. Provider instances and the circuit
+    breaker are shared across modes; only the priority order changes."""
+    from core.screen_vision.failover import FailoverVisionProvider
+
+    mode = normalize_routing_mode(mode)
+    order = get_vision_provider_order(mode)
+    providers = [_get_provider(name) for name in order]
+    return FailoverVisionProvider(
+        primary=providers[0],
+        fallbacks=tuple(providers[1:]),
+        breaker=_shared_vision_breaker(),
+    )
+
+
+def build_reasoning_provider(mode: str | None = None):
+    """Reasoning chain for a routing mode (shared instances + breaker)."""
+    from core.screen_vision.failover import FailoverReasoningProvider
+
+    mode = normalize_routing_mode(mode)
+    order = get_reasoning_provider_order(mode)
+    providers = [_get_provider(name) for name in order]
+    return FailoverReasoningProvider(
+        primary=providers[0],
+        fallbacks=tuple(providers[1:]),
+        breaker=_shared_reasoning_breaker(),
+    )

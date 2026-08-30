@@ -13,6 +13,8 @@ families into one module is a recorded TODO for the provider layer.
 
 import requests
 
+from core.screen_vision.safety import sanitize_error_text
+
 try:  # bridge the legacy provider error family (no hard dependency)
     from providers.base import ProviderError as LegacyProviderError
     from providers.base import (
@@ -45,10 +47,10 @@ class ProviderHTTPError(ProviderError):
 
     def __init__(self, status_code: int, detail: str):
         self.status_code = status_code
-        self.detail = detail
+        self.detail = sanitize_error_text(detail)
         self.transient = status_code in TRANSIENT_HTTP_STATUS
         self.failure_type = f"HTTP_{status_code}"
-        super().__init__(f"provider returned HTTP {status_code}: {detail}")
+        super().__init__(f"provider returned HTTP {status_code}: {self.detail}")
 
 
 class ProviderNetworkError(ProviderError):
@@ -58,7 +60,9 @@ class ProviderNetworkError(ProviderError):
 
     def __init__(self, exc: Exception):
         self.failure_type = type(exc).__name__
-        super().__init__(f"network failure: {exc}")
+        # Never retain the original request exception text/repr: requests may
+        # attach a PreparedRequest containing authentication headers.
+        super().__init__(f"provider network failure ({self.failure_type})")
 
 
 class ProviderSchemaError(ProviderError):
@@ -67,6 +71,14 @@ class ProviderSchemaError(ProviderError):
     def __init__(self, detail: str):
         self.failure_type = "schema_error"
         super().__init__(f"provider response unusable: {detail}")
+
+
+class EmptyProviderResponse(ProviderSchemaError):
+    """The upstream response had no final assistant text."""
+
+    def __init__(self):
+        self.failure_type = "empty_response"
+        ProviderError.__init__(self, "provider returned no final answer")
 
 
 class VisionTemporarilyUnavailable(ProviderError):
@@ -99,7 +111,7 @@ def classify_provider_exception(exc: Exception) -> ProviderError:
         return ProviderNetworkError(exc)
     if LegacyProviderError is not None and isinstance(exc, LegacyProviderError):
         if isinstance(exc, LegacyProviderHTTPError):
-            return ProviderHTTPError(exc.status_code, str(exc))
+            return ProviderHTTPError(exc.status_code, sanitize_error_text(str(exc)))
         if isinstance(exc, LegacyProviderTimeoutError):
             bridge = ProviderNetworkError.__new__(ProviderNetworkError)
             bridge.failure_type = "timeout"
@@ -111,10 +123,10 @@ def classify_provider_exception(exc: Exception) -> ProviderError:
             bridge.failure_type = "unavailable"
             return bridge
         if isinstance(exc, LegacyProviderProtocolError):
-            return ProviderSchemaError(str(exc))
-        bridge = ProviderError(f"legacy provider failure: {exc}")
+            return ProviderSchemaError("legacy provider protocol failure")
+        bridge = ProviderError(f"legacy provider failure ({type(exc).__name__})")
         return bridge
-    return ProviderError(f"unexpected provider failure: {exc}")
+    return ProviderError(f"unexpected provider failure ({type(exc).__name__})")
 
 
 def is_transient(exc: Exception) -> bool:

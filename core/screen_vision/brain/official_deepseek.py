@@ -35,11 +35,11 @@ class OfficialDeepSeekReasoningProvider:
         try:
             response = self._provider.chat(messages)
         except ProviderTimeoutError as exc:
-            raise ProviderNetworkError(exc)
+            raise ProviderNetworkError(exc) from None
         except Exception as exc:  # noqa: BLE001 - classify legacy errors
             from core.screen_vision.provider_errors import classify_provider_exception
 
-            raise classify_provider_exception(exc)
+            raise classify_provider_exception(exc) from None
         if not isinstance(response, dict):
             raise ProviderSchemaError("reasoning response must be an object")
         try:

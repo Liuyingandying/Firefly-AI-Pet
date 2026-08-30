@@ -121,7 +121,7 @@ class QwenVisionProvider(VisionProvider):
                 timeout=VISION_TIMEOUT_SECONDS,
             )
         except requests.RequestException as exc:
-            raise ProviderNetworkError(exc)
+            raise ProviderNetworkError(exc) from None
         _ = (perf_counter() - started) * 1000
 
         if not response.ok:

@@ -31,6 +31,16 @@ SCREEN_VISION_DIR = Path(r"E:\Firefly_AI_Pet\core\screen_vision")
 # ------------------------------------------------------------ G credentials
 
 
+@pytest.fixture(autouse=True)
+def clear_provider_cache():
+    """The config module caches provider instances across tests; reset it so
+    each test builds chains from its own (isolated) credentials."""
+    yield
+    sv_config._provider_instances.clear()
+    sv_config._vision_breaker = None
+    sv_config._reasoning_breaker = None
+
+
 @pytest.fixture
 def isolated_env_file(monkeypatch, tmp_path):
     """Point providers.base at an empty .env so tests control resolution."""
@@ -90,14 +100,14 @@ def test_h_no_qwencode_settings_dependency_in_production_code():
 
 
 def test_e_glm_vision_requires_zhipu_credential(monkeypatch, isolated_env_file):
-    # Without ZHIPU_API_KEY the glm-4.6v-flash fallback stays disabled.
+    # Missing ZHIPU_API_KEY makes building the chain fail cleanly (glm
+    # vision cannot be constructed), never a silent skip.
     monkeypatch.delenv("ZHIPU_API_KEY", raising=False)
     monkeypatch.delenv("GLM_API_KEY", raising=False)
-    assert sv_config.glm_vision_fallback_enabled() is False
     monkeypatch.setenv("TJULLM_API_KEY", "k")
-    provider = sv_config.build_vision_provider()
-    names = [getattr(p, "name", "") for p in _flatten_chain(provider)]
-    assert not any(n.startswith("zhipu-") for n in names)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "d")
+    with pytest.raises(ProviderError):
+        sv_config.build_vision_provider()
 
 
 def test_e2_glm_vision_default_model_is_4_6v_flash(monkeypatch, isolated_env_file):
@@ -107,6 +117,7 @@ def test_e2_glm_vision_default_model_is_4_6v_flash(monkeypatch, isolated_env_fil
     monkeypatch.delenv("GLM_VISION_MODEL", raising=False)
     monkeypatch.setenv("ZHIPU_API_KEY", "z")
     monkeypatch.setenv("TJULLM_API_KEY", "k")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "d")
     provider = sv_config.build_vision_provider()
     glm = [p for p in _flatten_chain(provider) if getattr(p, "name", "").startswith("zhipu-")]
     assert len(glm) == 1

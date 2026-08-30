@@ -72,7 +72,7 @@ class DeepSeekV4FlashProvider(ReasoningProvider):
                 timeout=BRAIN_TIMEOUT_SECONDS,
             )
         except requests.RequestException as exc:
-            raise ProviderNetworkError(exc)
+            raise ProviderNetworkError(exc) from None
         if not response.ok:
             # Never include auth headers in error output.
             raise ProviderHTTPError(

@@ -176,7 +176,9 @@ class VisualShell(QObject):
         self.settings_popover = SettingsPopover(self.settings)
         self.ask_pill = AskPill()
         self.short_ask = ShortAskPanel()
-        self.character_conversation = CharacterConversationRunner(parent=self)
+        self.character_conversation = CharacterConversationRunner(
+            parent=self, screen_vision_settings=self.settings
+        )
         self.recommendation_card = RecommendationCard()
         self.workflow_coordinator = WorkflowCoordinator()
         self.artifact_store = (

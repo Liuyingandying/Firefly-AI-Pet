@@ -108,7 +108,7 @@ class GlmVisionProvider:
         try:
             body = default_transport(self._zhipu.endpoint, payload, headers, timeout)
         except Exception as exc:  # noqa: BLE001 - classified at the boundary
-            raise classify_provider_exception(exc)
+            raise classify_provider_exception(exc) from None
         try:
             message = body["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as exc:

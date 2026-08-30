@@ -8,7 +8,11 @@ import pytest
 
 from core.screen_vision.brain.glm_reasoning import GlmReasoningProvider
 from core.screen_vision.circuit_breaker import CircuitBreaker
-from core.screen_vision.config import build_reasoning_provider
+from core.screen_vision.config import (
+    ROUTING_FAST,
+    ROUTING_RESILIENT,
+    build_reasoning_provider,
+)
 from core.screen_vision.failover import FailoverReasoningProvider
 from core.screen_vision.provider_errors import (
     ProviderHTTPError,
@@ -207,7 +211,7 @@ def test_l_m_meta_reports_provider_and_fallback():
 # --------------------------------------------- default chain assembly
 
 
-def test_default_chain_is_tju_deepseek_then_zhipu(monkeypatch, tmp_path):
+def test_resilient_chain_is_tju_deepseek_then_zhipu(monkeypatch, tmp_path):
     empty_env = tmp_path / "empty.env"
     empty_env.write_text("", encoding="utf-8")
     import providers.base as base
@@ -215,17 +219,28 @@ def test_default_chain_is_tju_deepseek_then_zhipu(monkeypatch, tmp_path):
     monkeypatch.setattr(base, "DEFAULT_ENV_FILE", empty_env)
     monkeypatch.setenv("TJUTOKEN", "t")
     monkeypatch.setenv("ZHIPU_API_KEY", "z")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "d")
     monkeypatch.delenv("FIREFLY_REASONING_FALLBACK", raising=False)
     monkeypatch.delenv("GLM_REASONING_MODEL", raising=False)
 
-    chain = build_reasoning_provider()
+    chain = build_reasoning_provider(ROUTING_RESILIENT)
     assert isinstance(chain, FailoverReasoningProvider)
     assert chain._primary.name == "tju-deepseek"
-    assert [f.name for f in chain._fallbacks] == ["zhipu-glm"]
-    assert isinstance(chain._fallbacks[0]._provider, __import__(
-        "providers.zhipu_glm", fromlist=["ZhipuGLMProvider"]
-    ).ZhipuGLMProvider)
-    assert chain._fallbacks[0].model == "glm-4.7-flash"
+    assert [f.name for f in chain._fallbacks] == ["zhipu-glm", "deepseek-official"]
+
+
+def test_fast_chain_is_official_deepseek_first(monkeypatch, tmp_path):
+    empty_env = tmp_path / "empty.env"
+    empty_env.write_text("", encoding="utf-8")
+    import providers.base as base
+
+    monkeypatch.setattr(base, "DEFAULT_ENV_FILE", empty_env)
+    monkeypatch.setenv("TJUTOKEN", "t")
+    monkeypatch.setenv("ZHIPU_API_KEY", "z")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "d")
+    chain = build_reasoning_provider(ROUTING_FAST)
+    assert chain._primary.name == "deepseek-official"
+    assert [f.name for f in chain._fallbacks] == ["tju-deepseek", "zhipu-glm"]
 
 
 def test_official_deepseek_not_auto_enabled(monkeypatch, tmp_path):

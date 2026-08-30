@@ -5,12 +5,52 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
+import urllib.request
 
 import pytest
+import requests
 from PySide6.QtCore import QEvent, QEventLoop
 from PySide6.QtWidgets import QApplication
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
+
+
+def _is_loopback_url(value) -> bool:
+    url = getattr(value, "full_url", value)
+    try:
+        host = (urlparse(str(url)).hostname or "").lower()
+    except ValueError:
+        return False
+    return host in {"127.0.0.1", "localhost", "::1"}
+
+
+@pytest.fixture(autouse=True)
+def _block_unstubbed_external_http(monkeypatch: pytest.MonkeyPatch):
+    """Fail closed before an unstubbed pytest request can leave the machine.
+
+    Provider tests must inject/monkeypatch their transport. Loopback remains
+    available for tests that deliberately own a local test server.
+    """
+    original_request = requests.sessions.Session.request
+    original_urlopen = urllib.request.urlopen
+
+    def guarded_request(session, method, url, *args, **kwargs):
+        if _is_loopback_url(url):
+            return original_request(session, method, url, *args, **kwargs)
+        raise RuntimeError(
+            "pytest blocked an unstubbed external HTTP request; inject a fake transport"
+        ) from None
+
+    def guarded_urlopen(url, *args, **kwargs):
+        if _is_loopback_url(url):
+            return original_urlopen(url, *args, **kwargs)
+        raise RuntimeError(
+            "pytest blocked an unstubbed external HTTP request; inject a fake transport"
+        ) from None
+
+    monkeypatch.setattr(requests.sessions.Session, "request", guarded_request)
+    monkeypatch.setattr(urllib.request, "urlopen", guarded_urlopen)
 
 
 def pytest_configure(config: pytest.Config) -> None:

@@ -24,6 +24,7 @@ def assert_text_only_payload(payload: dict) -> None:
 
 def sanitize_error_text(text: str, *secrets: str) -> str:
     """Strip credentials and auth headers from text destined for logs/errors."""
+    text = str(text or "")
     for secret in secrets:
         if secret:
             text = text.replace(secret, "<REDACTED>")
@@ -38,6 +39,12 @@ def sanitize_error_text(text: str, *secrets: str) -> str:
             break
         end = text.find("\n", idx)
         text = text[:idx] + "[auth-credentials removed]" + (text[end:] if end != -1 else "")
-    # Remove any bare Bearer token values.
-    text = re.sub(r"Bearer\s+\S+", "Bearer <REDACTED>", text, flags=re.IGNORECASE)
+    # Remove bare auth schemes and common credential fields. Replacement text
+    # intentionally contains none of the sensitive field/scheme names.
+    text = re.sub(r"Bearer\s+\S+", "[auth-credentials removed]", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"(?i)(api[_-]?key|access[_-]?token|token|cookie)\s*[:=]\s*[^,;\s}\]]+",
+        "[auth-credentials removed]",
+        text,
+    )
     return text

@@ -18,12 +18,19 @@ from typing import Callable
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 CONFIG_DIR = PROJECT_DIR / "config"
 PREFERENCES_FILE = CONFIG_DIR / "pet_preferences.json"
+_USER_CONFIG_ROOT = Path(
+    os.environ.get("LOCALAPPDATA") or (Path.home() / ".config")
+)
+SCREEN_VISION_PREFERENCES_FILE = (
+    _USER_CONFIG_ROOT / "Firefly_AI_Pet" / "screen_vision.json"
+)
 
 DEFAULT_PREFERENCES = {
     "notifications_enabled": True,
     "keep_awake_enabled": True,
     "greeting_on_startup": True,
     "ui_scale": 1.0,
+    "screen_vision_fast_mode": True,
 }
 
 
@@ -44,18 +51,40 @@ def _sanitize_ui_scale(value) -> float:
 class SettingsManager:
     """Load, mutate, and persist Firefly product preferences."""
 
-    def __init__(self, preferences_file: Path | str | None = None):
+    def __init__(
+        self,
+        preferences_file: Path | str | None = None,
+        screen_vision_preferences_file: Path | str | None = None,
+    ):
         self.preferences_file = Path(preferences_file) if preferences_file else PREFERENCES_FILE
+        self.screen_vision_preferences_file = (
+            Path(screen_vision_preferences_file)
+            if screen_vision_preferences_file is not None
+            else (
+                self.preferences_file
+                if preferences_file is not None
+                else SCREEN_VISION_PREFERENCES_FILE
+            )
+        )
         self._preferences = dict(DEFAULT_PREFERENCES)
         self._listeners: list[Callable[[dict], None]] = []
         self._preferences = self._load()
+        if self.screen_vision_preferences_file != self.preferences_file:
+            screen_settings = self._load_file(self.screen_vision_preferences_file)
+            fast_mode = screen_settings.get("screen_vision_fast_mode")
+            if isinstance(fast_mode, bool):
+                self._preferences["screen_vision_fast_mode"] = fast_mode
         self._normalize()
 
     # -- state ----------------------------------------------------------
 
     def _load(self) -> dict:
+        return self._load_file(self.preferences_file)
+
+    @staticmethod
+    def _load_file(path: Path) -> dict:
         try:
-            data = json.loads(self.preferences_file.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 return data
         except (OSError, ValueError):
@@ -91,6 +120,24 @@ class SettingsManager:
         return bool(self._preferences["greeting_on_startup"])
 
     @property
+    def screen_vision_fast_mode(self) -> bool:
+        """FAST routing for screen vision (DeepSeek-first). Default ON."""
+        return bool(self._preferences["screen_vision_fast_mode"])
+
+    def set_screen_vision_fast_mode(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if self._preferences.get("screen_vision_fast_mode") == enabled:
+            return
+        self._preferences["screen_vision_fast_mode"] = enabled
+        if self.screen_vision_preferences_file == self.preferences_file:
+            self.save()
+        else:
+            self._save_file(
+                self.screen_vision_preferences_file,
+                {"screen_vision_fast_mode": enabled},
+            )
+        self._notify()
+
     def ui_scale(self) -> float:
         return float(self._preferences["ui_scale"])
 
@@ -136,10 +183,14 @@ class SettingsManager:
     # -- persistence ----------------------------------------------------
 
     def save(self) -> None:
-        self.preferences_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.preferences_file.with_name(self.preferences_file.name + ".tmp")
+        self._save_file(self.preferences_file, self._preferences)
+
+    @staticmethod
+    def _save_file(path: Path, payload: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
         tmp.write_text(
-            json.dumps(self._preferences, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
-        os.replace(tmp, self.preferences_file)
+        os.replace(tmp, path)

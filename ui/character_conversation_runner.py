@@ -54,13 +54,16 @@ class CharacterConversationRunner(QObject):
         runtime: ConversationRuntime | None = None,
         parent: QObject | None = None,
         screen_vision_service: Any | None = None,
+        screen_vision_settings: Any | None = None,
     ) -> None:
         super().__init__(parent)
         self.runtime = runtime or ConversationRuntime(
             conversation_store=ConversationStore()
         )
         self._screen_vision_service = screen_vision_service
+        self._screen_vision_settings = screen_vision_settings
         self.last_screen_vision_timings: dict[str, float] | None = None
+        self.last_screen_vision_meta: dict[str, Any] | None = None
         self._busy = False
         self._cancel_event: threading.Event | None = None
         self._thread: threading.Thread | None = None
@@ -76,7 +79,13 @@ class CharacterConversationRunner(QObject):
         if self._screen_vision_service is None:
             from core.screen_vision.service import ScreenVisionService
 
-            self._screen_vision_service = ScreenVisionService()
+            self._screen_vision_service = ScreenVisionService(
+                settings=self._screen_vision_settings
+            )
+        # The Settings toggle applies immediately (no restart needed).
+        sync = getattr(self._screen_vision_service, "sync_routing_mode_from_settings", None)
+        if sync is not None:
+            sync()
         return self._screen_vision_service
 
     def _load_persisted_history(self) -> list[dict[str, str]]:
@@ -185,10 +194,12 @@ class CharacterConversationRunner(QObject):
                     VisionTemporarilyUnavailable,
                 )
 
+                from core.screen_vision.safety import sanitize_error_text
+
                 logger.warning(
                     "Screen vision look failed: %s: %s",
                     type(exc).__name__,
-                    exc,
+                    sanitize_error_text(str(exc)),
                 )
                 if isinstance(exc, VisionTemporarilyUnavailable):
                     answer = SCREEN_VISION_UNAVAILABLE_REPLY
@@ -210,9 +221,34 @@ class CharacterConversationRunner(QObject):
                     AgentEventType.FINAL,
                     text=answer,
                 )], answer
-            turn_context = format_screen_vision_context(result)
             self._pending_vision_timings = dict(result.timings)
             self._pending_vision_meta = dict(result.meta)
+            if result.meta.get("direct_one_shot") is True:
+                # FAST already produced the final natural-language companion
+                # answer. Do not send it, the screenshot question, or chat
+                # history through a second reasoning/chat provider.
+                answer = result.answer
+                if event.is_set():
+                    return [self._cancelled_event()], ""
+                self.last_screen_vision_timings = dict(result.timings)
+                self.last_screen_vision_meta = dict(result.meta)
+                logger.info(
+                    "Screen vision turn timings: %s",
+                    self.last_screen_vision_timings,
+                )
+                with self._lock:
+                    self._history.extend(
+                        [
+                            {"role": "user", "content": text},
+                            {"role": "assistant", "content": answer},
+                        ]
+                    )
+                return [AgentEvent.make(
+                    self.AGENT_ID,
+                    AgentEventType.FINAL,
+                    text=answer,
+                )], answer
+            turn_context = format_screen_vision_context(result)
 
         companion_started = time.perf_counter()
         try:
@@ -225,6 +261,9 @@ class CharacterConversationRunner(QObject):
             return [self._cancelled_event()], ""
         if turn_context is not None:
             vision_timings = getattr(self, "_pending_vision_timings", {}) or {}
+            self.last_screen_vision_meta = dict(
+                getattr(self, "_pending_vision_meta", {}) or {}
+            )
             total_ms = vision_timings.get("total_ms", 0.0) + companion_ms
             self.last_screen_vision_timings = {
                 **vision_timings,

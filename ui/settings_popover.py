@@ -24,7 +24,14 @@ TOGGLE_KEYS = (
     ("keep_awake_enabled", "Keep awake"),
     ("greeting_on_startup", "Greeting on startup"),
     ("launch_on_startup", "Launch on startup"),
+    ("screen_vision_fast_mode", "Fast screen vision"),
 )
+
+TOGGLE_TOOLTIPS = {
+    "screen_vision_fast_mode":
+        "ON: Faster screen understanding using DeepSeek first.\n"
+        "OFF: Use resilient provider fallback order.",
+}
 
 
 class _PillToggle(QPushButton):
@@ -79,6 +86,7 @@ class _ToggleRow(QFrame):
         state: bool,
         on_toggled: Callable[[str, bool], None],
         parent=None,
+        tooltip: str = "",
     ):
         super().__init__(parent)
         self.key = key
@@ -90,6 +98,8 @@ class _ToggleRow(QFrame):
 
         name = QLabel(label)
         name.setStyleSheet(theme.primary_label_style())
+        if tooltip:
+            name.setToolTip(tooltip)
         layout.addWidget(name, 1)
 
         self._toggle = _PillToggle(state, self)
@@ -130,7 +140,10 @@ class SettingsPopover(PopoverBase):
         self.content_layout.addWidget(general)
 
         for key, label in TOGGLE_KEYS:
-            row = _ToggleRow(label, key, self._initial_state(key), self._on_toggle, self._card)
+            row = _ToggleRow(
+                label, key, self._initial_state(key), self._on_toggle, self._card,
+                tooltip=TOGGLE_TOOLTIPS.get(key, ""),
+            )
             self._rows[key] = row
             self.content_layout.addWidget(row)
 
@@ -179,6 +192,8 @@ class SettingsPopover(PopoverBase):
             self._manager.set_greeting_on_startup(value)
         elif key == "launch_on_startup":
             self._on_toggle_launch_on_startup(value)
+        elif key == "screen_vision_fast_mode":
+            self._manager.set_screen_vision_fast_mode(value)
 
     def _initial_state(self, key: str) -> bool:
         if key == "launch_on_startup":
