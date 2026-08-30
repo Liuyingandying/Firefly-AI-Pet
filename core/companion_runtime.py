@@ -228,12 +228,21 @@ class CompanionRuntime:
         history: Sequence[dict[str, Any]] | None = None,
         model: str | None = None,
         temperature: float = 0.2,
+        turn_context: str | None = None,
     ) -> ChatCompletion:
-        """Run one ordered turn: reads, provider call, then durable save."""
+        """Run one ordered turn: reads, provider call, then durable save.
+
+        ``turn_context`` injects extra context (e.g. Screen Vision) into this
+        turn's provider messages only: it is never persisted to the
+        conversation store nor fed into post-turn memory suggestion
+        extraction.
+        """
         self._begin_turn()
         try:
             user_text = _required_text(user_message, "user_message")
             messages = self._build_messages(user_text, history=history)
+            if turn_context:
+                messages.insert(-1, {"role": "system", "content": turn_context})
             response = self.provider_router.chat(
                 messages,
                 model=model,

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import threading
+import time
 from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
 from core.agent_events import (
+    STATUS_READING,
     STATUS_THINKING,
     AgentEvent,
     AgentEventType,
@@ -15,6 +18,28 @@ from core.agent_events import (
 )
 from core.conversation_runtime import ConversationRuntime
 from core.conversation_store import ConversationStore
+from core.screen_vision.trigger import (
+    format_screen_vision_context,
+    is_explicit_screen_vision_request,
+    is_look_command,
+    resolve_capture_mode,
+    screen_vision_question,
+)
+
+
+logger = logging.getLogger(__name__)
+
+SCREEN_VISION_FAILURE_REPLY = (
+    "我这边的视觉模块这次没能看成屏幕（{reason}）。"
+    "你可以稍后再试一次，或者直接把内容粘贴给我。"
+)
+SCREEN_VISION_UNAVAILABLE_REPLY = (
+    "我这次暂时没能看清屏幕，视觉服务好像出了点问题。"
+    "稍后再叫我看一次吧；也可以直接把内容粘贴给我。"
+)
+SCREEN_VISION_REASONING_UNAVAILABLE_REPLY = (
+    "我已经看到了，但这次分析服务好像有些不稳定，稍后再问我一次吧。"
+)
 
 
 class CharacterConversationRunner(QObject):
@@ -28,16 +53,31 @@ class CharacterConversationRunner(QObject):
         self,
         runtime: ConversationRuntime | None = None,
         parent: QObject | None = None,
+        screen_vision_service: Any | None = None,
     ) -> None:
         super().__init__(parent)
         self.runtime = runtime or ConversationRuntime(
             conversation_store=ConversationStore()
         )
+        self._screen_vision_service = screen_vision_service
+        self.last_screen_vision_timings: dict[str, float] | None = None
         self._busy = False
         self._cancel_event: threading.Event | None = None
         self._thread: threading.Thread | None = None
         self._history = self._load_persisted_history()
         self._lock = threading.RLock()
+
+    def _get_screen_vision_service(self) -> Any:
+        """Lazily build the real service on first explicit request.
+
+        Construction loads provider config from the environment; a missing
+        configuration must not break Firefly startup, only the look request.
+        """
+        if self._screen_vision_service is None:
+            from core.screen_vision.service import ScreenVisionService
+
+            self._screen_vision_service = ScreenVisionService()
+        return self._screen_vision_service
 
     def _load_persisted_history(self) -> list[dict[str, str]]:
         """Seed the UI history from ConversationStore when one is configured."""
@@ -65,6 +105,8 @@ class CharacterConversationRunner(QObject):
         """Return a detached copy of the restored/in-process chat history."""
         with self._lock:
             return [dict(message) for message in self._history]
+
+
 
     def ask(self, prompt: str) -> bool:
         """Start a character turn and return False if the request is invalid."""
@@ -122,13 +164,77 @@ class CharacterConversationRunner(QObject):
             return [self._cancelled_event()], ""
         with self._lock:
             history = [dict(message) for message in self._history]
+
+        turn_context = None
+        if is_look_command(text) or is_explicit_screen_vision_request(text):
+            self.agent_event.emit(
+                AgentEvent.make(
+                    self.AGENT_ID,
+                    AgentEventType.STATUS,
+                    status=STATUS_READING,
+                )
+            )
+            try:
+                result = self._get_screen_vision_service().look(
+                    screen_vision_question(text),
+                    capture_mode=resolve_capture_mode(text),
+                )
+            except Exception as exc:  # vision failure must not crash the turn
+                from core.screen_vision.provider_errors import (
+                    ReasoningTemporarilyUnavailable,
+                    VisionTemporarilyUnavailable,
+                )
+
+                logger.warning(
+                    "Screen vision look failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+                if isinstance(exc, VisionTemporarilyUnavailable):
+                    answer = SCREEN_VISION_UNAVAILABLE_REPLY
+                elif isinstance(exc, ReasoningTemporarilyUnavailable):
+                    answer = SCREEN_VISION_REASONING_UNAVAILABLE_REPLY
+                else:
+                    answer = SCREEN_VISION_FAILURE_REPLY.format(
+                        reason=type(exc).__name__
+                    )
+                with self._lock:
+                    self._history.extend(
+                        [
+                            {"role": "user", "content": text},
+                            {"role": "assistant", "content": answer},
+                        ]
+                    )
+                return [AgentEvent.make(
+                    self.AGENT_ID,
+                    AgentEventType.FINAL,
+                    text=answer,
+                )], answer
+            turn_context = format_screen_vision_context(result)
+            self._pending_vision_timings = dict(result.timings)
+            self._pending_vision_meta = dict(result.meta)
+
+        companion_started = time.perf_counter()
         try:
-            response = self.runtime.chat(text, history=history)
+            response = self.runtime.chat(text, history=history, turn_context=turn_context)
             answer = extract_assistant_text(response)
         except Exception as exc:  # provider/runtime failures must not crash Qt
             return [self._error_event(str(exc), ErrorCategory.PROVIDER)], ""
+        companion_ms = (time.perf_counter() - companion_started) * 1000
         if event.is_set():
             return [self._cancelled_event()], ""
+        if turn_context is not None:
+            vision_timings = getattr(self, "_pending_vision_timings", {}) or {}
+            total_ms = vision_timings.get("total_ms", 0.0) + companion_ms
+            self.last_screen_vision_timings = {
+                **vision_timings,
+                "companion_ms": round(companion_ms, 1),
+                "total_ms": round(total_ms, 1),
+            }
+            logger.info(
+                "Screen vision turn timings: %s",
+                self.last_screen_vision_timings,
+            )
         with self._lock:
             self._history.extend(
                 [

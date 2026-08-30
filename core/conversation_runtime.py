@@ -72,12 +72,14 @@ class ConversationRuntime:
         history: Sequence[dict[str, Any]] | None = None,
         model: str | None = None,
         temperature: float = 0.2,
+        turn_context: str | None = None,
     ) -> ChatCompletion:
         return self._runtime.chat(
             user_message,
             history=history,
             model=model,
             temperature=temperature,
+            turn_context=turn_context,
         )
 
 
