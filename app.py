@@ -276,7 +276,7 @@ class VisualShell(QObject):
         self.pet.scale_mode_toggled.connect(self._on_scale_mode_toggled)
         self.pet.scale_wheel.connect(self._on_scale_wheel)
         self.pet.scale_exit_requested.connect(self._on_scale_exit)
-        self.dock.agent_selected.connect(self._on_dock_agent_selected)
+        self.dock.launch_agent.connect(self._on_dock_agent_selected)
         self.state_monitor.agent_state_changed.connect(self._on_agent_state_changed)
         self.state_monitor.resolved_state_changed.connect(self._on_resolved_state_changed)
         self.session_popover.continue_requested.connect(self._on_continue_session)
@@ -357,18 +357,43 @@ class VisualShell(QObject):
             pass
 
     def _on_agent_state_changed(self, agent_id: str, state: AgentState) -> None:
-        self.dock.set_agent_state(agent_id, state.state.value)
+        # The launcher dock has no per-agent state display anymore.
         self.session_popover.set_agent_state(agent_id, state.state.value)
         self.coordinator.on_agent_state(agent_id, state)
         self.notification_manager.on_agent_state(state)
         self.keep_awake.on_agent_state(state)
 
     def _on_dock_agent_selected(self, agent_id: str) -> None:
-        # ChatGPT has no in-app backend: a dock click opens the web UI directly.
-        # Claude/Codex keep their selection-only dock behavior — the Ask entry
-        # drives Quick Ask, unchanged.
-        if agent_id == "chatgpt":
-            self._open_chatgpt()
+        # The dock is now a launcher: each click opens the CLI / app for the
+        # CURRENTLY SELECTED workspace. Failures show a lightweight message
+        # and never crash Firefly.
+        from ui.agent_launcher import (
+            launch_claude,
+            launch_codex,
+            launch_qwen_yolo,
+            launch_zcode,
+        )
+
+        launchers = {
+            "claude": launch_claude,
+            "codex": launch_codex,
+            "qwen": launch_qwen_yolo,
+            "zcode": launch_zcode,
+        }
+        launcher = launchers.get(agent_id)
+        if launcher is None:
+            return
+        ok, message = launcher(self.workspace_manager.current())
+        if not ok:
+            try:
+                self.bubble.show_message(
+                    agent_id.title(),
+                    message,
+                    duration_ms=3_200,
+                    accent=theme.ERROR_STATUS,
+                )
+            except Exception:
+                pass
 
     def _open_chatgpt(self) -> None:
         ok, _ = ProcessLauncher.open_chatgpt()

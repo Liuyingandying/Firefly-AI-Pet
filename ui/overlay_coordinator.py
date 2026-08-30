@@ -482,6 +482,10 @@ class OverlayCoordinator(QObject):
             self._waiting[agent_id] = state
         else:
             self._waiting.pop(agent_id, None)
+            # The waiting episode ended: a later re-wait is a NEW episode and
+            # may show again even if the user dismissed the previous one.
+            if self.permission_card is not None:
+                self.permission_card.clear_dismissed()
         self._refresh_permission_card()
 
     def _refresh_permission_card(self) -> None:
