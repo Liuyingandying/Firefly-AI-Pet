@@ -2,7 +2,7 @@
 
 Coverage map (per Stage 1 acceptance):
 A. ordinary chat  -> zero capture
-B. explicit look  -> exactly one active_window capture
+B. explicit look  -> exactly one primary_screen capture
 C. whole screen   -> primary capture
 D. vision context only enters the current turn (not persisted)
 E. no memory writes from the vision round
@@ -28,7 +28,7 @@ from core.screen_vision.trigger import (
     format_screen_vision_context,
     is_explicit_screen_vision_request,
     is_look_command,
-    resolve_capture_mode,
+    resolve_capture_target,
     screen_vision_question,
 )
 from ui.character_conversation_runner import CharacterConversationRunner
@@ -46,12 +46,22 @@ class RecordingCapture:
         self.calls: list[str] = []
 
     def capture_primary_screen(self, **kwargs):
-        self.calls.append("primary")
+        self.calls.append("primary_screen")
         return _fake_frame()
 
     def capture_active_window(self, **kwargs):
         self.calls.append("active_window")
         return _fake_frame()
+
+    def capture_last_non_firefly_window(self, **kwargs):
+        self.calls.append("last_non_firefly_window")
+        return _fake_frame()
+
+    def capture_firefly_companion(self, **kwargs):
+        self.calls.append("firefly_companion")
+        return _fake_frame()
+
+    last_capture_info = {}
 
 
 class FakeVision:
@@ -133,11 +143,22 @@ def test_trigger_ordinary_chat_never_matches():
         assert not is_look_command(text), text
 
 
-def test_capture_mode_default_active_window():
-    assert resolve_capture_mode("流萤，看一下我的屏幕") == "active_window"
-    assert resolve_capture_mode("看看当前窗口") == "active_window"
-    assert resolve_capture_mode("看看整个屏幕") == "primary"
-    assert resolve_capture_mode("看看我的整个桌面") == "primary"
+def test_capture_target_semantics_v1():
+    # A: explicit whole screen / desktop / "my screen"
+    assert resolve_capture_target("看一下我的屏幕") == "primary_screen"
+    assert resolve_capture_target("看看整个屏幕") == "primary_screen"
+    assert resolve_capture_target("看看我的桌面") == "primary_screen"
+    # B: what I was just doing / the window before Firefly
+    assert resolve_capture_target("看看我在做什么") == "last_non_firefly_window"
+    assert resolve_capture_target("看看刚才这个窗口") == "last_non_firefly_window"
+    assert resolve_capture_target("看看这个页面") == "last_non_firefly_window"
+    # C: Firefly's own surface
+    assert resolve_capture_target("看看这个聊天框") == "firefly_companion"
+    assert resolve_capture_target("看看你的窗口") == "firefly_companion"
+    # priority: negated whole-screen phrase must not win over companion
+    assert resolve_capture_target("看看你这个聊天框，不用看整个桌面") == "firefly_companion"
+    # D: unqualified look requests default to the last external window
+    assert resolve_capture_target("看看屏幕") == "last_non_firefly_window"
 
 
 def test_look_command_maps_to_canonical_question():
@@ -157,31 +178,31 @@ def test_a_ordinary_chat_does_not_capture():
     assert answer == "流萤的回复"
 
 
-def test_b_explicit_look_captures_active_window_once():
+def test_b_explicit_look_captures_primary_screen_once():
     capture = RecordingCapture()
     runner, runtime = _make_runner(capture)
     events, answer = runner.perform("流萤，看一下我的屏幕")
-    assert capture.calls == ["active_window"]
+    assert capture.calls == ["primary_screen"]
     assert answer == "流萤的回复"
     context = runtime.chats[0]["turn_context"]
     assert "[Screen Vision Context]" in context
     assert "[End Screen Vision Context]" in context
-    assert "Capture mode: active_window" in context
+    assert "Capture target: primary_screen" in context
 
 
 def test_b_look_command_captures_once():
     capture = RecordingCapture()
     runner, _ = _make_runner(capture)
     runner.perform("/look")
-    assert capture.calls == ["active_window"]
+    assert capture.calls == ["primary_screen"]  # /look default question mentions 我的屏幕
 
 
 def test_c_whole_screen_uses_primary_capture():
     capture = RecordingCapture()
     runner, runtime = _make_runner(capture)
     runner.perform("看看整个屏幕，现在发生了什么")
-    assert capture.calls == ["primary"]
-    assert "Capture mode: primary" in runtime.chats[0]["turn_context"]
+    assert capture.calls == ["primary_screen"]
+    assert "Capture target: primary_screen" in runtime.chats[0]["turn_context"]
 
 
 # ------------------------------------------------------- D/E context scope
@@ -293,22 +314,22 @@ def test_i_ask_path_runs_look_on_worker_thread():
     runner, _ = _make_runner(capture)
     caller_thread = threading.current_thread()
     seen = []
-    real_capture_active = capture.capture_active_window
+    real_capture_primary = capture.capture_primary_screen
 
-    def spy_capture_active(**kwargs):
+    def spy_capture_primary(**kwargs):
         seen.append(threading.current_thread())
-        return real_capture_active(**kwargs)
+        return real_capture_primary(**kwargs)
 
-    capture.capture_active_window = spy_capture_active
+    capture.capture_primary_screen = spy_capture_primary
     assert runner.ask("流萤，看一下我的屏幕") is True
     # Wait until the worker thread has FULLY finished (not just captured):
     # returning earlier would let the runner emit Qt signals from a daemon
     # thread after this QObject-based test tore down -> native crash.
     deadline = threading.Event()
     for _ in range(1000):
-        if capture.calls == ["active_window"] and not runner.running:
+        if capture.calls == ["primary_screen"] and not runner.running:
             break
         deadline.wait(0.02)
     deadline.wait(0.2)  # let the worker's final agent_event.emit() drain
-    assert capture.calls == ["active_window"]
+    assert capture.calls == ["primary_screen"]
     assert seen and all(t is not caller_thread for t in seen)

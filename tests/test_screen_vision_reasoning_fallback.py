@@ -271,6 +271,14 @@ class _SpyCapture:
     def capture_active_window(self, **kwargs):
         return self.capture_primary_screen(**kwargs)
 
+    def capture_last_non_firefly_window(self, **kwargs):
+        return self.capture_primary_screen(**kwargs)
+
+    def capture_firefly_companion(self, **kwargs):
+        return self.capture_primary_screen(**kwargs)
+
+    last_capture_info = {}
+
 
 def test_n_service_exactly_one_capture_per_look():
     from core.screen_vision.models import ScreenObservation

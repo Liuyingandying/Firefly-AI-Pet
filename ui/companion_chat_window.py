@@ -48,11 +48,18 @@ class CompanionChatWindow(QWidget):
         can simply start typing. No message is filled in or sent, and no
         vision/provider call happens here.
         """
+        # Record the user's own window BEFORE a Firefly window takes
+        # focus, so "看看我在做什么" later captures what they were doing
+        # (not the Companion). Reads the HWND only; no capture, no provider.
+        from core.screen_vision.foreground_tracker import foreground_tracker
+
+        foreground_tracker.remember_current_external_window()
         window = cls._instance
         if window is None:
             window = cls(runner=runner)
             cls._instance = window
         window.show()
+        foreground_tracker.remember_firefly_window(int(window.winId()))
         window.raise_()
         window.activateWindow()
         window.input.setFocus()
@@ -63,6 +70,12 @@ class CompanionChatWindow(QWidget):
         # fresh instance and the same conversation runner.
         if CompanionChatWindow._instance is self:
             CompanionChatWindow._instance = None
+        try:
+            from core.screen_vision.foreground_tracker import foreground_tracker
+
+            foreground_tracker.forget_firefly_window(int(self.winId()))
+        except RuntimeError:
+            pass  # window already destroyed
         super().closeEvent(event)
 
     def __init__(self, runner: CharacterConversationRunner | None = None) -> None:

@@ -1,6 +1,13 @@
 """ScreenVisionService facade: the single entry point Firefly calls.
 
-    service.look(user_question, capture_mode="active_window") -> ScreenVisionResult
+    service.look(user_question, capture_mode=...) -> ScreenVisionResult
+
+Capture modes (semantics v1):
+- "primary_screen"        whole primary screen (alias: "primary")
+- "last_non_firefly_window" the window the user was in before Firefly took
+                           focus (default for unqualified look requests)
+- "firefly_companion"      the Companion chat window itself
+- "active_window"          legacy: current OS foreground
 
 Every look() performs exactly one on-demand capture. Nothing here runs or
 captures in the background, writes to disk, or touches long-term memory.
@@ -13,7 +20,21 @@ from core.screen_vision.models import ScreenVisionResult
 from core.screen_vision.screen.capture import ScreenCaptureService
 from core.screen_vision.vision.base import VisionProvider
 
-CAPTURE_MODES = ("primary", "active_window")
+CAPTURE_MODES = (
+    "primary_screen",
+    "last_non_firefly_window",
+    "firefly_companion",
+    "primary",       # legacy alias of primary_screen
+    "active_window", # legacy: current foreground
+)
+
+_CAPTURE_METHOD_BY_MODE = {
+    "primary_screen": "capture_primary_screen",
+    "primary": "capture_primary_screen",
+    "last_non_firefly_window": "capture_last_non_firefly_window",
+    "firefly_companion": "capture_firefly_companion",
+    "active_window": "capture_active_window",
+}
 
 
 class ScreenVisionService:
@@ -38,7 +59,7 @@ class ScreenVisionService:
     def look(
         self,
         user_question: str,
-        capture_mode: str = "active_window",
+        capture_mode: str = "last_non_firefly_window",
     ) -> ScreenVisionResult:
         """Capture once, observe, and answer. The only method that triggers
         a screenshot."""
@@ -48,9 +69,9 @@ class ScreenVisionService:
         total_started = perf_counter()
 
         capture_started = perf_counter()
-        frame = self._capture.capture_primary_screen() if capture_mode == "primary" \
-            else self._capture.capture_active_window()
+        frame = getattr(self._capture, _CAPTURE_METHOD_BY_MODE[capture_mode])()
         capture_ms = (perf_counter() - capture_started) * 1000
+        capture_info = dict(getattr(self._capture, "last_capture_info", {}))
 
         vision_started = perf_counter()
         observation = self._vision.inspect(frame)
@@ -78,6 +99,8 @@ class ScreenVisionService:
             },
             meta={
                 "capture_mode": capture_mode,
+                "capture_target": capture_info.get("capture_target", capture_mode),
+                "capture_fallback_used": capture_info.get("capture_fallback_used", False),
                 "vision_model": getattr(self._vision, "model", "unknown"),
                 "reasoning_model": getattr(self._reasoning, "model", "unknown"),
                 **getattr(self._vision, "last_meta", {}),

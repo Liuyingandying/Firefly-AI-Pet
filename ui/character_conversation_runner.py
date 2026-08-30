@@ -22,7 +22,7 @@ from core.screen_vision.trigger import (
     format_screen_vision_context,
     is_explicit_screen_vision_request,
     is_look_command,
-    resolve_capture_mode,
+    resolve_capture_target,
     screen_vision_question,
 )
 
@@ -177,7 +177,7 @@ class CharacterConversationRunner(QObject):
             try:
                 result = self._get_screen_vision_service().look(
                     screen_vision_question(text),
-                    capture_mode=resolve_capture_mode(text),
+                    capture_mode=resolve_capture_target(screen_vision_question(text)),
                 )
             except Exception as exc:  # vision failure must not crash the turn
                 from core.screen_vision.provider_errors import (

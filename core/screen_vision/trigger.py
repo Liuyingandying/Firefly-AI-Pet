@@ -24,7 +24,9 @@ _REQUEST_KEYWORDS = (
 # Generic combination rule: an explicit look-verb plus a screen/window target.
 _LOOK_VERBS = ("看看", "看一下", "看下", "瞧瞧", "帮我看看", "你看看", "看看我的")
 _SCREEN_TARGETS = ("屏幕", "当前窗口", "桌面", "显示器", "这是怎么回事",
-                   "我在做什么", "我在干什么", "在做什么", "在干什么")
+                   "我在做什么", "我在干什么", "在做什么", "在干什么",
+                   "聊天框", "聊天窗口", "你的窗口", "流萤窗口", "companion",
+                   "对话框")
 
 # Only these phrases upgrade the capture to the full primary screen.
 _WHOLE_SCREEN_KEYWORDS = (
@@ -51,11 +53,83 @@ def is_explicit_screen_vision_request(text: str) -> bool:
 
 
 def resolve_capture_mode(text: str) -> str:
-    """Default to the active window; full screen only when explicitly asked."""
+    """DEPRECATED legacy wrapper (primary / active_window names).
+
+    Use :func:`resolve_capture_target` for the v1 capture semantics."""
+    target = resolve_capture_target(text)
+    return "primary" if target == CAPTURE_PRIMARY_SCREEN else "active_window"
+
+
+# -------------------------------------------------- capture semantics v1
+
+CAPTURE_PRIMARY_SCREEN = "primary_screen"
+CAPTURE_LAST_NON_FIREFLY_WINDOW = "last_non_firefly_window"
+CAPTURE_FIREFLY_COMPANION = "firefly_companion"
+CAPTURE_TARGETS = (
+    CAPTURE_PRIMARY_SCREEN,
+    CAPTURE_LAST_NON_FIREFLY_WINDOW,
+    CAPTURE_FIREFLY_COMPANION,
+)
+
+# Priority 1: explicit whole screen / desktop.
+_WHOLE_SCREEN_TARGET_PHRASES = (
+    "整个屏幕", "全部屏幕", "整个桌面", "全部桌面", "全屏",
+    "我的屏幕", "我的桌面",
+)
+# Priority 2: Firefly's own surfaces.
+_COMPANION_TARGET_PHRASES = (
+    "聊天框", "聊天窗口", "你的窗口", "流萤窗口", "流萤的窗口",
+    "你的对话框", "这个对话框", "companion",
+)
+# Priority 3: "what I was just doing" surfaces.
+_LAST_WINDOW_TARGET_PHRASES = (
+    "我在做什么", "我在干什么", "刚才这个窗口", "刚才的窗口", "刚才在看",
+    "在看的东西", "正在看的", "这个页面", "当前页面", "当前窗口",
+    "这个窗口", "现在的画面",
+)
+
+_NEGATIONS = ("不用", "不要", "不用看", "别", "无需", "不需要", "不看", "没有看")
+
+
+def _phrase_not_negated(text: str, index: int) -> bool:
+    """A phrase match counts only when it is not directly negated, so
+    "看看你这个聊天框，不用看整个桌面" is not misread as whole-screen."""
+    prefix = text[max(0, index - 3):index]
+    return not any(neg in prefix for neg in _NEGATIONS)
+
+
+def _first_positive_phrase(text: str, phrases) -> int:
+    best = -1
+    for phrase in phrases:
+        start = 0
+        while True:
+            index = text.find(phrase, start)
+            if index == -1:
+                break
+            if _phrase_not_negated(text, index):
+                return index
+            start = index + len(phrase)
+    return best
+
+
+def resolve_capture_target(text: str) -> str:
+    """Map an already-gated look request to WHERE to capture.
+
+    Priority: explicit whole screen/desktop > Firefly's own window > the
+    window the user was just in > default (last non-Firefly window).
+    Callers must gate with is_explicit_screen_vision_request/is_look_command
+    first; this function never decides WHETHER to capture.
+    """
     normalized = (text or "").strip().lower()
-    if any(keyword in normalized for keyword in _WHOLE_SCREEN_KEYWORDS):
-        return "primary"
-    return "active_window"
+    if not normalized:
+        return CAPTURE_LAST_NON_FIREFLY_WINDOW
+    if _first_positive_phrase(normalized, _WHOLE_SCREEN_TARGET_PHRASES) != -1:
+        return CAPTURE_PRIMARY_SCREEN
+    if _first_positive_phrase(normalized, _COMPANION_TARGET_PHRASES) != -1:
+        return CAPTURE_FIREFLY_COMPANION
+    if _first_positive_phrase(normalized, _LAST_WINDOW_TARGET_PHRASES) != -1:
+        return CAPTURE_LAST_NON_FIREFLY_WINDOW
+    return CAPTURE_LAST_NON_FIREFLY_WINDOW
 
 
 def screen_vision_question(text: str) -> str:
@@ -96,7 +170,8 @@ def format_screen_vision_context(result: ScreenVisionResult) -> str:
         "DeepSeek reasoning:",
         result.answer,
         "",
-        f"Capture mode: {result.meta.get('capture_mode', 'active_window')}",
+        f"Capture target: {result.meta.get('capture_target', result.meta.get('capture_mode', 'last_non_firefly_window'))}",
+        f"Capture fallback used: {result.meta.get('capture_fallback_used', False)}",
         "[End Screen Vision Context]",
     ]
     return "\n".join(lines)

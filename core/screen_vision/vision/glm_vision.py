@@ -25,6 +25,7 @@ from providers.zhipu_glm import ZhipuGLMProvider
 from core.screen_vision.models import ScreenFrame, ScreenObservation
 from core.screen_vision.provider_errors import (
     ProviderError,
+    ProviderHTTPError,
     ProviderSchemaError,
     classify_provider_exception,
 )
