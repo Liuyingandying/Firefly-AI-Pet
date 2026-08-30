@@ -437,23 +437,13 @@ class VisualShell(QObject):
     # -- Short Talk -----------------------------------------------------
 
     def _on_short_ask_requested(self) -> None:
-        if self.coordinator.permission_card is not None and self.coordinator.permission_card.isVisible():
-            return
-        # A hidden pending recommendation (overlay conflict) is restored on the
-        # next Ask instead of starting over (Phase 9B section 21/22).
-        if self.recommendation_card.has_pending:
-            self.coordinator.show_recommendation()
-            return
-        # A hidden/live turn is resumed so the user sees its current state
-        # instead of starting over (Phase 8C.3 section 18).
-        if self.short_ask.has_pending_state():
-            self.coordinator.show_short_ask()
-            return
-        self.short_ask.show_input(
-            "firefly",
-            resume=self.character_conversation.has_history,
-        )
-        self.coordinator.show_short_ask()
+        # "Ask…" means "I want to talk to Firefly": open the existing
+        # Companion chat window (singleton, input focused). It must work
+        # regardless of any visible approval card or pending popover, and it
+        # never captures the screen or calls a provider by itself.
+        from ui.companion_chat_window import CompanionChatWindow
+
+        CompanionChatWindow.open_singleton(runner=self.character_conversation)
 
     def _task_request(self, prompt: str, requested_agent: str | None = None) -> TaskRequest:
         """Build the router request. ``requested_agent`` is only set when the

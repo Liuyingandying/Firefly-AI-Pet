@@ -36,6 +36,35 @@ from ui.character_conversation_runner import CharacterConversationRunner
 class CompanionChatWindow(QWidget):
     """A minimal single-window chat surface for Firefly."""
 
+    _instance: "CompanionChatWindow | None" = None
+
+    @classmethod
+    def open_singleton(cls, runner: CharacterConversationRunner | None = None) -> "CompanionChatWindow":
+        """Open the existing chat window, or bring it to the front.
+
+        This is the single entry point for the floating bubble's ``Ask…``
+        action: at most one window ever exists, an already-open window is
+        raised instead of duplicated, and the input gets focus so the user
+        can simply start typing. No message is filled in or sent, and no
+        vision/provider call happens here.
+        """
+        window = cls._instance
+        if window is None:
+            window = cls(runner=runner)
+            cls._instance = window
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        window.input.setFocus()
+        return window
+
+    def closeEvent(self, event) -> None:
+        # A closed companion window may be reopened by the next Ask with a
+        # fresh instance and the same conversation runner.
+        if CompanionChatWindow._instance is self:
+            CompanionChatWindow._instance = None
+        super().closeEvent(event)
+
     def __init__(self, runner: CharacterConversationRunner | None = None) -> None:
         super().__init__()
         self.setWindowTitle("Firefly Companion")
