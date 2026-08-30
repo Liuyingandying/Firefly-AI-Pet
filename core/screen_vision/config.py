@@ -145,14 +145,19 @@ def build_vision_provider():
             f"Unsupported FIREFLY_VISION_PRIMARY={primary_choice!r} (supported: tju)"
         )
     primary = QwenVisionProvider()
-    fallback = None
+
+    fallbacks = []
     if glm_vision_fallback_enabled():
         from core.screen_vision.vision.glm_vision import GlmVisionProvider
 
-        fallback = GlmVisionProvider()
-    if fallback is None:
+        fallbacks.append(GlmVisionProvider())
+    if _resolve_credential("DEEPSEEK_API_KEY", ()):
+        from core.screen_vision.vision.deepseek_vision import DeepSeekVisionProvider
+
+        fallbacks.append(DeepSeekVisionProvider())
+    if not fallbacks:
         return FailoverVisionProvider(primary=primary, fallback=None)
-    return FailoverVisionProvider(primary=primary, fallback=fallback)
+    return FailoverVisionProvider(primary=primary, fallbacks=tuple(fallbacks))
 
 
 def build_reasoning_provider():
@@ -189,6 +194,12 @@ def build_reasoning_provider():
                     )
                 )
             )
+    if _resolve_credential("DEEPSEEK_API_KEY", ()):
+        from core.screen_vision.brain.official_deepseek import (
+            OfficialDeepSeekReasoningProvider,
+        )
+
+        fallbacks.append(OfficialDeepSeekReasoningProvider())
     if not fallbacks:
         return primary
     return ChainedReasoningProvider(primary=primary, fallbacks=tuple(fallbacks))

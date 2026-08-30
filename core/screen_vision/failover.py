@@ -51,12 +51,16 @@ class _FailoverBase:
         self._meta_lock = threading.Lock()
         self.last_meta: dict = {}
 
-    def _meta(self, used: str, fallback_used: bool, failure_type: str | None) -> dict:
-        return {
+    def _meta(self, used: str, fallback_used: bool, failure_type: str | None,
+              secondary_failure_type: str | None = None) -> dict:
+        meta = {
             f"{self._meta_key}_fallback_used": fallback_used,
             f"{self._meta_key}_primary_failure_type": failure_type,
             f"{self._meta_key}_provider": used,
         }
+        if secondary_failure_type:
+            meta[f"{self._meta_key}_secondary_failure_type"] = secondary_failure_type
+        return meta
 
     def _set_meta(self, meta: dict) -> None:
         with self._meta_lock:
@@ -97,15 +101,18 @@ class _FailoverBase:
             )
 
         last_exc: Exception | None = None
+        failure_chain = [failure_type] if failure_type else []
         for index, fallback in enumerate(self._fallbacks):
             try:
                 result = call_fallbacks(index, fallback)
                 used = getattr(fallback, "name", f"fallback_{index}")
-                self._set_meta(self._meta(used, True, failure_type))
+                secondary = failure_chain[1] if len(failure_chain) > 1 else None
+                self._set_meta(self._meta(used, True, failure_type, secondary))
                 return result
             except Exception as exc:  # noqa: BLE001 - classified below
                 if not is_transient(exc):
                     raise
+                failure_chain.append(classify_provider_exception(exc).failure_type)
                 last_exc = exc
         raise self._unavailable_error(
             failure_type=classify_provider_exception(last_exc).failure_type
