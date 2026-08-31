@@ -91,7 +91,20 @@ class DocumentAttachment:
         self._context: DocumentContext | None = None
         self._parse_state = "parsing"
         self._parse_error: str | None = None
+        # In-memory, session-scoped summary cache (outline + group summaries).
+        # Lives only on this attachment object: cleared when the attachment is
+        # removed or replaced. Never written to disk / memory / history.
+        self._summary_cache: dict = {}
         self._lock = threading.RLock()
+
+    @property
+    def summary_cache(self) -> dict:
+        with self._lock:
+            return self._summary_cache
+
+    def clear_summary_cache(self) -> None:
+        with self._lock:
+            self._summary_cache = {}
 
     @property
     def context(self) -> DocumentContext | None:

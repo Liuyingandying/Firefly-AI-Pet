@@ -34,7 +34,7 @@ from core.document_attachment import (
     MAX_CSV_ROWS,
     MAX_PDF_PAGES,
     MAX_XLSX_SHEET_ROWS,
-    SUMMARY_DIRECT_BUDGET,
+    SUMMARY_DIRECT_CHAR_BUDGET,
     DocumentChunk,
     DocumentContext,
     DocumentParseError,
@@ -44,7 +44,6 @@ from core.document_attachment import (
     chunk_document,
     direct_section_lookup,
     format_excerpts,
-    hierarchical_summary,
     is_summary_request,
     parse_document_bytes,
     retrieve_chunks,
@@ -348,6 +347,12 @@ def test_h_document_chip_parsing_to_ready(tmp_path, qapp):
     assert window._chip.status_label.text() == "Parsing…"
     state = _wait_parse(window._pending_attachment)
     assert state == "ready"
+    # The chip updates via a queued signal from the parse thread; poll until
+    # the UI has caught up (avoids cross-thread delivery timing flakes).
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and "Ready" not in window._chip.status_label.text():
+        QApplication.processEvents()
+        time.sleep(0.01)
     assert "Ready" in window._chip.status_label.text()
     assert "3 pages" in window._chip.status_label.text()
 
@@ -685,7 +690,10 @@ def test_document_empty_text_uses_default_question():
     runner = _runner(chat)
     runner.perform_with_document("", _ready_attachment("txt", b"content", "d.txt"))
     user = chat.calls[0]["messages"][1]["content"]
-    assert "总结这个文档的主要内容。" in user
+    # Empty text maps to the default summary request, which now runs the
+    # five-point summary prompt.
+    assert "研究问题/目的" in user
+    assert "局限/意义" in user
 
 
 # ================================================== AL-AM summaries
@@ -703,11 +711,27 @@ def test_al_small_document_summary_minimal_calls():
 def test_am_large_document_hierarchical_summary():
     chat = FakeTextChat()
     runner = _runner(chat)
-    large = ("这是一段很长的论文内容。" * 2000).encode("utf-8")  # > SUMMARY_DIRECT_BUDGET
-    runner.perform_with_document("总结全文", _ready_attachment("txt", large, "big.txt"))
-    assert runner.last_document_meta["remote_calls"] > 1
+    # Many distinct, sentence-separated sections keep the compressed outline
+    # above the direct budget, so the bounded map/reduce path runs.
+    sections = [
+        DocumentSection(
+            index=i, label=f"Section {i}",
+            text=f"第 {i} 段独特方法内容。\n" + ("方法细节描述与实验结果。" * 300),
+        )
+        for i in range(1, 26)
+    ]
+    context = DocumentContext(
+        filename="big.txt", kind="txt", sections=sections,
+        total_characters=sum(len(s.text) for s in sections),
+    )
+    attachment = DocumentAttachment(
+        display_name="big.txt", kind="txt", original_size=1, source_bytes=b""
+    )
+    attachment.mark_ready(context)
+    runner.perform_with_document("总结全文", attachment)
     assert runner.last_document_meta["remote_calls"] == len(chat.calls)
-    assert len(chat.calls) >= 2
+    assert runner.last_document_meta["remote_calls"] >= 2
+    assert runner.last_document_meta["remote_calls"] <= 6
 
 
 def test_an_summary_grounded_in_source():

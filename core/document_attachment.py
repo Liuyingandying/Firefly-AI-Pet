@@ -23,6 +23,7 @@ import io
 import logging
 import math
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
@@ -84,8 +85,26 @@ DOCUMENT_KIND_LIMITS: dict[str, int] = {
 MAX_PDF_PAGES = 500
 CHUNK_SIZE = 1200          # ~chars per chunk (task: 1000-2000)
 CHUNK_OVERLAP = 100
-SUMMARY_DIRECT_BUDGET = 12000   # single-call summary below this size
-SUMMARY_GROUP_SIZE = 6000       # map-reduce group size
+
+# Summary latency v2 — fewer remote calls via local structure compression.
+#
+# Path selection is based on the size of the LOCALLY COMPRESSED summary input
+# (not the raw document): small -> 1 call, medium -> 2 map groups + 1 reduce
+# (3 calls), large -> bounded map/reduce (<= SUMMARY_MAX_MAP_GROUPS + 1).
+# The values are conservative character budgets; Chinese text is roughly one
+# token per character, and we reserve headroom for system prompt, question,
+# persona and the final answer.
+SUMMARY_DIRECT_CHAR_BUDGET = 18000     # LEVEL 1: whole outline in one call
+SUMMARY_MEDIUM_CHAR_BUDGET = 36000     # LEVEL 2: two map groups -> <=3 calls
+SUMMARY_GROUP_CHAR_BUDGET = 18000      # per-map-group budget (LEVEL 3)
+SUMMARY_MAX_MAP_GROUPS = 5             # hard cap on map groups (LEVEL 3)
+SUMMARY_PRIORITY_SECTION_BUDGET = 1800  # per academic heading section
+SUMMARY_NORMAL_SECTION_BUDGET = 900     # per ordinary section
+SUMMARY_REFERENCE_BUDGET = 150          # references keep metadata only
+SUMMARY_LEAD_FRACTION = 0.35
+SUMMARY_TAIL_FRACTION = 0.20
+SUMMARY_FREQUENT_TERMS = 12
+
 RETRIEVAL_TOP_K = 6
 
 MAX_XLSX_SHEET_ROWS = 2000
@@ -559,8 +578,26 @@ Be warm and concise, normally 2-5 sentences.
 Refer to pages/slides naturally when the content comes from a clear source."""
 
 SUMMARY_MAP_PROMPT = (
-    "你是 Firefly，用户的桌面伙伴。请阅读以下文档片段，用简洁要点概括其内容。"
-    "保留重要的页/幻灯片来源信息，不要编造片段中没有的内容。"
+    "你是 Firefly，用户的桌面伙伴。请阅读以下文档片段，用简洁要点概括其内容，"
+    "保留重要细节与页/幻灯片来源。不要编造片段中没有的内容。\n\n"
+)
+
+SUMMARY_DIRECT_PROMPT = (
+    "你是 Firefly，用户的桌面伙伴。请基于以下文档内容，用五点总结这份文档：\n"
+    "1. 研究问题/目的\n"
+    "2. 方法\n"
+    "3. 数据/实验\n"
+    "4. 主要结果\n"
+    "5. 局限/意义\n"
+    "只依据提供的文档内容；如果某项文档未明确提供，请明确说明“文档未明确提供”，"
+    "不要臆造。内容来自哪些页/幻灯片请自然提及，不必逐句引用。"
+    "保持简洁、温暖。\n\n"
+)
+
+SUMMARY_REDUCE_PROMPT = (
+    "以下是同一文档各部分的分段摘要。请合并为一份完整、连贯的中文总结，"
+    "并用五点组织：研究问题/目的、方法、数据/实验、主要结果、局限/意义。"
+    "只依据所提供的分段摘要；某部分未提供时明确说明“文档未明确提供”，不要臆造。\n\n"
 )
 
 
@@ -586,72 +623,367 @@ def build_qa_messages(
     ]
 
 
-def _group_chunks(chunks: list[DocumentChunk], group_size: int = SUMMARY_GROUP_SIZE) -> list[list[DocumentChunk]]:
-    groups: list[list[DocumentChunk]] = []
-    current: list[DocumentChunk] = []
+# ---------------------------------------------------------------- summary v2
+
+
+@dataclass
+class SummaryEntry:
+    """One source-labelled entry of the locally compressed summary input."""
+
+    label: str
+    text: str
+
+
+@dataclass
+class SummaryInput:
+    """Deterministic, locally compressed document outline. Never persisted."""
+
+    filename: str
+    kind: str
+    entries: list[SummaryEntry] = field(default_factory=list)
+    total_chars: int = 0
+    references_downgraded: int = 0
+    detected_headings: list[str] = field(default_factory=list)
+
+
+_ACADEMIC_HEADINGS_EN: dict[str, tuple[str, ...]] = {
+    "abstract": ("abstract",),
+    "introduction": ("introduction",),
+    "background": ("background",),
+    "related_work": ("related work", "related works"),
+    "method": ("method", "methods", "methodology", "approach"),
+    "experiments": ("experiment", "experiments", "evaluation", "evaluations"),
+    "results": ("results", "result"),
+    "discussion": ("discussion",),
+    "conclusion": ("conclusion", "conclusions", "summary"),
+    "references": ("references", "reference", "bibliography"),
+}
+
+_ACADEMIC_HEADINGS_ZH: dict[str, tuple[str, ...]] = {
+    "abstract": ("摘要",),
+    "introduction": ("引言", "绪论", "前言"),
+    "background": ("背景", "研究背景"),
+    "related_work": ("相关工作", "国内外研究"),
+    "method": ("方法", "研究方法", "模型设计", "方案设计"),
+    "experiments": ("实验", "试验", "仿真", "评估"),
+    "results": ("结果", "实验结果", "结果与分析"),
+    "discussion": ("讨论",),
+    "conclusion": ("结论", "总结", "结束语"),
+    "references": ("参考文献", "参考资料"),
+}
+
+_REFERENCE_KINDS = frozenset({"references"})
+_PRIORITY_KINDS = frozenset({
+    "abstract", "introduction", "background", "related_work", "method",
+    "experiments", "results", "discussion", "conclusion",
+})
+
+_RESULT_INDICATORS = (
+    "accuracy", "result", "achieve", "performance", "improve", "compared",
+    "outperform", "propose", "proposed", "show", "demonstrate",
+    "准确率", "精度", "结果", "性能", "优于", "提升", "提出", "表明",
+)
+
+
+def _first_nonempty_line(text: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return ""
+
+
+def _normalize_heading_line(line: str) -> str:
+    return line.strip().lower().lstrip("0123456789.、·-—()（） \t:：\"'「」[]")
+
+
+def _looks_like_references(text: str) -> bool:
+    sample = text[:4000]
+    bracket_lines = sum(
+        1 for line in sample.splitlines() if re.match(r"^\s*\[\d+\]", line)
+    )
+    numbered_lines = sum(
+        1 for line in sample.splitlines() if re.match(r"^\s*\d+\.\s", line)
+    )
+    return bracket_lines >= 3 or (numbered_lines >= 5 and len(sample) > 2000)
+
+
+def detect_section_kind(text: str) -> str | None:
+    """Classify a section by its first line / citation density (no ML).
+
+    The longest matching heading keyword wins, so ``实验结果`` classifies as
+    ``results`` rather than the shorter ``实验`` -> ``experiments``.
+    """
+    first = _first_nonempty_line(text)[:60]
+    normalized = _normalize_heading_line(first)
+    best_kind: str | None = None
+    best_length = 0
+    for kind, keywords in _ACADEMIC_HEADINGS_EN.items():
+        for keyword in keywords:
+            if (
+                normalized == keyword
+                or normalized.startswith(keyword + " ")
+                or normalized.startswith(keyword + ":")
+                or normalized.startswith(keyword + ".")
+            ):
+                if len(keyword) > best_length:
+                    best_kind, best_length = kind, len(keyword)
+    for kind, keywords in _ACADEMIC_HEADINGS_ZH.items():
+        for keyword in keywords:
+            if normalized.startswith(keyword):
+                if len(keyword) > best_length:
+                    best_kind, best_length = kind, len(keyword)
+    if best_kind is not None:
+        return best_kind
+    if _looks_like_references(text):
+        return "references"
+    return None
+
+
+def _dedupe_lines(text: str) -> str:
+    seen: set[str] = set()
+    kept: list[str] = []
+    for line in text.splitlines():
+        key = line.strip().lower()
+        if not key:
+            continue
+        if re.fullmatch(r"[\s\d.\-–—|·]+", key):  # page numbers / separators
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(line.strip())
+    return "\n".join(kept)
+
+
+def _split_sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[。！？.!?；;])\s*|\n+", text)
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _frequent_terms(context: DocumentContext, top_n: int = SUMMARY_FREQUENT_TERMS) -> list[str]:
+    counts: dict[str, int] = {}
+    for section in context.sections:
+        lowered = section.text.lower()
+        for word in _WORD_RE.findall(lowered):
+            if word in _STOP_WORDS or len(word) < 3:
+                continue
+            counts[word] = counts.get(word, 0) + 1
+        for index in range(len(section.text) - 1):
+            pair = section.text[index:index + 2]
+            if "\u4e00" <= pair[0] <= "\u9fff" and "\u4e00" <= pair[1] <= "\u9fff":
+                counts[pair] = counts.get(pair, 0) + 1
+    ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+    return [term for term, _count in ranked[:top_n]]
+
+
+def _selective_sentences(text: str, budget: int, frequent_terms: list[str]) -> str:
+    sentences = _split_sentences(text)
+    scored: list[tuple[int, int, str]] = []  # (score desc, original index, sentence)
+    for index, sentence in enumerate(sentences):
+        score = 0
+        if any(char.isdigit() for char in sentence):
+            score += 1
+        lowered = sentence.lower()
+        for term in frequent_terms:
+            if term and term.lower() in lowered:
+                score += 1
+        if any(indicator in lowered for indicator in _RESULT_INDICATORS):
+            score += 1
+        if score > 0:
+            scored.append((-score, index, sentence))
+    scored.sort()
+    selected: list[tuple[int, str]] = []
+    total = 0
+    for _neg_score, index, sentence in scored:
+        if total + len(sentence) > budget:
+            continue
+        selected.append((index, sentence))
+        total += len(sentence)
+    selected.sort(key=lambda item: item[0])
+    return "\n".join(sentence for _index, sentence in selected)
+
+
+def _extract_section_text(text: str, budget: int, frequent_terms: list[str]) -> str:
+    text = _dedupe_lines(text)
+    if len(text) <= budget:
+        return text
+    lead = text[: int(budget * SUMMARY_LEAD_FRACTION)]
+    tail = text[-int(budget * SUMMARY_TAIL_FRACTION):]
+    middle_budget = max(0, budget - len(lead) - len(tail))
+    middle = _selective_sentences(text, middle_budget, frequent_terms)
+    return "\n".join(part for part in (lead, middle, tail) if part.strip())
+
+
+def build_summary_input(context: DocumentContext) -> SummaryInput:
+    """Deterministic local compression into a source-labelled outline.
+
+    Academic headings (EN + ZH) keep more text; references keep metadata only;
+    repeated header/footer lines are dropped. The original DocumentContext is
+    never modified — this produces a separate SummaryInput.
+    """
+    frequent = _frequent_terms(context)
+    entries: list[SummaryEntry] = []
+    detected: list[str] = []
+    references_downgraded = 0
+    for section in context.sections:
+        text = (section.text or "").strip()
+        if not text:
+            continue
+        kind = detect_section_kind(text)
+        if kind == "references":
+            entries.append(SummaryEntry(
+                label=section.label, text=text[:SUMMARY_REFERENCE_BUDGET]
+            ))
+            references_downgraded += 1
+            continue
+        if kind is not None:
+            detected.append(kind)
+        budget = (
+            SUMMARY_PRIORITY_SECTION_BUDGET
+            if kind in _PRIORITY_KINDS
+            else SUMMARY_NORMAL_SECTION_BUDGET
+        )
+        entries.append(SummaryEntry(
+            label=section.label, text=_extract_section_text(text, budget, frequent)
+        ))
+    total = sum(len(entry.text) for entry in entries)
+    return SummaryInput(
+        filename=context.filename,
+        kind=context.kind,
+        entries=entries,
+        total_chars=total,
+        references_downgraded=references_downgraded,
+        detected_headings=sorted(set(detected)),
+    )
+
+
+def format_summary_input(summary_input: SummaryInput) -> str:
+    """Render the compressed outline as the SOURCE EXCERPTS block."""
+    blocks = []
+    for entry in summary_input.entries:
+        text = entry.text.strip()
+        if text:
+            blocks.append(f"[{entry.label}]\n{text}")
+    return "\n\n".join(blocks)
+
+
+def _split_entries(entries: list[SummaryEntry], num_groups: int) -> list[list[SummaryEntry]]:
+    total = sum(len(entry.text) for entry in entries)
+    if num_groups <= 1 or total <= 0:
+        return [entries] if entries else []
+    target = max(1, math.ceil(total / num_groups))
+    groups: list[list[SummaryEntry]] = []
+    current: list[SummaryEntry] = []
     current_chars = 0
-    for chunk in chunks:
-        if current and current_chars + len(chunk.text) > group_size:
+    for entry in entries:
+        if current and current_chars + len(entry.text) > target:
             groups.append(current)
             current = []
             current_chars = 0
-        current.append(chunk)
-        current_chars += len(chunk.text)
+        current.append(entry)
+        current_chars += len(entry.text)
     if current:
         groups.append(current)
+    # Merge trailing leftover groups so we never exceed ``num_groups``.
+    while len(groups) > num_groups and len(groups) >= 2:
+        last = groups.pop()
+        groups[-1].extend(last)
     return groups
 
 
-def hierarchical_summary(
+def summarize_document(
     context: DocumentContext,
     chat: Any,
     *,
-    direct_budget: int = SUMMARY_DIRECT_BUDGET,
-    max_groups: int = 8,
-) -> tuple[str, int]:
-    """Summarize a whole document; remote calls stay bounded.
+    cache: dict | None = None,
+) -> tuple[str, int, dict]:
+    """Full-document summary with few remote calls.
 
-    Small documents (<= ``direct_budget`` chars) use exactly one call. Larger
-    documents run a map-reduce: at most ``max_groups`` local summaries, then
-    one combining summary.
+    Strategy (based on the locally compressed outline size):
+      LEVEL 1 small   (<= SUMMARY_DIRECT_CHAR_BUDGET)         -> 1 call
+      LEVEL 2 medium  (<= SUMMARY_MEDIUM_CHAR_BUDGET)         -> 2 groups -> 3 calls
+      LEVEL 3 large   (> medium)  bounded map/reduce          -> <= MAX_GROUPS+1 calls
+
+    ``cache`` (in-memory, session-scoped) reuses the compressed outline and
+    the map-group summaries so a follow-up summary question only re-runs the
+    cheap final synthesis. Returns ``(answer, remote_calls, stats)`` where
+    stats = {summary_input_chars, groups, level, references_downgraded,
+             detected_headings, local_prepare_ms}.
     """
-    if context.total_characters <= direct_budget:
-        excerpts = format_excerpts(context.sections)
+    store = cache if isinstance(cache, dict) else {}
+    prepared = time.perf_counter()
+    summary_input = store.get("input")
+    if summary_input is None:
+        summary_input = build_summary_input(context)
+        store["input"] = summary_input
+    local_prepare_ms = (time.perf_counter() - prepared) * 1000
+
+    total = summary_input.total_chars
+    if total <= SUMMARY_DIRECT_CHAR_BUDGET:
+        excerpts = format_summary_input(summary_input)
         messages = build_qa_messages(
-            context.filename, excerpts, "请总结这个文档的主要内容。"
+            context.filename, excerpts, SUMMARY_DIRECT_PROMPT
         )
         answer = _chat_content(chat(messages, temperature=0.3))
-        return answer, 1
+        stats = {
+            "summary_input_chars": total,
+            "groups": 1,
+            "level": "small",
+            "references_downgraded": summary_input.references_downgraded,
+            "detected_headings": summary_input.detected_headings,
+            "local_prepare_ms": round(local_prepare_ms, 1),
+        }
+        return answer, 1, stats
 
-    chunks = chunk_document(context)
-    groups = _group_chunks(chunks)
-    if len(groups) > max_groups:
-        merged: list[list[DocumentChunk]] = []
+    if total <= SUMMARY_MEDIUM_CHAR_BUDGET:
+        groups = _split_entries(summary_input.entries, 2)
+        level = "medium"
+    else:
+        num_groups = max(
+            2, min(SUMMARY_MAX_MAP_GROUPS, math.ceil(total / SUMMARY_GROUP_CHAR_BUDGET))
+        )
+        groups = _split_entries(summary_input.entries, num_groups)
+        level = "large"
+
+    group_summaries = store.get("groups")
+    map_calls_this_invocation = 0
+    if group_summaries is None:
+        group_summaries = []
         for group in groups:
-            if merged and len(merged[-1]) + len(group) <= max_groups + 1:
-                merged[-1].extend(group)
-            else:
-                merged.append(list(group))
-        groups = merged
+            excerpts = format_summary_input(
+                SummaryInput(
+                    filename=summary_input.filename,
+                    kind=summary_input.kind,
+                    entries=group,
+                    total_chars=sum(len(entry.text) for entry in group),
+                )
+            )
+            messages = [
+                {"role": "system", "content": DOCUMENT_PERSONA},
+                {"role": "user", "content": SUMMARY_MAP_PROMPT + excerpts},
+            ]
+            group_summaries.append(_chat_content(chat(messages, temperature=0.3)))
+            map_calls_this_invocation += 1
+        store["groups"] = group_summaries
 
-    partial_summaries: list[str] = []
-    for group in groups:
-        excerpts = format_excerpts(group)
-        messages = [
-            {"role": "system", "content": DOCUMENT_PERSONA},
-            {"role": "user", "content": f"{SUMMARY_MAP_PROMPT}\n\n{excerpts}"},
-        ]
-        partial_summaries.append(_chat_content(chat(messages, temperature=0.3)))
-    combined = "\n\n".join(partial_summaries)
+    combined = "\n\n".join(group_summaries)
     final_messages = [
         {"role": "system", "content": DOCUMENT_PERSONA},
-        {"role": "user", "content": (
-            "以下是同一文档各部分的分段摘要，请合并为一份完整、连贯的中文总结，"
-            "突出整体逻辑与要点。\n\n" + combined
-        )},
+        {"role": "user", "content": SUMMARY_REDUCE_PROMPT + combined},
     ]
     final = _chat_content(chat(final_messages, temperature=0.3))
-    return final, 1 + len(groups)
+    stats = {
+        "summary_input_chars": total,
+        "groups": len(group_summaries),
+        "level": level,
+        "references_downgraded": summary_input.references_downgraded,
+        "detected_headings": summary_input.detected_headings,
+        "local_prepare_ms": round(local_prepare_ms, 1),
+    }
+    # Count only the calls this invocation actually makes: cached group
+    # summaries do not re-run the map stage.
+    return final, map_calls_this_invocation + 1, stats
 
 
 def _chat_content(response: Any) -> str:
@@ -680,8 +1012,17 @@ __all__ = [
     "format_excerpts",
     "is_summary_request",
     "build_qa_messages",
-    "hierarchical_summary",
+    "SummaryInput",
+    "SummaryEntry",
+    "build_summary_input",
+    "format_summary_input",
+    "detect_section_kind",
+    "summarize_document",
     "DOCUMENT_PERSONA",
     "DOCUMENT_KIND_LIMITS",
     "MAX_PDF_PAGES",
+    "SUMMARY_DIRECT_CHAR_BUDGET",
+    "SUMMARY_MEDIUM_CHAR_BUDGET",
+    "SUMMARY_GROUP_CHAR_BUDGET",
+    "SUMMARY_MAX_MAP_GROUPS",
 ]

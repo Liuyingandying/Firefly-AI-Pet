@@ -46,9 +46,9 @@ from core.document_attachment import (
     chunk_document,
     direct_section_lookup,
     format_excerpts,
-    hierarchical_summary,
     is_summary_request,
     retrieve_chunks,
+    summarize_document,
 )
 
 
@@ -444,6 +444,7 @@ class CharacterConversationRunner(QObject):
         effective_question = text or DEFAULT_DOCUMENT_QUESTION
         provider = self._get_document_chat()
         retrieval_started = time.perf_counter()
+        summary_stats: dict[str, Any] | None = None
         try:
             # Page/slide/sheet direct lookup wins over fuzzy retrieval AND
             # over summary intent ("第 6 页讲了什么" is page-specific).
@@ -455,8 +456,10 @@ class CharacterConversationRunner(QObject):
                 answer = _chat_answer(provider(messages, temperature=0.2))
                 remote_calls = 1
             elif is_summary_request(effective_question):
-                answer, remote_calls = hierarchical_summary(context, provider)
-                chunks_sent = len(chunk_document(context))
+                answer, remote_calls, summary_stats = summarize_document(
+                    context, provider, cache=attachment.summary_cache
+                )
+                chunks_sent = int(summary_stats.get("groups", 1))
             else:
                 top = retrieve_chunks(effective_question, chunk_document(context))
                 excerpts = format_excerpts(top)
@@ -497,13 +500,22 @@ class CharacterConversationRunner(QObject):
                 ]
             )
         total_ms = (time.perf_counter() - total_started) * 1000
-        self.last_document_timings = {
+        model_ms = max(total_ms - parse_ms - retrieval_ms, 0.0)
+        timings = {
             "parse_ms": round(parse_ms, 1),
             "retrieval_ms": round(retrieval_ms, 1),
-            "model_ms": round(max(total_ms - parse_ms - retrieval_ms, 0.0), 1),
+            "model_ms": round(model_ms, 1),
             "total_ms": round(total_ms, 1),
             "chunks_sent": int(chunks_sent),
         }
+        if summary_stats is not None:
+            local_prepare_ms = float(summary_stats.get("local_prepare_ms", 0.0))
+            timings["local_prepare_ms"] = round(local_prepare_ms, 1)
+            timings["model_ms"] = round(max(retrieval_ms - local_prepare_ms, 0.0), 1)
+            timings["summary_input_chars"] = int(
+                summary_stats.get("summary_input_chars", 0)
+            )
+        self.last_document_timings = timings
         self.last_document_meta = {
             "remote_calls": int(remote_calls),
             "reasoning_calls": 0,
@@ -514,6 +526,15 @@ class CharacterConversationRunner(QObject):
             "kind": context.kind,
             "filename": context.filename,
         }
+        if summary_stats is not None:
+            self.last_document_meta["summary_level"] = summary_stats.get("level", "small")
+            self.last_document_meta["summary_groups"] = int(summary_stats.get("groups", 1))
+            self.last_document_meta["summary_input_chars"] = int(
+                summary_stats.get("summary_input_chars", 0)
+            )
+            self.last_document_meta["references_downgraded"] = int(
+                summary_stats.get("references_downgraded", 0)
+            )
         return [
             AgentEvent.make(
                 self.AGENT_ID,
