@@ -33,7 +33,7 @@ from core.document_attachment import (
     CHUNK_SIZE,
     MAX_CSV_ROWS,
     MAX_PDF_PAGES,
-    MAX_XLSX_SHEET_ROWS,
+    MAX_XLSX_ROWS_PER_SHEET,
     SUMMARY_DIRECT_CHAR_BUDGET,
     DocumentChunk,
     DocumentContext,
@@ -402,9 +402,9 @@ def test_l_pdf_page_markers():
 
 def test_m_scanned_pdf_routes_existing_ocr():
     # An image-only page has no text layer; the reused PdfProcessor pipeline
-    # must mark it and route it through the OCR path.
+    # must mark it and route it through the OCR path (recorded in warnings).
     context = parse_document_bytes(_scanned_pdf_bytes(), "pdf", "scan.pdf")
-    assert context.sections[0].text == "" or context.parse_warnings
+    assert context.parse_warnings
     assert any("OCR" in warning for warning in context.parse_warnings)
 
 
@@ -492,12 +492,18 @@ def test_v2_xlsx_large_truncation():
     wb = Workbook()
     ws = wb.active
     ws.title = "Big"
-    for index in range(MAX_XLSX_SHEET_ROWS + 50):
-        ws.append([f"r{index}", index])
-    buffer = io.BytesIO()
-    wb.save(buffer)
-    context = parse_document_bytes(buffer.getvalue(), "xlsx", "big.xlsx")
-    assert context.truncated
+    import core.document_attachment as da
+    original = da.MAX_XLSX_ROWS_PER_SHEET
+    da.MAX_XLSX_ROWS_PER_SHEET = 100
+    try:
+        for index in range(150):
+            ws.append([f"r{index}", index])
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        context = parse_document_bytes(buffer.getvalue(), "xlsx", "big.xlsx")
+        assert context.truncated
+    finally:
+        da.MAX_XLSX_ROWS_PER_SHEET = original
 
 
 # ================================================== W/Z retrieval, X/Y direct lookup

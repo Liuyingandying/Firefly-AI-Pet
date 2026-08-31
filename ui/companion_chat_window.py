@@ -60,6 +60,8 @@ from ui.companion_attachment import (
 
 _CLIPBOARD_NAME = "剪贴板图片"
 
+_LARGE_FILE_BYTES = 50 * 1024 * 1024   # >=50MB shows "正在解析大型文件…"
+
 _LEGACY_DOCUMENT_EXTENSIONS = (".doc", ".ppt", ".xls")
 
 _DOCUMENT_KIND_LABELS = {
@@ -137,15 +139,17 @@ class _AttachmentChip(QFrame):
 class _DocumentChip(QFrame):
     """[ KIND ] name / state · ×  — the single in-memory document attachment.
 
-    State reflects the background parse: ``Parsing…`` -> ``Ready`` (with page
-    / slide / sheet count) or ``Unable to read``.
+    State reflects the background parse: ``Parsing…`` (``正在解析大型文件…``
+    for >=50MB files) -> ``Ready`` (with page / slide / sheet count) or
+    ``Unable to read``.
     """
 
     remove_clicked = Signal()
 
-    def __init__(self, attachment: DocumentAttachment, parent=None):
+    def __init__(self, attachment: DocumentAttachment, *, large: bool = False, parent=None):
         super().__init__(parent)
         self.attachment = attachment
+        self.large = large
         self.setStyleSheet(
             "background: rgba(244, 250, 255, 240);"
             "border: 1px solid rgba(190, 219, 237, 160);"
@@ -174,7 +178,7 @@ class _DocumentChip(QFrame):
             f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
         )
 
-        self.status_label = QLabel("Parsing…")
+        self.status_label = QLabel("正在解析大型文件…" if large else "Parsing…")
         self.status_label.setStyleSheet(
             f"color: {theme.css_color(theme.TEXT_SECONDARY)};"
             f"font-family: '{theme.FONT_FAMILY}'; font-size: {theme.scaled_font_px(7)}pt;"
@@ -213,7 +217,7 @@ class _DocumentChip(QFrame):
                 f"font-family: '{theme.FONT_FAMILY}'; font-size: {theme.scaled_font_px(7)}pt;"
             )
         else:
-            self.status_label.setText("Parsing…")
+            self.status_label.setText("正在解析大型文件…" if self.large else "Parsing…")
 
 
 def _document_count_label(context) -> str:
@@ -372,7 +376,9 @@ class CompanionChatWindow(QWidget):
             self.attachment_layout.removeWidget(self._chip)
             self._chip.deleteLater()
         if isinstance(attachment, DocumentAttachment):
-            chip = _DocumentChip(attachment)
+            chip = _DocumentChip(
+                attachment, large=attachment.original_size >= _LARGE_FILE_BYTES
+            )
             self._start_document_parse(attachment)
         else:
             chip = _AttachmentChip(attachment)

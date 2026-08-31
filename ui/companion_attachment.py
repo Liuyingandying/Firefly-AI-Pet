@@ -15,6 +15,7 @@ the user's text — never base64, raw bytes, extracted text, or the local path.
 
 from __future__ import annotations
 
+import math
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,7 +31,8 @@ from core.document_attachment import (
 )
 from core.screen_vision.models import ScreenFrame
 
-MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024     # image entry limit (Layer 1)
+MAX_IMAGE_PIXELS = 40_000_000               # ~40MP decoded pixel budget (Layer 2)
 ALLOWED_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
 ALLOWED_DOCUMENT_EXTENSIONS = (
     ".pdf", ".docx", ".pptx", ".txt", ".md", ".xlsx", ".csv",
@@ -44,8 +46,21 @@ HISTORY_IMAGE_PLACEHOLDER = "[Image attachment]"
 HISTORY_DOCUMENT_PLACEHOLDER = "[Document attachment: {name}]"
 DEFAULT_DOCUMENT_QUESTION = "总结这个文档的主要内容。"
 UNREADABLE_MESSAGE = "这张图片好像无法读取。"
-TOO_LARGE_MESSAGE = "图片超过 20MB，无法添加。"
-DOCUMENT_TOO_LARGE_MESSAGE = "文件太大，无法添加。"
+TOO_LARGE_MESSAGE = "图片超过 50 MB，暂时无法添加。"
+
+# Layer-2 bounded reads for text-like formats: never load a 100MB file fully.
+_TEXT_READ_CAP_BYTES = 5_000_000 * 4 + 4096    # >= MAX_TEXT_EXTRACTED_CHARS utf-8
+_CSV_READ_CAP_BYTES = 3_000_000 * 4 + 4096     # >= MAX_CSV_EXTRACTED_CHARS utf-8
+
+FORMAT_TOO_LARGE_MESSAGES = {
+    "pdf": "PDF 文件超过 150 MB，暂时无法添加。",
+    "docx": "DOCX 文件超过 150 MB，暂时无法添加。",
+    "pptx": "PPTX 文件超过 150 MB，暂时无法添加。",
+    "xlsx": "XLSX 文件超过 100 MB，暂时无法添加。",
+    "csv": "CSV 文件超过 100 MB，暂时无法添加。",
+    "txt": "TXT 文件超过 100 MB，暂时无法添加。",
+    "md": "MD 文件超过 100 MB，暂时无法添加。",
+}
 LEGACY_DOCUMENT_MESSAGE = "暂时支持 DOCX / PPTX / XLSX，新版格式可以直接读取。"
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -187,6 +202,7 @@ def decode_attachment_bytes(data: bytes, display_name: str) -> AttachmentImage:
     image = QImage.fromData(data)
     if image.isNull():
         raise AttachmentError(UNREADABLE_MESSAGE)
+    image = _limit_image_pixels(image)
     return AttachmentImage(
         image=image,
         mime_type=mime,
@@ -214,7 +230,8 @@ def load_attachment_file(path: Path) -> AttachmentImage:
 def load_document_file(path: Path) -> DocumentAttachment:
     """Load one local document file into a pending DocumentAttachment.
 
-    The file is read (bounded) and parsed in a later background step; the
+    stat-before-read: the size is checked against the per-format entry limit
+    FIRST; only then is the file read (bounded for text-like formats). The
     original file is never modified or copied into the project.
     """
     path = Path(path)
@@ -227,9 +244,14 @@ def load_document_file(path: Path) -> DocumentAttachment:
     except OSError as exc:
         raise AttachmentError(UNREADABLE_MESSAGE) from exc
     if size > limit:
-        raise AttachmentError(DOCUMENT_TOO_LARGE_MESSAGE)
+        raise AttachmentError(FORMAT_TOO_LARGE_MESSAGES[kind])
     try:
-        data = path.read_bytes()
+        if kind in ("txt", "md"):
+            data = _read_bounded(path, _TEXT_READ_CAP_BYTES)
+        elif kind == "csv":
+            data = _read_bounded(path, _CSV_READ_CAP_BYTES)
+        else:
+            data = path.read_bytes()
     except OSError as exc:
         raise AttachmentError(UNREADABLE_MESSAGE) from exc
     return DocumentAttachment(
@@ -240,12 +262,36 @@ def load_document_file(path: Path) -> DocumentAttachment:
     )
 
 
+def _read_bounded(path: Path, max_bytes: int) -> bytes:
+    """Read at most ``max_bytes`` from a file (streaming, no full load)."""
+    with open(path, "rb") as handle:
+        return handle.read(max_bytes)
+
+
+def _limit_image_pixels(image: QImage) -> QImage:
+    """Downscale decoded images over the ~40MP pixel budget (Layer 2).
+
+    A few-MB JPEG can still decode to a huge bitmap; never hand that to the
+    vision pipeline. Scaling keeps the aspect ratio and stays in memory.
+    """
+    pixels = image.width() * image.height()
+    if pixels <= MAX_IMAGE_PIXELS:
+        return image
+    scale = math.sqrt(MAX_IMAGE_PIXELS / pixels)
+    new_width = max(1, int(image.width() * scale))
+    new_height = max(1, int(image.height() * scale))
+    return image.scaled(
+        new_width, new_height, Qt.KeepAspectRatio, Qt.SmoothTransformation
+    )
+
+
 def qimage_to_attachment(image: QImage, display_name: str) -> AttachmentImage:
     """Wrap an already-decoded in-memory QImage (clipboard / drag) as an attachment."""
     if image.isNull():
         raise AttachmentError(UNREADABLE_MESSAGE)
     if image.sizeInBytes() > MAX_ATTACHMENT_BYTES:
         raise AttachmentError(TOO_LARGE_MESSAGE)
+    image = _limit_image_pixels(image)
     return AttachmentImage(
         image=image,
         mime_type="image/png",

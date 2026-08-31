@@ -353,17 +353,17 @@ def test_o_over_20mb_rejected():
         decode_attachment_bytes(
             b"\x89PNG\r\n\x1a\n" + b"x" * (MAX_ATTACHMENT_BYTES), "huge.png"
         )
-    assert "20MB" in str(exc.value)
+    assert "50 MB" in str(exc.value)
 
 
 def test_o2_over_20mb_file_rejected(tmp_path):
     path = tmp_path / "huge.png"
     with open(path, "wb") as handle:
-        handle.seek(MAX_ATTACHMENT_BYTES)  # sparse >20MB without huge memory
+        handle.seek(MAX_ATTACHMENT_BYTES)  # sparse >50MB without huge memory
         handle.write(b"\x00")
     with pytest.raises(AttachmentError) as exc:
         load_attachment_file(path)
-    assert "20MB" in str(exc.value)
+    assert "50 MB" in str(exc.value)
 
 
 def test_p_corrupt_and_unsupported_rejected_safely():

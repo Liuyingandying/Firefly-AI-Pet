@@ -68,21 +68,45 @@ class DocumentChunk:
 
 # ---------------------------------------------------------------- limits
 
-MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
-MAX_TEXT_BYTES = 20 * 1024 * 1024
-MAX_XLSX_BYTES = 30 * 1024 * 1024
+# ---------------------------------------------------------------- limits
+#
+# Layer 1: raw file entry limits (per format).
+# Layer 2: parse resource budgets — a file may be large, but the EXTRACTED
+# content (pages / slides / chars / rows / cells / pixels) is always bounded.
+
+MAX_DOCUMENT_BYTES = 150 * 1024 * 1024      # pdf / docx / pptx
+MAX_SPREADSHEET_BYTES = 100 * 1024 * 1024   # xlsx / csv / txt / md
 
 DOCUMENT_KIND_LIMITS: dict[str, int] = {
     "pdf": MAX_DOCUMENT_BYTES,
     "docx": MAX_DOCUMENT_BYTES,
     "pptx": MAX_DOCUMENT_BYTES,
-    "txt": MAX_TEXT_BYTES,
-    "md": MAX_TEXT_BYTES,
-    "csv": MAX_TEXT_BYTES,
-    "xlsx": MAX_XLSX_BYTES,
+    "xlsx": MAX_SPREADSHEET_BYTES,
+    "csv": MAX_SPREADSHEET_BYTES,
+    "txt": MAX_SPREADSHEET_BYTES,
+    "md": MAX_SPREADSHEET_BYTES,
 }
 
-MAX_PDF_PAGES = 500
+MAX_PDF_PAGES = 1000            # native-text page budget
+MAX_PDF_OCR_PAGES = 200         # OCR page budget (scanned pages)
+MAX_DOCUMENT_EXTRACTED_CHARS = 5_000_000
+MAX_DOCX_TABLE_CELLS = 250_000
+MAX_PPTX_SLIDES = 500
+MAX_XLSX_ROWS_PER_SHEET = 10_000
+MAX_XLSX_CELLS_PER_SHEET = 250_000
+MAX_XLSX_TOTAL_CELLS = 1_000_000
+MAX_XLSX_SHEETS = 100
+MAX_CSV_ROWS = 50_000
+MAX_CSV_EXTRACTED_CHARS = 3_000_000
+MAX_TEXT_EXTRACTED_CHARS = 5_000_000
+
+# ZIP container safety (docx / pptx / xlsx are ZIPs): audit the central
+# directory metadata BEFORE parsing — never fully decompress to disk.
+MAX_ZIP_UNCOMPRESSED_BYTES = 1_000_000_000   # 1 GB claimed uncompressed size
+MAX_ZIP_ENTRIES = 20_000
+MAX_COMPRESSION_RATIO = 100
+ZIP_BOMB_MESSAGE = "这个文档解压后的内容异常大，出于安全考虑无法读取。"
+
 CHUNK_SIZE = 1200          # ~chars per chunk (task: 1000-2000)
 CHUNK_OVERLAP = 100
 
@@ -107,10 +131,6 @@ SUMMARY_FREQUENT_TERMS = 12
 
 RETRIEVAL_TOP_K = 6
 
-MAX_XLSX_SHEET_ROWS = 2000
-MAX_XLSX_CELLS = 100_000
-MAX_CSV_ROWS = 5000
-
 KIND_LABELS = {
     "pdf": "PDF", "docx": "DOCX", "pptx": "PPTX",
     "txt": "TXT", "md": "Markdown", "xlsx": "XLSX", "csv": "CSV",
@@ -127,11 +147,54 @@ class EncryptedPdfError(DocumentParseError):
     """The PDF requires a password."""
 
 
+# ---------------------------------------------------------------- ZIP safety
+
+
+def _check_zip_metadata(infolist: Sequence[Any]) -> None:
+    """Reject zip-bomb shapes using ONLY central-directory metadata.
+
+    No member is ever decompressed or written to disk here.
+    """
+    total_uncompressed = 0
+    for info in infolist:
+        total_uncompressed += int(getattr(info, "file_size", 0) or 0)
+        compress_size = int(getattr(info, "compress_size", 0) or 0)
+        file_size = int(getattr(info, "file_size", 0) or 0)
+        if compress_size > 0 and file_size / compress_size > MAX_COMPRESSION_RATIO:
+            raise DocumentParseError(ZIP_BOMB_MESSAGE)
+        if total_uncompressed > MAX_ZIP_UNCOMPRESSED_BYTES:
+            raise DocumentParseError(ZIP_BOMB_MESSAGE)
+    if len(infolist) > MAX_ZIP_ENTRIES:
+        raise DocumentParseError(ZIP_BOMB_MESSAGE)
+
+
+def audit_zip_container(data: bytes, *, infolist: Sequence[Any] | None = None) -> None:
+    """Safe pre-parse audit for ZIP-based formats (docx / pptx / xlsx).
+
+    Reads only the central directory (``ZipFile.infolist``); nothing is
+    extracted to disk. ``infolist`` is injectable for deterministic tests.
+    """
+    import io
+    import zipfile
+
+    if infolist is None:
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                infolist = archive.infolist()
+        except zipfile.BadZipFile as exc:
+            raise DocumentParseError("无法读取文档（不是有效的压缩包）") from exc
+    _check_zip_metadata(infolist)
+
+
+_ZIP_KINDS = frozenset({"docx", "pptx", "xlsx"})
+
 # ---------------------------------------------------------------- dispatch
 
 
 def parse_document_bytes(data: bytes, kind: str, filename: str) -> DocumentContext:
     """Parse one in-memory document into a :class:`DocumentContext`."""
+    if kind in _ZIP_KINDS:
+        audit_zip_container(data)
     if kind == "pdf":
         return _parse_pdf(data, filename)
     if kind == "docx":
@@ -154,29 +217,49 @@ def _parse_pdf(data: bytes, filename: str) -> DocumentContext:
     from core.pdf_processor import PdfEncryptedError, PdfProcessor
 
     try:
-        result = PdfProcessor().process_stream(data, filename, max_pages=MAX_PDF_PAGES)
+        result = PdfProcessor().process_stream(
+            data,
+            filename,
+            max_pages=MAX_PDF_PAGES,
+            max_ocr_pages=MAX_PDF_OCR_PAGES,
+            keep_page_images=False,   # bounding memory on scanned documents
+        )
     except PdfEncryptedError as exc:
         raise EncryptedPdfError("PDF 需要密码") from exc
     except Exception as exc:
         raise DocumentParseError("无法读取 PDF") from exc
 
-    sections = [
-        DocumentSection(index=page.page_index + 1, label=f"Page {page.page_index + 1}", text=page.text)
-        for page in result.pages
-    ]
-    ocr_errors = [err for err in result.errors if "OCR" in err or "ocr" in err.lower()]
+    sections: list[DocumentSection] = []
+    total_chars = 0
+    truncated = bool(result.errors and "truncated" in result.errors[-1])
     warnings = list(result.errors)
     if result.ocr_used:
         warnings.insert(0, "部分页面通过 OCR 识别")
     elif result.ocr_attempted:
         warnings.insert(0, "部分页面尝试 OCR 识别但未获得文本")
+    if any("OCR skipped" in warning for warning in warnings):
+        warnings.insert(0, "部分扫描页面因文档过大未执行 OCR。")
+    for page in result.pages:
+        text = page.text
+        if not text:
+            continue
+        if total_chars + len(text) > MAX_DOCUMENT_EXTRACTED_CHARS:
+            truncated = True
+            warnings.append("文档内容过大，已截取部分内容用于分析。")
+            break
+        sections.append(DocumentSection(
+            index=page.page_index + 1,
+            label=f"Page {page.page_index + 1}",
+            text=text,
+        ))
+        total_chars += len(text)
     context = DocumentContext(
         filename=filename,
         kind="pdf",
         sections=sections,
-        total_characters=sum(len(s.text) for s in sections),
+        total_characters=total_chars,
         page_count=len(sections),
-        truncated=bool(result.errors and "truncated" in result.errors[-1]),
+        truncated=truncated,
         parse_warnings=warnings,
     )
     return context
@@ -202,35 +285,61 @@ def _parse_docx(data: bytes, filename: str) -> DocumentContext:
     sections: list[DocumentSection] = []
     para_index = 0
     table_index = 0
+    total_chars = 0
+    table_cells = 0
+    truncated = False
     for child in doc.element.body.iterchildren():
+        if truncated:
+            break
         if child.tag == qn("w:p"):
             para = Paragraph(child, doc)
             text = (para.text or "").strip()
             if not text:
                 continue
+            if total_chars + len(text) > MAX_DOCUMENT_EXTRACTED_CHARS:
+                truncated = True
+                break
             para_index += 1
             label = f"Section {para_index}"
             sections.append(DocumentSection(index=para_index, label=label, text=text))
+            total_chars += len(text)
         elif child.tag == qn("w:tbl"):
             try:
                 table = Table(child, doc)
             except Exception:
                 continue
-            table_index += 1
             rows: list[str] = []
             for row in table.rows:
-                cells = [(cell.text or "").strip().replace("\n", " ") for cell in row.cells]
-                rows.append(" | ".join(cells))
+                cell_texts: list[str] = []
+                for cell in row.cells:
+                    cell_text = (cell.text or "").strip().replace("\n", " ")
+                    cell_texts.append(cell_text)
+                    table_cells += 1
+                    if table_cells > MAX_DOCX_TABLE_CELLS:
+                        truncated = True
+                        rows.append(" | ".join(cell_texts) + " [Content truncated]")
+                        break
+                rows.append(" | ".join(cell_texts))
+                if truncated:
+                    break
+            table_index += 1
             label = f"Table {table_index}"
+            text = f"[{label}]\n" + "\n".join(rows)
+            if total_chars + len(text) > MAX_DOCUMENT_EXTRACTED_CHARS:
+                truncated = True
+                text = text[: max(0, MAX_DOCUMENT_EXTRACTED_CHARS - total_chars)]
             sections.append(DocumentSection(
-                index=len(sections) + 1, label=label, text=f"[{label}]\n" + "\n".join(rows)
+                index=len(sections) + 1, label=label, text=text
             ))
+            total_chars += len(text)
 
     return DocumentContext(
         filename=filename,
         kind="docx",
         sections=sections,
-        total_characters=sum(len(s.text) for s in sections),
+        total_characters=total_chars,
+        truncated=truncated,
+        parse_warnings=["文档内容过大，已截取部分内容用于分析。"] if truncated else [],
     )
 
 
@@ -249,7 +358,13 @@ def _parse_pptx(data: bytes, filename: str) -> DocumentContext:
         raise DocumentParseError("无法读取 PPTX") from exc
 
     sections: list[DocumentSection] = []
+    truncated = False
+    total_slides = len(prs.slides._sldIdLst)
+    if total_slides > MAX_PPTX_SLIDES:
+        truncated = True
     for slide_index, slide in enumerate(prs.slides, 1):
+        if slide_index > MAX_PPTX_SLIDES:
+            break
         parts: list[str] = []
         title_shape = slide.shapes.title
         title_text = ""
@@ -286,6 +401,8 @@ def _parse_pptx(data: bytes, filename: str) -> DocumentContext:
         sections=sections,
         total_characters=sum(len(s.text) for s in sections),
         slide_count=len(sections),
+        truncated=truncated,
+        parse_warnings=["幻灯片数量超过上限，已截取部分内容。"] if truncated else [],
     )
 
 
@@ -303,12 +420,17 @@ def _decode_text(data: bytes) -> str:
 
 def _parse_text(data: bytes, filename: str, kind: str) -> DocumentContext:
     text = _decode_text(data)
+    truncated = len(text) > MAX_TEXT_EXTRACTED_CHARS
+    if truncated:
+        text = text[:MAX_TEXT_EXTRACTED_CHARS]
     sections = [DocumentSection(index=1, label="Document", text=text)] if text.strip() else []
     return DocumentContext(
         filename=filename,
         kind=kind,
         sections=sections,
         total_characters=len(text),
+        truncated=truncated,
+        parse_warnings=["文档内容过大，已截取部分内容用于分析。"] if truncated else [],
     )
 
 
@@ -319,13 +441,19 @@ def _parse_csv(data: bytes, filename: str) -> DocumentContext:
     text = _decode_text(data)
     rows: list[str] = []
     truncated = False
+    total_chars = 0
     try:
         reader = csv.reader(io.StringIO(text))
         for index, row in enumerate(reader):
             if index >= MAX_CSV_ROWS:
                 truncated = True
                 break
-            rows.append(" | ".join((cell or "").strip() for cell in row))
+            line = " | ".join((cell or "").strip() for cell in row)
+            if total_chars + len(line) > MAX_CSV_EXTRACTED_CHARS:
+                truncated = True
+                break
+            rows.append(line)
+            total_chars += len(line)
     except Exception as exc:
         raise DocumentParseError("无法读取 CSV") from exc
     sections = [DocumentSection(index=1, label="CSV", text="\n".join(rows))]
@@ -333,7 +461,7 @@ def _parse_csv(data: bytes, filename: str) -> DocumentContext:
         filename=filename,
         kind="csv",
         sections=sections,
-        total_characters=sum(len(r) for r in rows),
+        total_characters=total_chars,
         truncated=truncated,
         parse_warnings=["内容超过上限已截断"] if truncated else [],
     )
@@ -356,22 +484,33 @@ def _parse_xlsx(data: bytes, filename: str) -> DocumentContext:
     sections: list[DocumentSection] = []
     total_cells = 0
     truncated = False
+    sheet_count = 0
     try:
         for worksheet in workbook.worksheets:
+            if sheet_count >= MAX_XLSX_SHEETS:
+                truncated = True
+                break
             rows: list[str] = []
             row_count = 0
+            sheet_cells = 0
             for row in worksheet.iter_rows(values_only=True):
                 cells = ["" if value is None else str(value) for value in row]
                 rows.append(" | ".join(cells))
                 row_count += 1
+                sheet_cells += len(cells)
                 total_cells += len(cells)
-                if row_count >= MAX_XLSX_SHEET_ROWS or total_cells >= MAX_XLSX_CELLS:
+                if (
+                    row_count >= MAX_XLSX_ROWS_PER_SHEET
+                    or sheet_cells >= MAX_XLSX_CELLS_PER_SHEET
+                    or total_cells >= MAX_XLSX_TOTAL_CELLS
+                ):
                     truncated = True
                     break
             label = f"Sheet: {worksheet.title}"
             sections.append(DocumentSection(
                 index=len(sections) + 1, label=label, text="\n".join(rows)
             ))
+            sheet_count += 1
     finally:
         workbook.close()
 
@@ -1021,6 +1160,10 @@ __all__ = [
     "DOCUMENT_PERSONA",
     "DOCUMENT_KIND_LIMITS",
     "MAX_PDF_PAGES",
+    "MAX_PDF_OCR_PAGES",
+    "MAX_DOCUMENT_EXTRACTED_CHARS",
+    "audit_zip_container",
+    "ZIP_BOMB_MESSAGE",
     "SUMMARY_DIRECT_CHAR_BUDGET",
     "SUMMARY_MEDIUM_CHAR_BUDGET",
     "SUMMARY_GROUP_CHAR_BUDGET",

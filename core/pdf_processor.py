@@ -202,20 +202,32 @@ class PdfProcessor:
         display_name: str = "document.pdf",
         *,
         max_pages: int | None = None,
+        max_ocr_pages: int | None = None,
+        keep_page_images: bool = True,
     ) -> PdfResult:
         """Process PDF bytes in memory (no temp file, original untouched).
 
         Shares the exact native-text + OCR fallback pipeline with
-        :meth:`process`; the document bytes never touch disk.
+        :meth:`process`; the document bytes never touch disk. ``max_pages``
+        bounds native-text pages; ``max_ocr_pages`` bounds how many scanned
+        pages get OCR (the rest are skipped with a recorded warning).
+        ``keep_page_images=False`` drops each OCR page's PNG after recognition
+        so fully-scanned documents do not accumulate hundreds of page bitmaps.
         """
         if not data:
             raise ValueError("PDF stream is empty")
         import fitz  # PyMuPDF
 
         doc = fitz.open(stream=data, filetype="pdf")
-        return self._process_open_doc(doc, str(display_name), max_pages=max_pages)
+        return self._process_open_doc(
+            doc, str(display_name), max_pages=max_pages, max_ocr_pages=max_ocr_pages,
+            keep_page_images=keep_page_images,
+        )
 
-    def _process_open_doc(self, doc, label: str, *, max_pages: int | None = None) -> PdfResult:
+    def _process_open_doc(
+        self, doc, label: str, *, max_pages: int | None = None,
+        max_ocr_pages: int | None = None, keep_page_images: bool = True,
+    ) -> PdfResult:
         import fitz  # PyMuPDF (used for OCR page rendering)
 
         pages: list[PdfPage] = []
@@ -224,6 +236,7 @@ class PdfProcessor:
         ocr_attempted = False
         errors: list[str] = []
         truncated = False
+        ocr_pages_used = 0
 
         try:
             if doc.needs_pass:
@@ -245,7 +258,9 @@ class PdfProcessor:
                 if page_has_text:
                     has_text_layer = True
                 elif self._use_ocr:
-                    if self._ocr is None:
+                    if max_ocr_pages is not None and ocr_pages_used >= max_ocr_pages:
+                        page_ocr_error = "OCR skipped (page budget)"
+                    elif self._ocr is None:
                         page_ocr_error = self._ocr_init_error or "RapidOCR backend unavailable"
                     else:
                         mat = fitz.Matrix(2.0, 2.0)
@@ -253,6 +268,7 @@ class PdfProcessor:
                         img_bytes = pix.tobytes("png")
                         page_ocr_attempted = True
                         ocr_attempted = True
+                        ocr_pages_used += 1
                         try:
                             ocr_text = self._ocr.extract_text(img_bytes)
                         except Exception as exc:
@@ -271,6 +287,11 @@ class PdfProcessor:
 
                 if page_ocr_error:
                     errors.append(f"page {page_idx + 1}: {page_ocr_error}")
+
+                if not keep_page_images:
+                    # The PNG was only needed for OCR; drop it so scanned
+                    # documents do not accumulate every page bitmap in memory.
+                    img_bytes = None
 
                 pages.append(PdfPage(
                     page_index=page_idx,
