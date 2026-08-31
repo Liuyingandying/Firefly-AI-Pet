@@ -211,7 +211,9 @@ def test_b_drag_jpg_image_mime_adds_attachment(qapp):
 
 def test_c_drag_txt_ignored(tmp_path, qapp):
     window = _window()
-    path = tmp_path / "note.txt"
+    # TXT is now a supported document; a genuinely unsupported extension must
+    # be ignored.
+    path = tmp_path / "note.xyz"
     path.write_text("hello", encoding="utf-8")
     mime = QMimeData()
     mime.setUrls([QUrl.fromLocalFile(str(path))])

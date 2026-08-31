@@ -30,10 +30,25 @@ from core.screen_vision.vision.deepseek_vision import (
 )
 from ui.companion_attachment import (
     DEFAULT_ATTACHMENT_QUESTION,
+    DEFAULT_DOCUMENT_QUESTION,
+    HISTORY_DOCUMENT_PLACEHOLDER,
     HISTORY_IMAGE_PLACEHOLDER,
     AttachmentError,
     AttachmentImage,
+    DocumentAttachment,
     attachment_to_frame,
+)
+from core.document_attachment import (
+    DocumentContext,
+    DocumentParseError,
+    EncryptedPdfError,
+    build_qa_messages,
+    chunk_document,
+    direct_section_lookup,
+    format_excerpts,
+    hierarchical_summary,
+    is_summary_request,
+    retrieve_chunks,
 )
 
 
@@ -58,6 +73,23 @@ ATTACHMENT_VISION_FAILURE_REPLY = (
     "这张图片我这次没能看清（{reason}）。你可以稍后再试一次。"
 )
 
+# Document-attachment turns. Documents are parsed locally; only question-
+# relevant excerpts reach the text provider (core.ai_router) — never Memory.
+DOCUMENT_QA_FAILURE_REPLY = (
+    "这次没能读取这个文档（{reason}）。你可以稍后再试一次。"
+)
+DOCUMENT_UNREADABLE_REPLY = "这个文件似乎无法读取。"
+DOCUMENT_ENCRYPTED_REPLY = "这个 PDF 需要密码，目前无法直接读取。"
+DOCUMENT_PARSING_REPLY = "文档还在解析中，请稍候再问。"
+DOCUMENT_PARTIAL_OCR_NOTE = "\n\n（注：部分页面没有成功识别。）"
+
+# Explicit "ignore the document" phrasing falls through to a normal turn.
+_DOCUMENT_NEGATION_MARKERS = (
+    "先不看这个文件", "先不管这个文件", "别看这个文件", "不要看这个文件",
+    "不看这个文件", "忽略这个文件", "先不看文件", "先不管文件",
+    "先不看这份文件", "先不管这份文件",
+)
+
 # Explicit "ignore the image" phrasing falls through to a normal turn (which
 # may then legitimately use screen vision). No LLM intent classifier in v1.
 _ATTACHMENT_NEGATION_MARKERS = (
@@ -80,6 +112,7 @@ class CharacterConversationRunner(QObject):
         screen_vision_service: Any | None = None,
         screen_vision_settings: Any | None = None,
         attachment_vision_provider: Any | None = None,
+        document_chat_handler: Any | None = None,
     ) -> None:
         super().__init__(parent)
         self.runtime = runtime or ConversationRuntime(
@@ -90,10 +123,15 @@ class CharacterConversationRunner(QObject):
         # Direct vision provider for image-attachment turns (injectable for
         # tests; defaults to the shared FAST DeepSeek vision provider).
         self._attachment_vision_provider = attachment_vision_provider
+        # Text chat handler for document-attachment turns (injectable for
+        # tests; defaults to core.ai_router.chat — no Memory/Bond/suggestion).
+        self._document_chat_handler = document_chat_handler
         self.last_screen_vision_timings: dict[str, float] | None = None
         self.last_screen_vision_meta: dict[str, Any] | None = None
         self.last_attachment_timings: dict[str, Any] | None = None
         self.last_attachment_meta: dict[str, Any] | None = None
+        self.last_document_timings: dict[str, Any] | None = None
+        self.last_document_meta: dict[str, Any] | None = None
         self._busy = False
         self._cancel_event: threading.Event | None = None
         self._thread: threading.Thread | None = None
@@ -147,6 +185,7 @@ class CharacterConversationRunner(QObject):
 
 
 
+    @property
     def ask(self, prompt: str) -> bool:
         """Start a character turn and return False if the request is invalid."""
         text = (prompt or "").strip()
@@ -338,6 +377,189 @@ class CharacterConversationRunner(QObject):
             self._attachment_vision_provider = get_fast_direct_provider()
         return self._attachment_vision_provider
 
+    def ask_with_document(self, question: str, attachment: DocumentAttachment) -> bool:
+        """Start a document turn (local parsing + text QA, no screen/vision)."""
+        if attachment is None:
+            return self.ask(question)
+        with self._lock:
+            if self._busy:
+                return False
+            self._busy = True
+            self._cancel_event = threading.Event()
+            cancel_event = self._cancel_event
+
+        self.agent_event.emit(
+            AgentEvent.make(self.AGENT_ID, AgentEventType.STARTED)
+        )
+        self.agent_event.emit(
+            AgentEvent.make(
+                self.AGENT_ID,
+                AgentEventType.STATUS,
+                status=STATUS_THINKING,
+            )
+        )
+        thread = threading.Thread(
+            target=self._run_with_document,
+            args=(question, attachment, cancel_event),
+            daemon=True,
+            name="FireflyDocumentAttachmentTurn",
+        )
+        with self._lock:
+            self._thread = thread
+        thread.start()
+        return True
+
+    def perform_with_document(
+        self,
+        question: str,
+        attachment: DocumentAttachment,
+        cancel_event: threading.Event | None = None,
+    ) -> tuple[list[AgentEvent], str]:
+        """Synchronously execute one document turn.
+
+        With a document attachment the question defaults to being about the
+        document (even for ordinary questions) unless the text explicitly says
+        to ignore the file. Documents are parsed locally; only question-
+        relevant excerpts go to the text provider (never Memory, never vision,
+        never a screen capture).
+        """
+        text = (question or "").strip()
+        if attachment is None:
+            return self.perform(text, cancel_event)
+        if _document_negated(text):
+            return self.perform(text, cancel_event)
+        event = cancel_event or threading.Event()
+        if event.is_set():
+            return [self._cancelled_event()], ""
+
+        total_started = time.perf_counter()
+        if not self._wait_for_document_parse(attachment):
+            return [self._error_event(DOCUMENT_PARSING_REPLY, ErrorCategory.PROTOCOL)], ""
+        parse_ms = 0.0
+        context = attachment.context
+        if context is None or attachment.parse_state == "error":
+            message = _document_error_message(attachment.parse_error)
+            return [self._error_event(message, ErrorCategory.PROTOCOL)], ""
+
+        effective_question = text or DEFAULT_DOCUMENT_QUESTION
+        provider = self._get_document_chat()
+        retrieval_started = time.perf_counter()
+        try:
+            # Page/slide/sheet direct lookup wins over fuzzy retrieval AND
+            # over summary intent ("第 6 页讲了什么" is page-specific).
+            direct = direct_section_lookup(effective_question, context)
+            if direct:
+                excerpts = format_excerpts(direct)
+                chunks_sent = len(direct)
+                messages = build_qa_messages(context.filename, excerpts, effective_question)
+                answer = _chat_answer(provider(messages, temperature=0.2))
+                remote_calls = 1
+            elif is_summary_request(effective_question):
+                answer, remote_calls = hierarchical_summary(context, provider)
+                chunks_sent = len(chunk_document(context))
+            else:
+                top = retrieve_chunks(effective_question, chunk_document(context))
+                excerpts = format_excerpts(top)
+                chunks_sent = len(top)
+                messages = build_qa_messages(context.filename, excerpts, effective_question)
+                answer = _chat_answer(provider(messages, temperature=0.2))
+                remote_calls = 1
+        except Exception as exc:
+            reason = _attachment_failure_label(exc)
+            logger.info("document attachment QA failed: %s", reason)
+            return [self._error_event(
+                DOCUMENT_QA_FAILURE_REPLY.format(reason=reason),
+                ErrorCategory.PROVIDER,
+            )], ""
+        retrieval_ms = (time.perf_counter() - retrieval_started) * 1000
+
+        if not isinstance(answer, str) or not answer.strip():
+            return [self._error_event(
+                DOCUMENT_QA_FAILURE_REPLY.format(reason="empty_response"),
+                ErrorCategory.PROVIDER,
+            )], ""
+        answer = answer.strip()
+        if _has_ocr_failures(context):
+            answer = answer + DOCUMENT_PARTIAL_OCR_NOTE
+        if event.is_set():
+            return [self._cancelled_event()], ""
+
+        history_user = HISTORY_DOCUMENT_PLACEHOLDER.format(
+            name=attachment.display_name
+        )
+        if text:
+            history_user = f"{history_user} {text}"
+        with self._lock:
+            self._history.extend(
+                [
+                    {"role": "user", "content": history_user},
+                    {"role": "assistant", "content": answer},
+                ]
+            )
+        total_ms = (time.perf_counter() - total_started) * 1000
+        self.last_document_timings = {
+            "parse_ms": round(parse_ms, 1),
+            "retrieval_ms": round(retrieval_ms, 1),
+            "model_ms": round(max(total_ms - parse_ms - retrieval_ms, 0.0), 1),
+            "total_ms": round(total_ms, 1),
+            "chunks_sent": int(chunks_sent),
+        }
+        self.last_document_meta = {
+            "remote_calls": int(remote_calls),
+            "reasoning_calls": 0,
+            "screen_capture_calls": 0,
+            "vision_calls": 0,
+            "chunks_sent": int(chunks_sent),
+            "source": "document_attachment",
+            "kind": context.kind,
+            "filename": context.filename,
+        }
+        return [
+            AgentEvent.make(
+                self.AGENT_ID,
+                AgentEventType.FINAL,
+                text=answer,
+            )
+        ], answer
+
+    def _run_with_document(
+        self,
+        question: str,
+        attachment: DocumentAttachment,
+        cancel_event: threading.Event,
+    ) -> None:
+        events, _ = self.perform_with_document(question, attachment, cancel_event)
+        with self._lock:
+            self._busy = False
+            self._cancel_event = None
+            self._thread = None
+        for event in events:
+            self.agent_event.emit(event)
+
+    def _get_document_chat(self) -> Any:
+        """The text chat handler for document QA (lazily; injectable).
+
+        Uses ``core.ai_router.chat`` directly: the router performs no memory
+        retrieval, no bond update and no suggestion extraction.
+        """
+        if self._document_chat_handler is None:
+            from core.ai_router import chat
+
+            self._document_chat_handler = chat
+        return self._document_chat_handler
+
+    def _wait_for_document_parse(
+        self, attachment: DocumentAttachment, timeout: float = 60.0
+    ) -> bool:
+        """Block (worker thread only) until background parsing settles."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            state = attachment.parse_state
+            if state in ("ready", "error"):
+                return True
+            time.sleep(0.05)
+        return False
+
     def stop(self) -> None:
         """Logically cancel an in-flight request and discard its late reply."""
         with self._lock:
@@ -509,6 +731,42 @@ def _attachment_negated(text: str) -> bool:
     """True when the user explicitly asked to ignore the attached image."""
     lowered = (text or "").lower()
     return any(marker in lowered for marker in _ATTACHMENT_NEGATION_MARKERS)
+
+
+def _document_negated(text: str) -> bool:
+    """True when the user explicitly asked to ignore the attached document."""
+    lowered = (text or "").lower()
+    return any(marker in lowered for marker in _DOCUMENT_NEGATION_MARKERS)
+
+
+def _document_error_message(parse_error: str | None) -> str:
+    """Map a document parse failure to a friendly user-facing message."""
+    error_text = (parse_error or "").strip()
+    if "密码" in error_text:
+        return DOCUMENT_ENCRYPTED_REPLY
+    if "OCR" in error_text or "无法读取" in error_text or error_text:
+        return DOCUMENT_UNREADABLE_REPLY
+    return DOCUMENT_UNREADABLE_REPLY
+
+
+def _has_ocr_failures(context: Any) -> bool:
+    warnings = getattr(context, "parse_warnings", None) or []
+    return any("OCR" in warning for warning in warnings)
+
+
+def _chat_answer(response: Any) -> str:
+    """Extract the assistant text from an OpenAI-compatible completion dict."""
+    if not isinstance(response, dict):
+        raise ValueError("document QA response must be an object")
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise ValueError("document QA response has no choices")
+    choice = choices[0]
+    message = choice.get("message") if isinstance(choice, dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("document QA response has no assistant text")
+    return content.strip()
 
 
 def _attachment_failure_label(exc: Exception) -> str:

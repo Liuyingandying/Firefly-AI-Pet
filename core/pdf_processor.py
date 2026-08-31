@@ -149,6 +149,10 @@ def _package_version(package: str) -> str | None:
         return None
 
 
+class PdfEncryptedError(ValueError):
+    """The PDF is password-protected and cannot be read without a password."""
+
+
 class PdfProcessor:
     """PDF processing with text layer + OCR fallback.
 
@@ -190,14 +194,45 @@ class PdfProcessor:
         import fitz  # PyMuPDF
 
         doc = fitz.open(str(file_path))
+        return self._process_open_doc(doc, str(file_path))
+
+    def process_stream(
+        self,
+        data: bytes,
+        display_name: str = "document.pdf",
+        *,
+        max_pages: int | None = None,
+    ) -> PdfResult:
+        """Process PDF bytes in memory (no temp file, original untouched).
+
+        Shares the exact native-text + OCR fallback pipeline with
+        :meth:`process`; the document bytes never touch disk.
+        """
+        if not data:
+            raise ValueError("PDF stream is empty")
+        import fitz  # PyMuPDF
+
+        doc = fitz.open(stream=data, filetype="pdf")
+        return self._process_open_doc(doc, str(display_name), max_pages=max_pages)
+
+    def _process_open_doc(self, doc, label: str, *, max_pages: int | None = None) -> PdfResult:
+        import fitz  # PyMuPDF (used for OCR page rendering)
+
         pages: list[PdfPage] = []
         has_text_layer = False
         ocr_used = False
         ocr_attempted = False
         errors: list[str] = []
+        truncated = False
 
         try:
-            for page_idx in range(len(doc)):
+            if doc.needs_pass:
+                raise PdfEncryptedError("PDF requires a password")
+            total = len(doc)
+            if max_pages is not None and total > max_pages:
+                total = max_pages
+                truncated = True
+            for page_idx in range(total):
                 page = doc[page_idx]
                 text = page.get_text().strip()
                 page_has_text = bool(text)
@@ -254,9 +289,9 @@ class PdfProcessor:
 
         is_scanned = bool(pages) and all(not page.has_text_layer for page in pages)
 
-        return PdfResult(
-            file_path=str(file_path),
-            total_pages=len(doc) if 'doc' not in locals() else len(pages),
+        result = PdfResult(
+            file_path=label,
+            total_pages=len(pages),
             pages=pages,
             is_scanned=is_scanned,
             has_text_layer=has_text_layer,
@@ -265,6 +300,9 @@ class PdfProcessor:
             ocr_backend=self._ocr_backend.label if self._ocr_backend else None,
             errors=errors,
         )
+        if truncated:
+            result.errors.append("truncated: page count exceeded the processing limit")
+        return result
 
     def extract_images(self, file_path: str | Path, *, max_count: int = 10) -> list[dict]:
         """Extract images from a PDF page for chart/diagram analysis.
@@ -304,6 +342,7 @@ __all__ = [
     "PdfProcessor",
     "PdfResult",
     "PdfPage",
+    "PdfEncryptedError",
     "RapidOcrBackend",
     "parse_rapidocr_text",
 ]

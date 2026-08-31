@@ -10,19 +10,19 @@ Run from the project root with::
 
     python -m ui.companion_chat_window
 
-A real reply requires a configured provider (TJU Qwen / Zhipu GLM / DeepSeek
-via ``ProviderRouter``); without keys the turn surfaces a provider error in the
-log instead of crashing.
-
-Image attachment v1: drag & drop, Ctrl+V (clipboard image), or the ``+`` file
-picker add a single in-memory image. With an attachment the turn answers from
-the image through DeepSeek Vision one-shot — never a screenshot, never memory,
-nothing is persisted.
+Attachment v1: one in-memory attachment per turn.
+- Images (drag & drop, Ctrl+V, ``+``): answered through DeepSeek Vision
+  one-shot; cleared after a successful turn.
+- Documents (PDF / DOCX / PPTX / TXT / MD / XLSX / CSV via drag & drop or
+  ``+``): parsed locally in the background; question-relevant excerpts go to
+  the text provider; the chip stays for follow-up questions until removed or
+  replaced. Nothing is persisted or uploaded as a raw file.
 """
 
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, Qt, Signal, QUrl
@@ -41,20 +41,31 @@ from PySide6.QtWidgets import (
 )
 
 from core.agent_events import AgentEventType
+from core.document_attachment import DocumentParseError, EncryptedPdfError, parse_document_bytes
 from ui import theme
 from ui.character_conversation_runner import CharacterConversationRunner
 from ui.companion_attachment import (
-    ALLOWED_IMAGE_EXTENSIONS,
+    LEGACY_DOCUMENT_MESSAGE,
     THUMBNAIL_SIZE,
     AttachmentError,
     AttachmentImage,
+    DocumentAttachment,
     decode_attachment_bytes,
+    detect_kind_from_path,
     load_attachment_file,
+    load_document_file,
     qimage_to_attachment,
     rounded_pixmap,
 )
 
 _CLIPBOARD_NAME = "剪贴板图片"
+
+_LEGACY_DOCUMENT_EXTENSIONS = (".doc", ".ppt", ".xls")
+
+_DOCUMENT_KIND_LABELS = {
+    "pdf": "PDF", "docx": "DOCX", "pptx": "PPTX",
+    "txt": "TXT", "md": "MD", "xlsx": "XLSX", "csv": "CSV",
+}
 
 
 class _AttachmentLineEdit(QLineEdit):
@@ -114,8 +125,8 @@ class _AttachmentChip(QFrame):
         close = QPushButton("×")
         close.setFixedSize(20, 20)
         close.setCursor(Qt.PointingHandCursor)
-        close.setAccessibleName("移除图片附件")
-        close.setToolTip("移除图片附件")
+        close.setAccessibleName("移除附件")
+        close.setToolTip("移除附件")
         close.clicked.connect(self.remove_clicked)
 
         layout.addWidget(thumb)
@@ -123,10 +134,104 @@ class _AttachmentChip(QFrame):
         layout.addWidget(close)
 
 
+class _DocumentChip(QFrame):
+    """[ KIND ] name / state · ×  — the single in-memory document attachment.
+
+    State reflects the background parse: ``Parsing…`` -> ``Ready`` (with page
+    / slide / sheet count) or ``Unable to read``.
+    """
+
+    remove_clicked = Signal()
+
+    def __init__(self, attachment: DocumentAttachment, parent=None):
+        super().__init__(parent)
+        self.attachment = attachment
+        self.setStyleSheet(
+            "background: rgba(244, 250, 255, 240);"
+            "border: 1px solid rgba(190, 219, 237, 160);"
+            "border-radius: 10px;"
+        )
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(1)
+
+        icon = QLabel(_DOCUMENT_KIND_LABELS.get(attachment.kind, "DOC"))
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setFixedSize(40, 28)
+        icon.setStyleSheet(
+            f"color: {theme.css_color(theme.CYAN_ACCENT)};"
+            f"background: rgba(83, 220, 233, 26);"
+            f"border-radius: 6px; font-weight: {theme.FONT_WEIGHT_MEDIUM};"
+            f"font-family: '{theme.FONT_FAMILY}'; font-size: {theme.scaled_font_px(8)}pt;"
+        )
+        icon.setAccessibleName("文档附件图标")
+
+        name = QLabel(attachment.display_name)
+        name.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_PRIMARY)};"
+            f"font-family: '{theme.FONT_FAMILY}'; font-size: {theme.scaled_font_px(8)}pt;"
+            f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
+        )
+
+        self.status_label = QLabel("Parsing…")
+        self.status_label.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)};"
+            f"font-family: '{theme.FONT_FAMILY}'; font-size: {theme.scaled_font_px(7)}pt;"
+        )
+
+        close = QPushButton("×")
+        close.setFixedSize(20, 20)
+        close.setCursor(Qt.PointingHandCursor)
+        close.setAccessibleName("移除附件")
+        close.setToolTip("移除附件")
+        close.clicked.connect(self.remove_clicked)
+
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(8)
+        top.addWidget(icon)
+        top.addWidget(name, 1)
+        top.addWidget(close)
+
+        layout.addLayout(top)
+        layout.addWidget(self.status_label)
+
+    def set_state(self, state: str) -> None:
+        context = self.attachment.context
+        if state == "ready" and context is not None:
+            detail = _document_count_label(context)
+            self.status_label.setText(f"{detail} · Ready" if detail else "Ready")
+            self.status_label.setStyleSheet(
+                f"color: {theme.css_color(theme.MINT_STATUS)};"
+                f"font-family: '{theme.FONT_FAMILY}'; font-size: {theme.scaled_font_px(7)}pt;"
+            )
+        elif state == "error":
+            self.status_label.setText("Unable to read")
+            self.status_label.setStyleSheet(
+                f"color: {theme.css_color(theme.ERROR_STATUS)};"
+                f"font-family: '{theme.FONT_FAMILY}'; font-size: {theme.scaled_font_px(7)}pt;"
+            )
+        else:
+            self.status_label.setText("Parsing…")
+
+
+def _document_count_label(context) -> str:
+    if context.page_count:
+        return f"{context.page_count} pages"
+    if context.slide_count:
+        return f"{context.slide_count} slides"
+    if context.sheet_count:
+        return f"{context.sheet_count} sheets"
+    return ""
+
+
 class CompanionChatWindow(QWidget):
     """A minimal single-window chat surface for Firefly."""
 
     _instance: "CompanionChatWindow | None" = None
+
+    attachment_parsed = Signal(object, str)  # (DocumentAttachment, state)
 
     @classmethod
     def open_singleton(cls, runner: CharacterConversationRunner | None = None) -> "CompanionChatWindow":
@@ -176,6 +281,7 @@ class CompanionChatWindow(QWidget):
 
         self.runner = runner or CharacterConversationRunner(parent=self)
         self.runner.agent_event.connect(self._on_event)
+        self.attachment_parsed.connect(self._on_attachment_parsed)
 
         self.log = QTextEdit()
         self.log.setReadOnly(True)
@@ -183,9 +289,9 @@ class CompanionChatWindow(QWidget):
             label = "你" if message["role"] == "user" else "流萤"
             self.log.append(f"{label}: {message['content']}")
 
-        # Image attachment (v1): at most one in-memory image per turn.
-        self._pending_attachment: AttachmentImage | None = None
-        self._chip: _AttachmentChip | None = None
+        # Attachment v1: at most one in-memory image OR document per turn.
+        self._pending_attachment: AttachmentImage | DocumentAttachment | None = None
+        self._chip: _AttachmentChip | _DocumentChip | None = None
         self._turn_has_image = False
 
         self.attachment_row = QWidget(self)
@@ -209,8 +315,8 @@ class CompanionChatWindow(QWidget):
         self.pick_button = QPushButton("＋")
         self.pick_button.setFixedSize(28, 28)
         self.pick_button.setCursor(Qt.PointingHandCursor)
-        self.pick_button.setToolTip("选择本地图片")
-        self.pick_button.setAccessibleName("选择图片附件")
+        self.pick_button.setToolTip("选择图片或文档")
+        self.pick_button.setAccessibleName("选择附件")
         self.pick_button.clicked.connect(self._pick_image)
 
         self.send_button = QPushButton("发送")
@@ -239,30 +345,68 @@ class CompanionChatWindow(QWidget):
 
     def _pick_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择图片", "", "图片 (*.png *.jpg *.jpeg *.webp)"
+            self, "选择附件", "",
+            "附件 (*.png *.jpg *.jpeg *.webp *.pdf *.docx *.pptx *.txt *.md *.xlsx *.csv)",
         )
         if not path:
             return
+        self._add_local_file(Path(path))
+
+    def _add_local_file(self, path: Path) -> None:
+        kind = detect_kind_from_path(path)
+        if kind is None:
+            self._show_hint(LEGACY_DOCUMENT_MESSAGE)
+            return
         try:
-            self._set_attachment(load_attachment_file(Path(path)))
+            if kind == "image":
+                self._set_attachment(load_attachment_file(path))
+            else:
+                self._set_attachment(load_document_file(path))
         except AttachmentError as exc:
             self._show_hint(str(exc))
 
-    def _set_attachment_from_bytes(self, data: bytes, display_name: str) -> None:
-        self._set_attachment(decode_attachment_bytes(data, display_name))
-
-    def _set_attachment(self, attachment: AttachmentImage) -> None:
-        """Replace the current attachment (v1 keeps at most one image)."""
+    def _set_attachment(self, attachment: AttachmentImage | DocumentAttachment) -> None:
+        """Replace the current attachment (v1 keeps at most one)."""
         self._pending_attachment = attachment
         if self._chip is not None:
             self.attachment_layout.removeWidget(self._chip)
             self._chip.deleteLater()
-        chip = _AttachmentChip(attachment)
+        if isinstance(attachment, DocumentAttachment):
+            chip = _DocumentChip(attachment)
+            self._start_document_parse(attachment)
+        else:
+            chip = _AttachmentChip(attachment)
         chip.remove_clicked.connect(self._clear_attachment)
         self.attachment_layout.addWidget(chip)
         self._chip = chip
         self.attachment_row.setVisible(True)
         self._hide_hint()
+
+    def _start_document_parse(self, attachment: DocumentAttachment) -> None:
+        """Parse the document on a daemon thread; chip updates via signal."""
+
+        def work() -> None:
+            data = attachment.take_source_bytes()
+            try:
+                context = parse_document_bytes(data, attachment.kind, attachment.display_name)
+                attachment.mark_ready(context)
+            except EncryptedPdfError:
+                attachment.mark_error("PDF 需要密码")
+            except DocumentParseError as exc:
+                attachment.mark_error(str(exc) or "无法读取")
+            except Exception as exc:  # parser must never crash the thread
+                attachment.mark_error(f"无法读取: {type(exc).__name__}")
+            finally:
+                attachment.release_source_bytes()
+                self.attachment_parsed.emit(attachment, attachment.parse_state)
+
+        threading.Thread(
+            target=work, daemon=True, name="FireflyDocumentParse"
+        ).start()
+
+    def _on_attachment_parsed(self, attachment: DocumentAttachment, state: str) -> None:
+        if self._chip is not None and getattr(self._chip, "attachment", None) is attachment:
+            self._chip.set_state(state)
 
     def _clear_attachment(self) -> None:
         self._pending_attachment = None
@@ -282,7 +426,7 @@ class CompanionChatWindow(QWidget):
     # ------------------------------------------------------ drag & drop
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if _drop_has_image(event.mimeData()):
+        if _drop_has_attachment(event.mimeData()):
             event.acceptProposedAction()
             return
         event.ignore()
@@ -302,10 +446,16 @@ class CompanionChatWindow(QWidget):
             if not url.isLocalFile():
                 continue
             path = Path(url.toLocalFile())
-            if path.suffix.lower() not in ALLOWED_IMAGE_EXTENSIONS:
+            kind = detect_kind_from_path(path)
+            if kind is None:
+                if path.suffix.lower() in _LEGACY_DOCUMENT_EXTENSIONS:
+                    # Consume the drop and explain; never silently ignore.
+                    self._show_hint(LEGACY_DOCUMENT_MESSAGE)
+                    event.acceptProposedAction()
+                    return
                 continue
             try:
-                self._set_attachment(load_attachment_file(path))
+                self._add_local_file(path)
                 event.acceptProposedAction()
                 return
             except AttachmentError as exc:
@@ -323,14 +473,18 @@ class CompanionChatWindow(QWidget):
             return
         self.input.clear()
         if attachment is not None:
-            self.log.append(f"你: [图片] {attachment.display_name}")
+            self.log.append(f"你: [附件] {attachment.display_name}")
         if text:
             self.log.append(f"你: {text}")
         self._set_busy(True)
-        self._turn_has_image = attachment is not None
-        if attachment is not None:
+        if isinstance(attachment, DocumentAttachment):
+            self._turn_has_image = False
+            self.runner.ask_with_document(text, attachment)
+        elif attachment is not None:
+            self._turn_has_image = True
             self.runner.ask_with_image(text, attachment)
         else:
+            self._turn_has_image = False
             self.runner.ask(text)
 
     def _set_busy(self, busy: bool) -> None:
@@ -342,7 +496,7 @@ class CompanionChatWindow(QWidget):
             self.log.append(f"流萤: {event.text}")
             self._set_busy(False)
             if self._turn_has_image:
-                self._clear_attachment()  # success: attachment consumed
+                self._clear_attachment()  # images: consumed on success
                 self._turn_has_image = False
         elif event.type is AgentEventType.ERROR:
             self.log.append(f"[错误] {event.text}")
@@ -354,12 +508,21 @@ class CompanionChatWindow(QWidget):
             self._set_busy(False)
 
 
-def _drop_has_image(mime: QMimeData) -> bool:
-    """Accept image mime, or local file URLs with an image extension."""
+def _drop_has_attachment(mime: QMimeData) -> bool:
+    """Accept image mime, or local file URLs with a supported extension.
+
+    Legacy office formats (.doc/.ppt/.xls) are also accepted so the drop can
+    explain why they are not supported yet.
+    """
     if mime.hasImage():
         return True
     for url in mime.urls():
-        if url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in ALLOWED_IMAGE_EXTENSIONS:
+        if not url.isLocalFile():
+            continue
+        path = Path(url.toLocalFile())
+        if detect_kind_from_path(path) is not None:
+            return True
+        if path.suffix.lower() in _LEGACY_DOCUMENT_EXTENSIONS:
             return True
     return False
 
