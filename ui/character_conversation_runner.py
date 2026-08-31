@@ -50,6 +50,20 @@ from core.document_attachment import (
     retrieve_chunks,
     summarize_document,
 )
+from core.lazy_pdf_ocr import (
+    BATCH_LIMIT_NOTE,
+    LOW_COVERAGE_REPLY,
+    MAX_LAZY_OCR_PAGES_PER_TURN,
+    MAX_PROGRESSIVE_OCR_PAGES_PER_TURN,
+    MAX_SUMMARY_SEED_OCR_PAGES,
+    PAGE_OCR_FAILED_REPLY,
+    SUMMARY_COVERAGE_THRESHOLD,
+    LazyPdfOcrState,
+    is_continue_scan_request,
+    is_full_ocr_request,
+    run_ocr_batch,
+)
+from core.pdf_processor import PdfPageStatus
 
 
 logger = logging.getLogger(__name__)
@@ -104,6 +118,8 @@ class CharacterConversationRunner(QObject):
     AGENT_ID = "firefly"
 
     agent_event = Signal(object)
+    ocr_progress = Signal(object, int, int)   # (attachment, completed, total)
+    ocr_page = Signal(object, int)            # (attachment, page) on-demand OCR started
 
     def __init__(
         self,
@@ -441,6 +457,10 @@ class CharacterConversationRunner(QObject):
             message = _document_error_message(attachment.parse_error)
             return [self._error_event(message, ErrorCategory.PROTOCOL)], ""
 
+        lazy = getattr(attachment, "lazy_state", None)
+        if lazy is not None:
+            return self._perform_lazy_pdf(text, attachment, lazy, event, total_started)
+
         effective_question = text or DEFAULT_DOCUMENT_QUESTION
         provider = self._get_document_chat()
         retrieval_started = time.perf_counter()
@@ -580,6 +600,300 @@ class CharacterConversationRunner(QObject):
                 return True
             time.sleep(0.05)
         return False
+
+    # ------------------------------------------------ lazy scanned PDF turns
+
+    def _perform_lazy_pdf(
+        self,
+        question: str,
+        attachment: DocumentAttachment,
+        lazy: LazyPdfOcrState,
+        event: threading.Event,
+        total_started: float,
+    ) -> tuple[list[AgentEvent], str]:
+        """One turn against a scanned PDF with lazy on-demand OCR."""
+        text = (question or "").strip()
+        effective = text or DEFAULT_DOCUMENT_QUESTION
+        provider = self._get_document_chat()
+        ocr_fn = getattr(attachment, "lazy_ocr_fn", None) or self._get_lazy_ocr_fn()
+        source = attachment.take_source_bytes()
+
+        if is_full_ocr_request(effective):
+            if not self._full_ocr_active(attachment):
+                self.start_full_pdf_ocr(attachment)
+            answer = "已开始后台全文识别，可以随时继续提问；识别进度会显示在附件上。"
+            return self._finish_lazy_turn(
+                answer, attachment, lazy, [], 0, 0.0,
+                ocr_mode="full_background", total_started=total_started,
+            )
+        if is_continue_scan_request(effective):
+            batch = lazy.pick_next_batch()
+            if batch:
+                self._run_ocr_batch(attachment, lazy, batch, ocr_fn, source)
+                answer = f"已继续识别第 {batch[0]}–{batch[-1]} 页。"
+            else:
+                answer = "所有页面都已识别完成。"
+            return self._finish_lazy_turn(
+                answer, attachment, lazy, list(batch), 0, 0.0,
+                ocr_mode="progressive", total_started=total_started,
+            )
+
+        pages = lazy.requested_pages(effective)
+        if pages is not None:
+            return self._answer_lazy_pages(
+                effective, attachment, lazy, pages, ocr_fn, source, provider,
+                event, total_started,
+            )
+        if is_summary_request(effective):
+            return self._answer_lazy_summary(
+                attachment, lazy, ocr_fn, source, provider, event, total_started,
+            )
+        return self._answer_lazy_generic(
+            effective, attachment, lazy, ocr_fn, source, provider,
+            event, total_started,
+        )
+
+    def _answer_lazy_pages(
+        self,
+        question: str,
+        attachment: DocumentAttachment,
+        lazy: LazyPdfOcrState,
+        pages: list[int],
+        ocr_fn,
+        source: bytes,
+        provider,
+        event: threading.Event,
+        total_started: float,
+    ) -> tuple[list[AgentEvent], str]:
+        capped = pages[:MAX_LAZY_OCR_PAGES_PER_TURN]
+        cache_hits = 0
+        ocr_started = time.perf_counter()
+        needed = []
+        for page in capped:
+            state = lazy.page_state(page)
+            if state in (PdfPageStatus.OCR_DONE, PdfPageStatus.NATIVE):
+                cache_hits += 1
+            else:
+                needed.append(page)
+        if needed:
+            self._run_ocr_batch(attachment, lazy, needed, ocr_fn, source)
+        ocr_ms = (time.perf_counter() - ocr_started) * 1000
+
+        usable = [(p, lazy.page_text(p)) for p in capped if lazy.page_text(p).strip()]
+        if not usable:
+            answer = PAGE_OCR_FAILED_REPLY
+            return self._finish_lazy_turn(
+                answer, attachment, lazy, pages, cache_hits, ocr_ms,
+                ocr_mode="lazy", total_started=total_started,
+            )
+        excerpts = "\n\n".join(f"[Page {p}]\n{t}" for p, t in usable)
+        if len(pages) > MAX_LAZY_OCR_PAGES_PER_TURN:
+            excerpts = excerpts + "\n\n" + BATCH_LIMIT_NOTE
+        messages = build_qa_messages(attachment.display_name, excerpts, question)
+        answer = _chat_answer(provider(messages, temperature=0.2))
+        if event.is_set():
+            return [self._cancelled_event()], ""
+        return self._finish_lazy_turn(
+            answer, attachment, lazy, pages, cache_hits, ocr_ms,
+            ocr_mode="lazy", total_started=total_started,
+        )
+
+    def _answer_lazy_summary(
+        self,
+        attachment: DocumentAttachment,
+        lazy: LazyPdfOcrState,
+        ocr_fn,
+        source: bytes,
+        provider,
+        event: threading.Event,
+        total_started: float,
+    ) -> tuple[list[AgentEvent], str]:
+        coverage = lazy.coverage_ratio()
+        ocr_ms = 0.0
+        cache_hits = 0
+        ocr_started = time.perf_counter()
+        if coverage < SUMMARY_COVERAGE_THRESHOLD and lazy.ocr_pages_pending():
+            seed = lazy.pick_summary_seed_pages(MAX_SUMMARY_SEED_OCR_PAGES)
+            if seed:
+                self._run_ocr_batch(attachment, lazy, seed, ocr_fn, source)
+        ocr_ms = (time.perf_counter() - ocr_started) * 1000
+        context = lazy.build_context()
+        answer, calls, stats = summarize_document(
+            context, provider, cache=attachment.summary_cache
+        )
+        preliminary = coverage < SUMMARY_COVERAGE_THRESHOLD
+        if preliminary:
+            answer = (
+                "基于目前已识别的代表性页面，先给你一个初步概览"
+                "（这是部分页面的初步总结，不是完整全文总结）：\n\n" + answer
+            )
+        if event.is_set():
+            return [self._cancelled_event()], ""
+        return self._finish_lazy_turn(
+            answer, attachment, lazy, [], cache_hits, ocr_ms,
+            ocr_mode="progressive" if preliminary else "native",
+            total_started=total_started, remote_calls=calls,
+            summary_input_chars=stats.get("summary_input_chars"),
+        )
+
+    def _answer_lazy_generic(
+        self,
+        question: str,
+        attachment: DocumentAttachment,
+        lazy: LazyPdfOcrState,
+        ocr_fn,
+        source: bytes,
+        provider,
+        event: threading.Event,
+        total_started: float,
+    ) -> tuple[list[AgentEvent], str]:
+        context = lazy.build_context()
+        top = retrieve_chunks(question, chunk_document(context))
+        has_evidence = any(_chunk_matches(chunk, question) for chunk in top)
+        ocr_ms = 0.0
+        cache_hits = 0
+        progressive_used = False
+        if not has_evidence and lazy.ocr_pages_pending():
+            ocr_started = time.perf_counter()
+            batch = lazy.pick_progressive_pages(question, MAX_PROGRESSIVE_OCR_PAGES_PER_TURN)
+            if batch:
+                self._run_ocr_batch(attachment, lazy, batch, ocr_fn, source)
+                progressive_used = True
+                context = lazy.build_context()
+                top = retrieve_chunks(question, chunk_document(context))
+                has_evidence = any(_chunk_matches(chunk, question) for chunk in top)
+            ocr_ms = (time.perf_counter() - ocr_started) * 1000
+        if not has_evidence:
+            return self._finish_lazy_turn(
+                LOW_COVERAGE_REPLY, attachment, lazy, [], cache_hits, ocr_ms,
+                ocr_mode="progressive" if progressive_used else "lazy",
+                total_started=total_started,
+            )
+        excerpts = format_excerpts(top)
+        messages = build_qa_messages(attachment.display_name, excerpts, question)
+        answer = _chat_answer(provider(messages, temperature=0.2))
+        if event.is_set():
+            return [self._cancelled_event()], ""
+        return self._finish_lazy_turn(
+            answer, attachment, lazy, [], cache_hits, ocr_ms,
+            ocr_mode="progressive" if progressive_used else "lazy",
+            total_started=total_started,
+        )
+
+    def _run_ocr_batch(
+        self, attachment: DocumentAttachment, lazy: LazyPdfOcrState,
+        pages: list[int], ocr_fn, source: bytes,
+    ) -> None:
+        for page in pages:
+            if lazy.cancel_event.is_set():
+                return
+            self.ocr_page.emit(attachment, page)
+        run_ocr_batch(lazy, pages, ocr_fn, source)
+        # New OCR pages invalidate the derived retrieval/summary caches.
+        attachment.clear_summary_cache()
+
+    def _get_lazy_ocr_fn(self):
+        from core.pdf_processor import ocr_pdf_pages
+
+        return ocr_pdf_pages
+
+    def _full_ocr_active(self, attachment: DocumentAttachment) -> bool:
+        lazy = getattr(attachment, "lazy_state", None)
+        return bool(getattr(lazy, "full_job_active", False))
+
+    def start_full_pdf_ocr(self, attachment: DocumentAttachment) -> None:
+        """Start a single-worker background full-OCR job for a lazy PDF.
+
+        Cancellable and generation-guarded: the job only ever writes to the
+        lazy state it was started with, so a newer attachment can never
+        receive stale results.
+        """
+        lazy = getattr(attachment, "lazy_state", None)
+        if lazy is None or getattr(lazy, "full_job_active", False):
+            return
+        lazy.full_job_active = True
+        ocr_fn = getattr(attachment, "lazy_ocr_fn", None) or self._get_lazy_ocr_fn()
+
+        def work() -> None:
+            try:
+                source = attachment.take_source_bytes()
+                while not lazy.cancel_event.is_set():
+                    batch = lazy.pick_next_batch(1)  # exactly one worker/page
+                    if not batch:
+                        break
+                    self._run_ocr_batch(attachment, lazy, batch, ocr_fn, source)
+                    self.ocr_progress.emit(
+                        attachment, lazy.ocr_pages_completed(), lazy.page_count
+                    )
+                self.ocr_progress.emit(
+                    attachment, lazy.ocr_pages_completed(), lazy.page_count
+                )
+            finally:
+                lazy.full_job_active = False
+
+        threading.Thread(
+            target=work, daemon=True, name="FireflyFullPdfOcr"
+        ).start()
+
+    def _finish_lazy_turn(
+        self,
+        answer: str,
+        attachment: DocumentAttachment,
+        lazy: LazyPdfOcrState,
+        requested_pages: list[int],
+        cache_hits: int,
+        ocr_ms: float,
+        *,
+        ocr_mode: str,
+        total_started: float,
+        remote_calls: int = 1,
+        summary_input_chars: int | None = None,
+    ) -> tuple[list[AgentEvent], str]:
+        if not isinstance(answer, str) or not answer.strip():
+            return [self._error_event(
+                DOCUMENT_QA_FAILURE_REPLY.format(reason="empty_response"),
+                ErrorCategory.PROVIDER,
+            )], ""
+        answer = answer.strip()
+        history_user = HISTORY_DOCUMENT_PLACEHOLDER.format(
+            name=attachment.display_name
+        )
+        with self._lock:
+            self._history.extend(
+                [
+                    {"role": "user", "content": history_user},
+                    {"role": "assistant", "content": answer},
+                ]
+            )
+        total_ms = (time.perf_counter() - total_started) * 1000
+        self.last_document_timings = {
+            "total_ms": round(total_ms, 1),
+            "ocr_ms": round(ocr_ms, 1),
+            "response_length": len(answer),
+        }
+        index_ms = getattr(attachment, "lazy_index_ms", 0.0)
+        self.last_document_meta = {
+            "remote_calls": int(remote_calls),
+            "reasoning_calls": 0,
+            "screen_capture_calls": 0,
+            "vision_calls": 0,
+            "source": "document_attachment",
+            "kind": "pdf",
+            "filename": attachment.display_name,
+            "ocr_mode": ocr_mode,
+            "ocr_pages_requested": int(len(requested_pages)),
+            "ocr_pages_completed": int(lazy.ocr_pages_completed()),
+            "ocr_cache_hits": int(cache_hits),
+            "ocr_ms": round(ocr_ms, 1),
+            "ocr_coverage_ratio": round(lazy.coverage_ratio(), 3),
+            "pdf_initial_index_ms": round(index_ms, 1),
+        }
+        if summary_input_chars is not None:
+            self.last_document_meta["summary_input_chars"] = int(summary_input_chars)
+        return [self._final_event(answer)], answer
+
+    def _final_event(self, text: str) -> AgentEvent:
+        return AgentEvent.make(self.AGENT_ID, AgentEventType.FINAL, text=text)
 
     def stop(self) -> None:
         """Logically cancel an in-flight request and discard its late reply."""
@@ -752,6 +1066,14 @@ def _attachment_negated(text: str) -> bool:
     """True when the user explicitly asked to ignore the attached image."""
     lowered = (text or "").lower()
     return any(marker in lowered for marker in _ATTACHMENT_NEGATION_MARKERS)
+
+
+def _chunk_matches(chunk: Any, question: str) -> bool:
+    """Cheap evidence check: does any question term appear in the chunk?"""
+    from core.lazy_pdf_ocr import _question_terms
+
+    lowered = (chunk.text or "").lower()
+    return any(term in lowered for term in _question_terms(question))
 
 
 def _document_negated(text: str) -> bool:

@@ -203,7 +203,16 @@ class _DocumentChip(QFrame):
 
     def set_state(self, state: str) -> None:
         context = self.attachment.context
-        if state == "ready" and context is not None:
+        lazy = getattr(self.attachment, "lazy_state", None)
+        if state == "ready" and lazy is not None:
+            self.status_label.setText(
+                f"{lazy.page_count} pages · Ready · OCR on demand"
+            )
+            self.status_label.setStyleSheet(
+                f"color: {theme.css_color(theme.MINT_STATUS)};"
+                f"font-family: '{theme.FONT_FAMILY}'; font-size: {theme.scaled_font_px(7)}pt;"
+            )
+        elif state == "ready" and context is not None:
             detail = _document_count_label(context)
             self.status_label.setText(f"{detail} · Ready" if detail else "Ready")
             self.status_label.setStyleSheet(
@@ -218,6 +227,19 @@ class _DocumentChip(QFrame):
             )
         else:
             self.status_label.setText("正在解析大型文件…" if self.large else "Parsing…")
+
+    def set_ocr_page(self, page: int) -> None:
+        """Transient 'OCR Page N…' while an on-demand page is being read."""
+        self.status_label.setText(f"OCR Page {page}…")
+
+    def set_ocr_progress(self, completed: int, total: int) -> None:
+        """Background full-OCR progress: 'OCR 34 / 168' then '168 pages · Ready'."""
+        if total <= 0:
+            return
+        if completed >= total:
+            self.status_label.setText(f"{total} pages · Ready")
+        else:
+            self.status_label.setText(f"OCR {completed} / {total}")
 
 
 def _document_count_label(context) -> str:
@@ -269,6 +291,10 @@ class CompanionChatWindow(QWidget):
         # fresh instance and the same conversation runner.
         if CompanionChatWindow._instance is self:
             CompanionChatWindow._instance = None
+        if self._pending_attachment is not None:
+            cancel = getattr(self._pending_attachment, "cancel_lazy", None)
+            if cancel is not None:
+                cancel()  # stop in-flight OCR workers
         try:
             from core.screen_vision.foreground_tracker import foreground_tracker
 
@@ -285,6 +311,10 @@ class CompanionChatWindow(QWidget):
 
         self.runner = runner or CharacterConversationRunner(parent=self)
         self.runner.agent_event.connect(self._on_event)
+        if hasattr(self.runner, "ocr_progress"):
+            self.runner.ocr_progress.connect(self._on_ocr_progress)
+        if hasattr(self.runner, "ocr_page"):
+            self.runner.ocr_page.connect(self._on_ocr_page)
         self.attachment_parsed.connect(self._on_attachment_parsed)
 
         self.log = QTextEdit()
@@ -371,6 +401,10 @@ class CompanionChatWindow(QWidget):
 
     def _set_attachment(self, attachment: AttachmentImage | DocumentAttachment) -> None:
         """Replace the current attachment (v1 keeps at most one)."""
+        if self._pending_attachment is not None:
+            cancel = getattr(self._pending_attachment, "cancel_lazy", None)
+            if cancel is not None:
+                cancel()  # stop old OCR workers
         self._pending_attachment = attachment
         if self._chip is not None:
             self.attachment_layout.removeWidget(self._chip)
@@ -389,13 +423,42 @@ class CompanionChatWindow(QWidget):
         self._hide_hint()
 
     def _start_document_parse(self, attachment: DocumentAttachment) -> None:
-        """Parse the document on a daemon thread; chip updates via signal."""
+        """Parse the document on a daemon thread; chip updates via signal.
+
+        PDFs use the lazy fast-index path: when scanned pages are detected the
+        attachment becomes Ready immediately (``OCR on demand``) and keeps its
+        source bytes for on-demand OCR; fully-native PDFs keep the eager path.
+        """
+        from core.lazy_pdf_ocr import LazyPdfOcrState
+        from core.pdf_processor import PdfPageStatus, build_pdf_lazy_index
 
         def work() -> None:
             data = attachment.take_source_bytes()
             try:
-                context = parse_document_bytes(data, attachment.kind, attachment.display_name)
-                attachment.mark_ready(context)
+                if attachment.kind == "pdf" and data:
+                    import time as _time
+
+                    index_started = _time.perf_counter()
+                    index = build_pdf_lazy_index(data, attachment.display_name)
+                    attachment.lazy_index_ms = (
+                        _time.perf_counter() - index_started
+                    ) * 1000
+                    has_pending = any(
+                        state != PdfPageStatus.NATIVE
+                        for state in index.page_states.values()
+                    )
+                    if has_pending:
+                        import uuid
+
+                        lazy = LazyPdfOcrState(index, generation_id=uuid.uuid4().hex)
+                        attachment.attach_lazy_state(lazy)
+                        attachment.mark_lazy_ready(lazy.build_context())
+                    else:
+                        context = parse_document_bytes(data, "pdf", attachment.display_name)
+                        attachment.mark_ready(context)
+                else:
+                    context = parse_document_bytes(data, attachment.kind, attachment.display_name)
+                    attachment.mark_ready(context)
             except EncryptedPdfError:
                 attachment.mark_error("PDF 需要密码")
             except DocumentParseError as exc:
@@ -403,7 +466,8 @@ class CompanionChatWindow(QWidget):
             except Exception as exc:  # parser must never crash the thread
                 attachment.mark_error(f"无法读取: {type(exc).__name__}")
             finally:
-                attachment.release_source_bytes()
+                if not attachment.is_lazy:
+                    attachment.release_source_bytes()
                 self.attachment_parsed.emit(attachment, attachment.parse_state)
 
         threading.Thread(
@@ -414,7 +478,19 @@ class CompanionChatWindow(QWidget):
         if self._chip is not None and getattr(self._chip, "attachment", None) is attachment:
             self._chip.set_state(state)
 
+    def _on_ocr_progress(self, attachment: DocumentAttachment, completed: int, total: int) -> None:
+        if self._chip is not None and getattr(self._chip, "attachment", None) is attachment:
+            self._chip.set_ocr_progress(completed, total)
+
+    def _on_ocr_page(self, attachment: DocumentAttachment, page: int) -> None:
+        if self._chip is not None and getattr(self._chip, "attachment", None) is attachment:
+            self._chip.set_ocr_page(page)
+
     def _clear_attachment(self) -> None:
+        if self._pending_attachment is not None:
+            cancel = getattr(self._pending_attachment, "cancel_lazy", None)
+            if cancel is not None:
+                cancel()  # stop in-flight OCR workers
         self._pending_attachment = None
         if self._chip is not None:
             self.attachment_layout.removeWidget(self._chip)

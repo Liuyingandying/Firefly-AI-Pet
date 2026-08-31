@@ -106,6 +106,12 @@ class DocumentAttachment:
         self._context: DocumentContext | None = None
         self._parse_state = "parsing"
         self._parse_error: str | None = None
+        # Lazy scanned-PDF support (Progressive / Lazy OCR v1): when set, the
+        # source bytes are RETAINED for on-demand page OCR and released only
+        # when the attachment is removed or replaced.
+        self._lazy_state = None
+        self._lazy_ocr_fn = None
+        self.lazy_index_ms = 0.0  # runtime-only metadata, never persisted
         # In-memory, session-scoped summary cache (outline + group summaries).
         # Lives only on this attachment object: cleared when the attachment is
         # removed or replaced. Never written to disk / memory / history.
@@ -120,6 +126,39 @@ class DocumentAttachment:
     def clear_summary_cache(self) -> None:
         with self._lock:
             self._summary_cache = {}
+
+    @property
+    def lazy_state(self):
+        with self._lock:
+            return self._lazy_state
+
+    @property
+    def is_lazy(self) -> bool:
+        with self._lock:
+            return self._lazy_state is not None
+
+    @property
+    def lazy_ocr_fn(self):
+        with self._lock:
+            return self._lazy_ocr_fn
+
+    def attach_lazy_state(self, state) -> None:
+        """Attach a LazyPdfOcrState; the attachment keeps its source bytes."""
+        with self._lock:
+            self._lazy_state = state
+            self._lazy_ocr_fn = None
+
+    def set_lazy_ocr_fn(self, ocr_fn) -> None:
+        """Injectable OCR function (tests); defaults to the real RapidOCR."""
+        with self._lock:
+            self._lazy_ocr_fn = ocr_fn
+
+    def cancel_lazy(self) -> None:
+        """Cancel any in-flight lazy OCR worker for this attachment."""
+        with self._lock:
+            state = self._lazy_state
+        if state is not None:
+            state.cancel()
 
     @property
     def context(self) -> DocumentContext | None:
@@ -155,6 +194,13 @@ class DocumentAttachment:
             self._parse_state = "ready"
             self._parse_error = None
             self._source_bytes = b""
+
+    def mark_lazy_ready(self, context: DocumentContext) -> None:
+        """Ready for a lazy scanned PDF: RETAIN source bytes for on-demand OCR."""
+        with self._lock:
+            self._context = context
+            self._parse_state = "ready"
+            self._parse_error = None
 
     def mark_error(self, message: str) -> None:
         with self._lock:

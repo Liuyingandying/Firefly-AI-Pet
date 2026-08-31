@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -359,11 +360,143 @@ class PdfProcessor:
         return images
 
 
+# ---------------------------------------------------------------- lazy OCR
+#
+# Fast index + on-demand OCR for scanned PDFs. The full-processing APIs above
+# (process / process_stream) are untouched for existing callers; Document
+# Attachment uses this lazy path so "attaching a scanned PDF" and "OCRing it"
+# are fully decoupled.
+
+
+class PdfPageStatus:
+    NATIVE = "NATIVE"
+    OCR_PENDING = "OCR_PENDING"
+    OCR_DONE = "OCR_DONE"
+    OCR_FAILED = "OCR_FAILED"
+
+
+@dataclass(frozen=True)
+class LazyPdfIndex:
+    """Cheap metadata + native-text pass. No OCR, no page rendering."""
+
+    display_name: str
+    page_count: int
+    page_states: dict  # 1-based page -> PdfPageStatus
+    native_text: dict  # page number -> extracted native text
+    outline: list  # (title, 1-based page) from PDF bookmarks
+    truncated: bool
+
+
+_shared_ocr_backend: RapidOcrBackend | None = None
+_shared_ocr_backend_lock = threading.Lock()
+
+
+def _get_shared_ocr_backend() -> RapidOcrBackend | None:
+    """One process-wide RapidOCR backend (models load once)."""
+    global _shared_ocr_backend
+    if _shared_ocr_backend is None:
+        with _shared_ocr_backend_lock:
+            if _shared_ocr_backend is None:
+                _shared_ocr_backend = RapidOcrBackend()
+    return _shared_ocr_backend if _shared_ocr_backend.available else None
+
+
+def build_pdf_lazy_index(
+    data: bytes,
+    display_name: str = "document.pdf",
+    *,
+    max_pages: int = 1000,
+) -> LazyPdfIndex:
+    """Fast initial pass: metadata + per-page native text + bookmarks.
+
+    Never renders or OCRs anything; a scanned PDF indexes in well under a
+    second and returns every page marked OCR_PENDING.
+    """
+    import fitz  # PyMuPDF
+
+    if not data:
+        raise ValueError("PDF stream is empty")
+    doc = fitz.open(stream=data, filetype="pdf")
+    try:
+        if doc.needs_pass:
+            raise PdfEncryptedError("PDF requires a password")
+        total = len(doc)
+        truncated = total > max_pages
+        if truncated:
+            total = max_pages
+        page_states: dict[int, str] = {}
+        native_text: dict[int, str] = {}
+        for index in range(total):
+            text = doc[index].get_text().strip()
+            number = index + 1
+            if text:
+                page_states[number] = PdfPageStatus.NATIVE
+                native_text[number] = text
+            else:
+                page_states[number] = PdfPageStatus.OCR_PENDING
+        outline = [(title, page) for _level, title, page in doc.get_toc()]
+    finally:
+        doc.close()
+    return LazyPdfIndex(
+        display_name=display_name,
+        page_count=total,
+        page_states=page_states,
+        native_text=native_text,
+        outline=outline,
+        truncated=truncated,
+    )
+
+
+def ocr_pdf_pages(
+    data: bytes,
+    page_numbers: Sequence[int],
+    *,
+    ocr_backend: RapidOcrBackend | None = None,
+) -> dict[int, str]:
+    """OCR exactly the requested 1-based pages (in memory, single worker).
+
+    Returns ``{page_number: text}``; pages whose OCR produced no text are
+    omitted (callers mark them OCR_FAILED). Page pixmaps are released right
+    after each page; nothing is written to disk.
+    """
+    import fitz  # PyMuPDF
+
+    backend = ocr_backend or _get_shared_ocr_backend()
+    if backend is None:
+        raise RuntimeError("RapidOCR backend unavailable")
+    wanted = sorted({int(number) for number in page_numbers if int(number) >= 1})
+    if not wanted:
+        return {}
+    doc = fitz.open(stream=data, filetype="pdf")
+    try:
+        results: dict[int, str] = {}
+        for number in wanted:
+            if number > len(doc):
+                continue
+            page = doc[number - 1]
+            mat = fitz.Matrix(2.0, 2.0)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            try:
+                image = pix.tobytes("png")
+                text = backend.extract_text(image).strip()
+            finally:
+                pix = None  # release the page bitmap immediately
+            if text:
+                results[number] = text
+        return results
+    finally:
+        doc.close()
+
+
 __all__ = [
     "PdfProcessor",
     "PdfResult",
     "PdfPage",
     "PdfEncryptedError",
+    "PdfPageStatus",
+    "LazyPdfIndex",
+    "build_pdf_lazy_index",
+    "ocr_pdf_pages",
     "RapidOcrBackend",
     "parse_rapidocr_text",
 ]
