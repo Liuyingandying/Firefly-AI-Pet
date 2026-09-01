@@ -455,9 +455,13 @@ class CompanionChatWindow(QWidget):
                         attachment.mark_lazy_ready(lazy.build_context())
                     else:
                         context = parse_document_bytes(data, "pdf", attachment.display_name)
+                        attachment.retain_source_bytes()  # Document Vision renders pages
                         attachment.mark_ready(context)
                 else:
                     context = parse_document_bytes(data, attachment.kind, attachment.display_name)
+                    if attachment.kind == "pptx":
+                        # Document Vision renders slides from the source bytes.
+                        attachment.retain_source_bytes()
                     attachment.mark_ready(context)
             except EncryptedPdfError:
                 attachment.mark_error("PDF 需要密码")
@@ -466,7 +470,7 @@ class CompanionChatWindow(QWidget):
             except Exception as exc:  # parser must never crash the thread
                 attachment.mark_error(f"无法读取: {type(exc).__name__}")
             finally:
-                if not attachment.is_lazy:
+                if not attachment.is_lazy and not attachment.retains_source:
                     attachment.release_source_bytes()
                 self.attachment_parsed.emit(attachment, attachment.parse_state)
 

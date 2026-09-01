@@ -50,6 +50,13 @@ from core.document_attachment import (
     retrieve_chunks,
     summarize_document,
 )
+from core.document_vision import (
+    DOCUMENT_VISION_STYLE_CONTEXT,
+    PageOutOfRangeError,
+    build_document_vision_question,
+    is_document_vision_request,
+    resolve_document_location,
+)
 from core.lazy_pdf_ocr import (
     BATCH_LIMIT_NOTE,
     LOW_COVERAGE_REPLY,
@@ -97,6 +104,20 @@ DOCUMENT_ENCRYPTED_REPLY = "这个 PDF 需要密码，目前无法直接读取�
 DOCUMENT_PARSING_REPLY = "文档还在解析中，请稍候再问。"
 DOCUMENT_PARTIAL_OCR_NOTE = "\n\n（注：部分页面没有成功识别。）"
 
+# Document Vision turns: render the requested page/slide and answer with one
+# direct vision call (page image + page text + question). Only explicit visual
+# triggers plus a resolvable page/slide location engage this path.
+DOCUMENT_VISION_FAILURE_REPLY = (
+    "这一页的图片我这次没能看清（{reason}）。你可以稍后再试一次。"
+)
+DOCUMENT_VISION_UNRESOLVED_REPLY = "请告诉我具体页码，我才能查看对应页面。"
+DOCUMENT_VISION_OUT_OF_RANGE_REPLY = "这份文档没有这一页，请告诉我一个有效的页码。"
+DOCUMENT_VISION_NO_SOURCE_REPLY = "这份文档暂时无法查看页面图片，请重新上传后再试。"
+DOCUMENT_VISION_RENDER_FAILED_REPLY = (
+    "这一页暂时没能渲染成图片（{reason}），请稍后再试。"
+)
+DOCUMENT_VISION_UNSUPPORTED_REPLY = "这种文档类型暂时不支持查看页面图片。"
+
 # Explicit "ignore the document" phrasing falls through to a normal turn.
 _DOCUMENT_NEGATION_MARKERS = (
     "先不看这个文件", "先不管这个文件", "别看这个文件", "不要看这个文件",
@@ -129,6 +150,7 @@ class CharacterConversationRunner(QObject):
         screen_vision_settings: Any | None = None,
         attachment_vision_provider: Any | None = None,
         document_chat_handler: Any | None = None,
+        document_vision_renderer: Any | None = None,
     ) -> None:
         super().__init__(parent)
         self.runtime = runtime or ConversationRuntime(
@@ -142,12 +164,17 @@ class CharacterConversationRunner(QObject):
         # Text chat handler for document-attachment turns (injectable for
         # tests; defaults to core.ai_router.chat — no Memory/Bond/suggestion).
         self._document_chat_handler = document_chat_handler
+        # Document Vision page/slide renderer (injectable for tests; defaults
+        # to the real PyMuPDF / PowerPoint COM renderer).
+        self._document_vision_renderer = document_vision_renderer
         self.last_screen_vision_timings: dict[str, float] | None = None
         self.last_screen_vision_meta: dict[str, Any] | None = None
         self.last_attachment_timings: dict[str, Any] | None = None
         self.last_attachment_meta: dict[str, Any] | None = None
         self.last_document_timings: dict[str, Any] | None = None
         self.last_document_meta: dict[str, Any] | None = None
+        self.last_document_vision_timings: dict[str, Any] | None = None
+        self.last_document_vision_meta: dict[str, Any] | None = None
         self._busy = False
         self._cancel_event: threading.Event | None = None
         self._thread: threading.Thread | None = None
@@ -563,6 +590,159 @@ class CharacterConversationRunner(QObject):
             )
         ], answer
 
+    def perform_with_document_vision(
+        self,
+        question: str,
+        attachment: DocumentAttachment,
+        cancel_event: threading.Event | None = None,
+    ) -> tuple[list[AgentEvent], str]:
+        """Synchronously execute one Document Vision turn.
+
+        Renders the requested page/slide to an in-memory JPEG frame and answers
+        with exactly one direct vision call (page image + page text + question).
+        Only an explicit visual trigger plus a resolvable page/slide location
+        engages this path; everything else falls through to the normal document
+        QA. Never touches OCR, Memory, History or a screen capture.
+        """
+        text = (question or "").strip()
+        if attachment is None:
+            return self.perform(text, cancel_event)
+        if _document_negated(text):
+            return self.perform(text, cancel_event)
+        event = cancel_event or threading.Event()
+        if event.is_set():
+            return [self._cancelled_event()], ""
+
+        if not is_document_vision_request(text):
+            return self.perform_with_document(text, attachment, cancel_event)
+
+        if not self._wait_for_document_parse(attachment):
+            return [self._error_event(DOCUMENT_PARSING_REPLY, ErrorCategory.PROTOCOL)], ""
+        context = attachment.context
+        if context is None or attachment.parse_state == "error":
+            message = _document_error_message(attachment.parse_error)
+            return [self._error_event(message, ErrorCategory.PROTOCOL)], ""
+
+        location = resolve_document_location(text, context)
+        if location is None:
+            return [self._error_event(
+                DOCUMENT_VISION_UNRESOLVED_REPLY, ErrorCategory.PROTOCOL
+            )], ""
+        total = context.page_count if context.kind == "pdf" else context.slide_count
+        if total is None or location < 1 or location > total:
+            return [self._error_event(
+                DOCUMENT_VISION_OUT_OF_RANGE_REPLY, ErrorCategory.PROTOCOL
+            )], ""
+
+        source = attachment.take_source_bytes()
+        if not source:
+            return [self._error_event(
+                DOCUMENT_VISION_NO_SOURCE_REPLY, ErrorCategory.PROTOCOL
+            )], ""
+
+        total_started = time.perf_counter()
+        renderer = self._get_document_vision_renderer()
+        render_started = time.perf_counter()
+        try:
+            if context.kind == "pdf":
+                frame = renderer.render_pdf_page(source, location)
+            elif context.kind == "pptx":
+                frame = renderer.render_pptx_slide(source, location)
+            else:
+                return [self._error_event(
+                    DOCUMENT_VISION_UNSUPPORTED_REPLY, ErrorCategory.PROTOCOL
+                )], ""
+        except PageOutOfRangeError:
+            return [self._error_event(
+                DOCUMENT_VISION_OUT_OF_RANGE_REPLY, ErrorCategory.PROTOCOL
+            )], ""
+        except Exception as exc:
+            reason = _attachment_failure_label(exc)
+            logger.info("document vision render failed: %s", reason)
+            return [self._error_event(
+                DOCUMENT_VISION_RENDER_FAILED_REPLY.format(reason=reason),
+                ErrorCategory.PROVIDER,
+            )], ""
+        render_ms = (time.perf_counter() - render_started) * 1000
+
+        location_label = f"Page {location}" if context.kind == "pdf" else f"Slide {location}"
+        section = next(
+            (s for s in context.sections if s.label == location_label), None
+        )
+        page_text = (section.text if section is not None else "") or ""
+
+        provider = self._get_attachment_vision_provider()
+        vision_started = time.perf_counter()
+        try:
+            answer = provider.answer_direct(
+                frame,
+                build_document_vision_question(text, location_label, page_text),
+                style_context=DOCUMENT_VISION_STYLE_CONTEXT,
+            )
+        except Exception as exc:
+            vision_ms = (time.perf_counter() - vision_started) * 1000
+            reason = _attachment_failure_label(exc)
+            logger.info(
+                "document vision failed: %s (%s ms)",
+                reason,
+                round(vision_ms, 1),
+            )
+            return [self._error_event(
+                DOCUMENT_VISION_FAILURE_REPLY.format(reason=reason),
+                ErrorCategory.PROVIDER,
+            )], ""
+        vision_ms = (time.perf_counter() - vision_started) * 1000
+
+        if not isinstance(answer, str) or not answer.strip():
+            return [self._error_event(
+                DOCUMENT_VISION_FAILURE_REPLY.format(reason="empty_response"),
+                ErrorCategory.PROVIDER,
+            )], ""
+        answer = answer.strip()
+        if event.is_set():
+            return [self._cancelled_event()], ""
+
+        history_user = HISTORY_DOCUMENT_PLACEHOLDER.format(
+            name=attachment.display_name
+        )
+        if text:
+            history_user = f"{history_user} {text}"
+        with self._lock:
+            self._history.extend(
+                [
+                    {"role": "user", "content": history_user},
+                    {"role": "assistant", "content": answer},
+                ]
+            )
+        total_ms = (time.perf_counter() - total_started) * 1000
+        self.last_document_vision_timings = {
+            "render_ms": round(render_ms, 1),
+            "vision_ms": round(vision_ms, 1),
+            "total_ms": round(total_ms, 1),
+            "response_length": len(answer),
+            "location": int(location),
+        }
+        self.last_document_vision_meta = {
+            "remote_calls": 1,
+            "reasoning_calls": 0,
+            "screen_capture_calls": 0,
+            "vision_calls": 1,
+            "source": "document_vision",
+            "kind": context.kind,
+            "filename": context.filename,
+            "location": int(location),
+            "page_text_chars": len(page_text),
+            "vision_provider": getattr(provider, "name", "deepseek-vision"),
+            "vision_model": getattr(provider, "model", "unknown"),
+        }
+        return [
+            AgentEvent.make(
+                self.AGENT_ID,
+                AgentEventType.FINAL,
+                text=answer,
+            )
+        ], answer
+
     def _run_with_document(
         self,
         question: str,
@@ -588,6 +768,14 @@ class CharacterConversationRunner(QObject):
 
             self._document_chat_handler = chat
         return self._document_chat_handler
+
+    def _get_document_vision_renderer(self) -> Any:
+        """The Document Vision page/slide renderer (lazily; injectable)."""
+        if self._document_vision_renderer is None:
+            from core.document_vision import DocumentVisionRenderer
+
+            self._document_vision_renderer = DocumentVisionRenderer()
+        return self._document_vision_renderer
 
     def _wait_for_document_parse(
         self, attachment: DocumentAttachment, timeout: float = 60.0

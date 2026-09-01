@@ -112,6 +112,10 @@ class DocumentAttachment:
         self._lazy_state = None
         self._lazy_ocr_fn = None
         self.lazy_index_ms = 0.0  # runtime-only metadata, never persisted
+        # Document Vision (pdf/pptx): keep source bytes after parsing so a
+        # requested page/slide can be rendered later. Released with the
+        # attachment when it is removed or replaced.
+        self._retain_source = False
         # In-memory, session-scoped summary cache (outline + group summaries).
         # Lives only on this attachment object: cleared when the attachment is
         # removed or replaced. Never written to disk / memory / history.
@@ -184,6 +188,16 @@ class DocumentAttachment:
         with self._lock:
             return self._source_bytes
 
+    def retain_source_bytes(self) -> None:
+        """Keep source bytes after parsing (Document Vision renders pages)."""
+        with self._lock:
+            self._retain_source = True
+
+    @property
+    def retains_source(self) -> bool:
+        with self._lock:
+            return self._retain_source
+
     def release_source_bytes(self) -> None:
         with self._lock:
             self._source_bytes = b""
@@ -193,7 +207,8 @@ class DocumentAttachment:
             self._context = context
             self._parse_state = "ready"
             self._parse_error = None
-            self._source_bytes = b""
+            if not self._retain_source:
+                self._source_bytes = b""
 
     def mark_lazy_ready(self, context: DocumentContext) -> None:
         """Ready for a lazy scanned PDF: RETAIN source bytes for on-demand OCR."""
