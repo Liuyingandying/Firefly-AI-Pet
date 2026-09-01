@@ -166,18 +166,18 @@ def test_single_right_click_toggles_once_after_interval(app: QApplication) -> No
         pet.shutdown()
 
 
-def test_double_right_click_quits_without_toggle(app: QApplication) -> None:
-    """B: the second click cancels the toggle and requests quit exactly once."""
+def test_double_right_click_hides_without_toggle(app: QApplication) -> None:
+    """B: the second click cancels the toggle and requests hide exactly once."""
     pet = _fresh_pet()
     pet.show()
     toggled: list[int] = []
-    quits: list[int] = []
+    hides: list[int] = []
     pet.scale_mode_toggled.connect(lambda: toggled.append(1))
-    pet.quit_requested.connect(lambda: quits.append(1))
+    pet.hide_requested.connect(lambda: hides.append(1))
     try:
         QTest.mouseDClick(pet, Qt.RightButton, pos=pet.rect().center())
         _settle(app)
-        assert quits == [1]
+        assert hides == [1]
         assert toggled == []
         # no late toggle after the interval elapses
         QTest.qWait(QApplication.doubleClickInterval() + 120)
@@ -186,21 +186,21 @@ def test_double_right_click_quits_without_toggle(app: QApplication) -> None:
         pet.shutdown()
 
 
-def test_two_right_presses_within_interval_quit(app: QApplication) -> None:
+def test_two_right_presses_within_interval_hide(app: QApplication) -> None:
     """Two separate right presses within the interval (no synthesized dblclick)
-    still quit via the timer-activity check, once, with no toggle."""
+    still hide via the timer-activity check, once, with no toggle."""
     pet = _fresh_pet()
     pet.show()
     toggled: list[int] = []
-    quits: list[int] = []
+    hides: list[int] = []
     pet.scale_mode_toggled.connect(lambda: toggled.append(1))
-    pet.quit_requested.connect(lambda: quits.append(1))
+    pet.hide_requested.connect(lambda: hides.append(1))
     try:
         QTest.mouseClick(pet, Qt.RightButton, pos=pet.rect().center())
         _settle(app)
         QTest.mouseClick(pet, Qt.RightButton, pos=pet.rect().center())
         _settle(app)
-        assert quits == [1]
+        assert hides == [1]
         assert toggled == []
         QTest.qWait(QApplication.doubleClickInterval() + 120)
         assert toggled == []
@@ -213,9 +213,9 @@ def test_two_slow_right_clicks_toggle_twice(app: QApplication) -> None:
     pet = _fresh_pet()
     pet.show()
     toggled: list[int] = []
-    quits: list[int] = []
+    hides: list[int] = []
     pet.scale_mode_toggled.connect(lambda: toggled.append(1))
-    pet.quit_requested.connect(lambda: quits.append(1))
+    pet.hide_requested.connect(lambda: hides.append(1))
     try:
         interval = QApplication.doubleClickInterval()
         QTest.mouseClick(pet, Qt.RightButton, pos=pet.rect().center())
@@ -223,31 +223,31 @@ def test_two_slow_right_clicks_toggle_twice(app: QApplication) -> None:
         QTest.mouseClick(pet, Qt.RightButton, pos=pet.rect().center())
         QTest.qWait(interval + 120)
         assert toggled == [1, 1]
-        assert quits == []
+        assert hides == []
     finally:
         pet.shutdown()
 
 
-def test_left_double_click_does_not_quit(app: QApplication) -> None:
-    """D: left double-click is untouched — no quit, no scale toggle."""
+def test_left_double_click_does_not_hide(app: QApplication) -> None:
+    """D: left double-click is untouched — no hide, no scale toggle."""
     pet = _fresh_pet()
     pet.show()
     toggled: list[int] = []
-    quits: list[int] = []
+    hides: list[int] = []
     pet.scale_mode_toggled.connect(lambda: toggled.append(1))
-    pet.quit_requested.connect(lambda: quits.append(1))
+    pet.hide_requested.connect(lambda: hides.append(1))
     try:
         QTest.mouseDClick(pet, Qt.LeftButton, pos=pet.rect().center())
         _settle(app)
         QTest.qWait(QApplication.doubleClickInterval() + 120)
-        assert quits == []
+        assert hides == []
         assert toggled == []
     finally:
         pet.shutdown()
 
 
 def test_exit_path_avoids_hard_kill() -> None:
-    """E: the exit trigger is the graceful quit_requested signal, never a kill."""
+    """E: hiding is the graceful hide_requested signal, never a kill."""
     src = (PROJECT_DIR / "ui" / "pet_overlay.py").read_text(encoding="utf-8")
     for banned in ("os._exit", "taskkill", "TerminateProcess"):
         assert banned not in src, banned

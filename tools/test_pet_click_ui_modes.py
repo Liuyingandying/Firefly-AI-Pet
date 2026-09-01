@@ -231,15 +231,15 @@ def test_right_click_scale_unaffected(app: QApplication) -> None:
         pet.shutdown()
 
 
-def test_double_right_click_quit_unaffected(app: QApplication) -> None:
+def test_double_right_click_hides_unaffected(app: QApplication) -> None:
     pet = _fresh_pet()
     pet.show()
-    quits: list[int] = []
-    pet.quit_requested.connect(lambda: quits.append(1))
+    hides: list[int] = []
+    pet.hide_requested.connect(lambda: hides.append(1))
     try:
         QTest.mouseDClick(pet, Qt.RightButton, pos=pet.rect().center())
         _settle(app)
-        assert quits == [1]
+        assert hides == [1]
     finally:
         pet.shutdown()
 
@@ -362,7 +362,7 @@ def main() -> None:
             shell.shutdown()
 
     test_right_click_scale_unaffected(app)
-    test_double_right_click_quit_unaffected(app)
+    test_double_right_click_hides_unaffected(app)
     test_wheel_scale_unaffected(app)
     test_chat_bubble_always_visible(app)
     test_chat_greeting_off_blank_bubble(app)

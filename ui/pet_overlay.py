@@ -17,7 +17,7 @@ class PetOverlay(QWidget):
     drag_started = Signal()
     drag_finished = Signal()
     reset_requested = Signal()
-    quit_requested = Signal()
+    hide_requested = Signal()  # double right click / close -> hide the pet, never quit
     scale_mode_toggled = Signal()
     scale_wheel = Signal(int)  # +1 wheel-up, -1 wheel-down
     scale_exit_requested = Signal()
@@ -183,12 +183,12 @@ class PetOverlay(QWidget):
         if event.button() == Qt.RightButton:
             if self._right_click_timer.isActive():
                 # A second right press within the system double-click interval
-                # is a double click: cancel the pending toggle and quit. Qt only
-                # synthesizes a mouseDoubleClickEvent when the two clicks are
-                # within the drag-distance threshold, so this timer check is
-                # what makes the exit purely interval-based.
+                # is a double click: cancel the pending toggle and hide the
+                # pet. Qt only synthesizes a mouseDoubleClickEvent when the two
+                # clicks are within the drag-distance threshold, so this timer
+                # check is what makes the hiding purely interval-based.
                 self._right_click_timer.stop()
-                self.quit_requested.emit()
+                self.hide_requested.emit()
             else:
                 self._right_click_timer.start()
             event.accept()
@@ -198,7 +198,7 @@ class PetOverlay(QWidget):
     def mouseDoubleClickEvent(self, event) -> None:
         if event.button() == Qt.RightButton:
             self._right_click_timer.stop()
-            self.quit_requested.emit()
+            self.hide_requested.emit()
             event.accept()
             return
         if event.button() == Qt.LeftButton:
@@ -286,7 +286,7 @@ class PetOverlay(QWidget):
             event.accept()
             return
         event.ignore()
-        self.quit_requested.emit()
+        self.hide_requested.emit()
 
     def shutdown(self) -> None:
         self._shutting_down = True

@@ -70,6 +70,7 @@ from ui.session_popover import SessionPopover
 from ui.settings_popover import SettingsPopover
 from ui.short_ask import AskPill, ShortAskPanel
 from ui.speech_bubble import SpeechBubble
+from ui.system_tray import FireflySystemTray
 from ui.vertical_toolbar import VerticalToolbar
 from ui.workflow_card import WorkflowCard
 from ui.workflow_executor import PlanStepExecutor
@@ -122,6 +123,7 @@ class _HotkeyManager(QObject):
 
 PROJECT_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = PROJECT_DIR / "assets" / "animations"
+ICON_FILE = PROJECT_DIR / "assets" / "firefly.ico"
 RUNTIME_DIR = PROJECT_DIR / "runtime"
 CONFIG_DIR = PROJECT_DIR / "config"
 SESSIONS_FILE = CONFIG_DIR / "sessions.json"
@@ -155,6 +157,7 @@ class VisualShell(QObject):
         super().__init__()
         self._server = server
         self._shutting_down = False
+        self._exiting = False
 
         self.pet = PetOverlay(ASSETS_DIR, STATE_GIF, max_dimension=theme.PET_MAX_DIMENSION)
         self.dock = AgentDock()
@@ -171,6 +174,13 @@ class VisualShell(QObject):
             self.session_manager = SessionManager()
         self.settings = SettingsManager()
         self.workspace_popover = WorkspacePopover(self.workspace_manager)
+        # Resident Windows tray: left-click toggle, dynamic plugin submenu, the
+        # only 退出 path. Created with the shell; removed in shutdown().
+        self.system_tray = FireflySystemTray(
+            controller=self,
+            icon_path=str(ICON_FILE),
+        )
+        self.system_tray.show()
         self.session_popover = SessionPopover(self.session_manager, self.workspace_manager)
         self.permission_card = PermissionCard()
         self.settings_popover = SettingsPopover(self.settings)
@@ -274,7 +284,7 @@ class VisualShell(QObject):
         self._scale_save_timer.setInterval(400)
         self._scale_save_timer.timeout.connect(self._persist_ui_scale)
 
-        self.pet.quit_requested.connect(QApplication.quit)
+        self.pet.hide_requested.connect(self.hide_firefly)
         self.pet.scale_mode_toggled.connect(self._on_scale_mode_toggled)
         self.pet.scale_wheel.connect(self._on_scale_wheel)
         self.pet.scale_exit_requested.connect(self._on_scale_exit)
@@ -328,6 +338,44 @@ class VisualShell(QObject):
         theme.set_ui_scale(self.settings.ui_scale)
         self.coordinator.show_shell_pet_only()
 
+    # -------------------------------------------------------- Firefly lifecycle
+    #
+    # hide != exit. show/hide/toggle only ever touch the Firefly pet body
+    # (PetOverlay); plugin windows, plugin background tasks and QApplication
+    # are never affected. exit_application() is the only path to QApplication.
+    # Cleanup runs through aboutToQuit -> shutdown(); it is never copied here.
+
+    def show_firefly(self) -> None:
+        """Show the Firefly pet body only."""
+        self.pet.show()
+
+    def hide_firefly(self) -> None:
+        """Hide the Firefly pet body only. Never quits, never shuts down."""
+        self.pet.hide()
+
+    def toggle_firefly(self) -> None:
+        """Toggle the Firefly pet body visibility (single source of truth)."""
+        if self.pet.isVisible():
+            self.hide_firefly()
+        else:
+            self.show_firefly()
+            self.pet.raise_()
+
+    def show_settings(self) -> None:
+        """Reuse the existing settings popover toggle."""
+        self.coordinator._toggle_settings()
+
+    def exit_application(self) -> None:
+        """The only real-exit trigger: flag + QApplication.quit().
+
+        All cleanup continues through aboutToQuit -> shutdown(); nothing is
+        duplicated here. Guarded so a second exit request is a no-op.
+        """
+        if self._shutting_down:
+            return
+        self._exiting = True
+        QApplication.quit()
+
     def shutdown(self) -> None:
         if self._shutting_down:
             return
@@ -351,6 +399,11 @@ class VisualShell(QObject):
         if hasattr(self, "hotkey_manager"):
             self.hotkey_manager.unregister()
         self.pet.shutdown()
+        # Remove the tray icon so it disappears from the notification area.
+        if self.system_tray is not None:
+            self.system_tray.hide()
+            self.system_tray.deleteLater()
+            self.system_tray = None
         if self._server is not None:
             self._server.close()
         try:
@@ -975,12 +1028,12 @@ class VisualShell(QObject):
         if socket.bytesAvailable():
             self._handle_control(socket)
 
-    @staticmethod
-    def _handle_control(socket) -> None:
+    def _handle_control(self, socket) -> None:
+        """Control channel keeps its semantics: "quit" really exits the pet."""
         data = bytes(socket.readAll()).decode("utf-8", "ignore")
         if "quit" in data:
             socket.disconnectFromServer()
-            QApplication.quit()
+            self.exit_application()
 
     @staticmethod
     def _write_pid() -> None:
