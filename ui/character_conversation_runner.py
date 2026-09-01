@@ -57,6 +57,11 @@ from core.document_vision import (
     is_document_vision_request,
     resolve_document_location,
 )
+from core.document_router import (
+    DocumentAction,
+    DocumentRoute,
+    route_document_question,
+)
 from core.lazy_pdf_ocr import (
     BATCH_LIMIT_NOTE,
     LOW_COVERAGE_REPLY,
@@ -175,6 +180,10 @@ class CharacterConversationRunner(QObject):
         self.last_document_meta: dict[str, Any] | None = None
         self.last_document_vision_timings: dict[str, Any] | None = None
         self.last_document_vision_meta: dict[str, Any] | None = None
+        # Router explainability for the current document turn (debug only;
+        # never shown to the user).
+        self._active_document_action: str | None = None
+        self._active_document_route_reason: str | None = None
         self._busy = False
         self._cancel_event: threading.Event | None = None
         self._thread: threading.Thread | None = None
@@ -485,10 +494,19 @@ class CharacterConversationRunner(QObject):
             return [self._error_event(message, ErrorCategory.PROTOCOL)], ""
 
         lazy = getattr(attachment, "lazy_state", None)
+        effective_question = text or DEFAULT_DOCUMENT_QUESTION
+        # Rule-based router decides between text QA / page lookup / vision /
+        # scan OCR / summary. No model call, no second parser.
+        route = route_document_question(effective_question, context, lazy_state=lazy)
+        self._active_document_action = route.action.value
+        self._active_document_route_reason = route.reason
+
+        if route.action == DocumentAction.DOCUMENT_VISION:
+            return self.perform_with_document_vision(text, attachment, cancel_event)
+
         if lazy is not None:
             return self._perform_lazy_pdf(text, attachment, lazy, event, total_started)
 
-        effective_question = text or DEFAULT_DOCUMENT_QUESTION
         provider = self._get_document_chat()
         retrieval_started = time.perf_counter()
         summary_stats: dict[str, Any] | None = None
@@ -502,7 +520,7 @@ class CharacterConversationRunner(QObject):
                 messages = build_qa_messages(context.filename, excerpts, effective_question)
                 answer = _chat_answer(provider(messages, temperature=0.2))
                 remote_calls = 1
-            elif is_summary_request(effective_question):
+            elif route.action == DocumentAction.SUMMARY:
                 answer, remote_calls, summary_stats = summarize_document(
                     context, provider, cache=attachment.summary_cache
                 )
@@ -572,6 +590,8 @@ class CharacterConversationRunner(QObject):
             "source": "document_attachment",
             "kind": context.kind,
             "filename": context.filename,
+            "document_action": self._active_document_action,
+            "document_route_reason": self._active_document_route_reason,
         }
         if summary_stats is not None:
             self.last_document_meta["summary_level"] = summary_stats.get("level", "small")
@@ -596,13 +616,13 @@ class CharacterConversationRunner(QObject):
         attachment: DocumentAttachment,
         cancel_event: threading.Event | None = None,
     ) -> tuple[list[AgentEvent], str]:
-        """Synchronously execute one Document Vision turn.
+        """Synchronously execute one document turn (router-driven entry).
 
-        Renders the requested page/slide to an in-memory JPEG frame and answers
-        with exactly one direct vision call (page image + page text + question).
-        Only an explicit visual trigger plus a resolvable page/slide location
-        engages this path; everything else falls through to the normal document
-        QA. Never touches OCR, Memory, History or a screen capture.
+        The router picks the handler: DOCUMENT_VISION renders the requested
+        page/slide and answers with exactly one direct vision call (page image
+        + page text + question); every other action falls through to the
+        normal document QA. Never touches OCR, Memory, History or a screen
+        capture outside the chosen handler.
         """
         text = (question or "").strip()
         if attachment is None:
@@ -613,9 +633,6 @@ class CharacterConversationRunner(QObject):
         if event.is_set():
             return [self._cancelled_event()], ""
 
-        if not is_document_vision_request(text):
-            return self.perform_with_document(text, attachment, cancel_event)
-
         if not self._wait_for_document_parse(attachment):
             return [self._error_event(DOCUMENT_PARSING_REPLY, ErrorCategory.PROTOCOL)], ""
         context = attachment.context
@@ -623,6 +640,28 @@ class CharacterConversationRunner(QObject):
             message = _document_error_message(attachment.parse_error)
             return [self._error_event(message, ErrorCategory.PROTOCOL)], ""
 
+        route = route_document_question(
+            text, context, lazy_state=getattr(attachment, "lazy_state", None)
+        )
+        if route.action != DocumentAction.DOCUMENT_VISION:
+            return self.perform_with_document(text, attachment, cancel_event)
+        self._active_document_action = route.action.value
+        self._active_document_route_reason = route.reason
+
+        return self._run_document_vision_turn(text, attachment, context, event)
+
+    def _run_document_vision_turn(
+        self,
+        text: str,
+        attachment: DocumentAttachment,
+        context: DocumentContext,
+        event: threading.Event,
+    ) -> tuple[list[AgentEvent], str]:
+        """Render the requested page/slide and answer with one direct vision call.
+
+        Shared by both document entries; only reached after the router decided
+        DOCUMENT_VISION (or the explicit vision entry confirmed it).
+        """
         location = resolve_document_location(text, context)
         if location is None:
             return [self._error_event(
@@ -732,6 +771,8 @@ class CharacterConversationRunner(QObject):
             "filename": context.filename,
             "location": int(location),
             "page_text_chars": len(page_text),
+            "document_action": self._active_document_action,
+            "document_route_reason": self._active_document_route_reason,
             "vision_provider": getattr(provider, "name", "deepseek-vision"),
             "vision_model": getattr(provider, "model", "unknown"),
         }
@@ -1068,6 +1109,8 @@ class CharacterConversationRunner(QObject):
             "source": "document_attachment",
             "kind": "pdf",
             "filename": attachment.display_name,
+            "document_action": self._active_document_action,
+            "document_route_reason": self._active_document_route_reason,
             "ocr_mode": ocr_mode,
             "ocr_pages_requested": int(len(requested_pages)),
             "ocr_pages_completed": int(lazy.ocr_pages_completed()),
