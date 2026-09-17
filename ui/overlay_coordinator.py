@@ -29,6 +29,14 @@ class PresentationState(Enum):
 class OverlayCoordinator(QObject):
     permission_view_requested = Signal(str)
     short_ask_requested = Signal()
+    memory_panel_requested = Signal()
+    scratchpad_requested = Signal()
+    console_requested = Signal()
+    # PDF OCR Overlay Phase 3-B: toolbar "PDF 划词" → app starts the
+    # fresh-capture → OCR → arm cycle; the coordinator owns no snapshot.
+    pdf_select_requested = Signal()
+    # Phase 4-B: toolbar "区域解释" → same pipeline in VISUAL_REGION mode.
+    pdf_visual_requested = Signal()
 
     def __init__(
         self,
@@ -48,6 +56,9 @@ class OverlayCoordinator(QObject):
         recommendation_card=None,
         workflow_card=None,
         pagelens_panel=None,
+        explain_box=None,
+        reader_panel=None,
+        single_reading_surface=False,
     ):
         super().__init__(parent)
         self.pet = pet
@@ -64,12 +75,19 @@ class OverlayCoordinator(QObject):
         self.recommendation_card = recommendation_card
         self.workflow_card = workflow_card
         self.pagelens_panel = pagelens_panel
+        # PaperLens P0: ExplainBox hosts local PDF word-selection explanation.
+        self.explain_box = explain_box
+        self.single_reading_surface = single_reading_surface is True
+        # PaperLens 2.2: independent paper reading mode.
+        self.reader_panel = reader_panel
         self._active_context = "workspace"
         self._waiting: dict[str, object] = {}
         self._pending_notification = None
         self._context_switching = False
         self._presentation_state = PresentationState.PET_ONLY
         self._pagelens_was_visible = True  # track bubble visibility before pagelens open
+        self._paper_was_visible = True  # track bubble visibility before paper open
+        self._reader_was_visible = True  # track bubble visibility before reader open
 
         self.pet.position_changed.connect(self.reposition)
         self.pet.left_clicked.connect(self.advance_presentation_state)
@@ -140,6 +158,10 @@ class OverlayCoordinator(QObject):
             self.workflow_card.raise_()
         if self.pagelens_panel is not None and self.pagelens_panel.isVisible():
             self.pagelens_panel.raise_()
+        if self.explain_box is not None and self.explain_box.isVisible():
+            self.explain_box.raise_()
+        if self.reader_panel is not None and self.reader_panel.isVisible():
+            self.reader_panel.raise_()
 
     def reset_position(self) -> None:
         screen = QApplication.primaryScreen()
@@ -205,6 +227,12 @@ class OverlayCoordinator(QObject):
 
         if self.pagelens_panel is not None and self.pagelens_panel.visible:
             self._position_pagelens()
+
+        if self.explain_box is not None and self.explain_box.isVisible():
+            self._position_paper()
+
+        if self.reader_panel is not None and self.reader_panel.isVisible():
+            self._position_reader()
 
     def apply_ui_scale(self, scale: float) -> None:
         """Resize the whole shell for a new ui_scale while holding the pet anchor.
@@ -334,17 +362,46 @@ class OverlayCoordinator(QObject):
             self.settings_popover.close()
         if self.pagelens_panel is not None:
             self.pagelens_panel.close()
+        if self.explain_box is not None:
+            self.explain_box.close()
+        if self.reader_panel is not None:
+            self.reader_panel.close()
+        memory_panel = getattr(self, "memory_panel", None)
+        if memory_panel is not None:
+            memory_panel.close()
 
     def _toolbar_action(self, action_id: str) -> None:
         if action_id == "companion":
             if not self.bubble.isVisible():
                 self.toggle_bubble()
+        elif action_id == "console":
+            self.console_requested.emit()
         elif action_id == "pagelens":
             self.toggle_pagelens()
+        elif action_id == "paper":
+            self.toggle_paper()
+        elif action_id == "reader":
+            self.toggle_reader()
         elif action_id == "workspace":
             self._toggle_context()
         elif action_id == "settings":
             self._toggle_settings()
+        elif action_id == "memory":
+            self.memory_panel_requested.emit()
+        elif action_id == "scratchpad":
+            # Momentary action (opens the notebook window): restore the
+            # toolbar highlight so the item does not stay selected.
+            self.scratchpad_requested.emit()
+            self.toolbar.select_action("companion", emit_signal=False)
+        elif action_id == "pdf_select":
+            # Momentary action: no panel toggles, restore the toolbar
+            # selection so the item does not stay highlighted.
+            self.pdf_select_requested.emit()
+            self.toolbar.select_action("companion", emit_signal=False)
+        elif action_id == "pdf_visual":
+            # Phase 4-B: same momentary semantics ("区域解释").
+            self.pdf_visual_requested.emit()
+            self.toolbar.select_action("companion", emit_signal=False)
 
     def _toggle_settings(self) -> None:
         if self.settings_popover is None:
@@ -391,6 +448,13 @@ class OverlayCoordinator(QObject):
     def show_pagelens(self) -> None:
         if self.pagelens_panel is None:
             return
+        # PageLens and the PDF explain panel never overlap on screen.
+        if (
+            not self.single_reading_surface
+            and self.explain_box is not None
+            and self.explain_box.isVisible()
+        ):
+            self.hide_paper()
         # Save bubble visibility state before opening PageLens
         self._pagelens_was_visible = self.bubble.isVisible()
         # Hide bubble while PageLens is open
@@ -465,6 +529,174 @@ class OverlayCoordinator(QObject):
             point.setY(available.top() + margin)
         if point.y() + panel_height > available.bottom() - margin:
             point.setY(available.bottom() - panel_height - margin)
+
+        panel.move(self._clamp_point(point, panel, available))
+
+    # -- PaperLens P0: local PDF word-selection explanation --------------
+
+    def toggle_paper(self) -> None:
+        if self.single_reading_surface:
+            self.toggle_pagelens()
+            return
+        if self.explain_box is None:
+            return
+        if self.explain_box.isVisible():
+            self.hide_paper()
+        else:
+            self.show_paper()
+
+    def show_paper(self) -> None:
+        if self.single_reading_surface:
+            if self.explain_box is not None:
+                self.explain_box.hide_panel()
+            self.show_pagelens()
+            return
+        if self.explain_box is None:
+            return
+        # The PDF reading panel is persistent like PageLens; the two never
+        # overlap on screen.
+        if self.pagelens_panel is not None and self.pagelens_panel.visible:
+            self.hide_pagelens()
+        self._paper_was_visible = self.bubble.isVisible()
+        self._hide_bubble()
+        self._dismiss_business_popovers()
+        self.suspend_short_ask()
+        self.suspend_recommendation()
+        self.suspend_workflow()
+        self.toolbar.select_action("paper", emit_signal=False)
+        self.explain_box.show_panel()
+        self._position_paper()
+        self.raise_shell()
+
+    def hide_paper(self) -> None:
+        if self.single_reading_surface:
+            if self.explain_box is not None:
+                self.explain_box.hide_panel()
+            return
+        if self.explain_box is None:
+            return
+        self.explain_box.hide_panel()
+        self.toolbar.select_action("companion", emit_signal=False)
+        if self._paper_was_visible:
+            self.reposition()
+            self.bubble.show()
+            self.bubble.raise_()
+
+    def _position_paper(self) -> None:
+        panel = self.explain_box
+        if panel is None or not panel.isVisible():
+            return
+        screen = (
+            QGuiApplication.screenAt(self.pet.frameGeometry().center())
+            or QApplication.primaryScreen()
+        )
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        pet_geo = self.pet.frameGeometry()
+        toolbar_geo = self.toolbar.frameGeometry()
+
+        gap = theme.scaled(theme.PAGELENS_ANCHOR_GAP)
+        panel_w = panel.width()
+        panel_h = panel.height()
+
+        cluster_left = min(pet_geo.left(), toolbar_geo.left())
+        cluster_right = max(pet_geo.right(), toolbar_geo.right())
+        cluster_center_y = (toolbar_geo.top() + toolbar_geo.bottom()) // 2
+        point = QPoint(
+            cluster_left - gap - panel_w,
+            cluster_center_y - panel_h // 2,
+        )
+        if point.x() < available.left() + 10:
+            point = QPoint(
+                cluster_right + gap,
+                cluster_center_y - panel_h // 2,
+            )
+
+        margin = theme.scaled(theme.SPACE_MD)
+        if point.y() < available.top() + margin:
+            point.setY(available.top() + margin)
+        if point.y() + panel_h > available.bottom() - margin:
+            point.setY(available.bottom() - panel_h - margin)
+
+        panel.move(self._clamp_point(point, panel, available))
+
+    # -- PaperLens 2.2: independent paper reading mode ------------------
+
+    def toggle_reader(self) -> None:
+        if self.reader_panel is None:
+            return
+        if self.reader_panel.isVisible():
+            self.hide_reader()
+        else:
+            self.show_reader()
+
+    def show_reader(self) -> None:
+        if self.reader_panel is None:
+            return
+        # The reading surface is persistent; other reader-family panels yield
+        # so the two never stack on the same anchor.
+        if self.explain_box is not None and self.explain_box.isVisible():
+            self.hide_paper()
+        if self.pagelens_panel is not None and self.pagelens_panel.visible:
+            self.hide_pagelens()
+        self._reader_was_visible = self.bubble.isVisible()
+        self._hide_bubble()
+        self._dismiss_business_popovers()
+        self.suspend_short_ask()
+        self.suspend_recommendation()
+        self.suspend_workflow()
+        self.toolbar.select_action("reader", emit_signal=False)
+        self.reader_panel.show_panel()
+        self._position_reader()
+        self.raise_shell()
+
+    def hide_reader(self) -> None:
+        if self.reader_panel is None:
+            return
+        self.reader_panel.hide_panel()
+        self.toolbar.select_action("companion", emit_signal=False)
+        if self._reader_was_visible:
+            self.reposition()
+            self.bubble.show()
+            self.bubble.raise_()
+
+    def _position_reader(self) -> None:
+        panel = self.reader_panel
+        if panel is None or not panel.isVisible():
+            return
+        screen = (
+            QGuiApplication.screenAt(self.pet.frameGeometry().center())
+            or QApplication.primaryScreen()
+        )
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        pet_geo = self.pet.frameGeometry()
+        toolbar_geo = self.toolbar.frameGeometry()
+
+        gap = theme.scaled(theme.PAGELENS_ANCHOR_GAP)
+        panel_w = panel.width()
+        panel_h = panel.height()
+
+        cluster_left = min(pet_geo.left(), toolbar_geo.left())
+        cluster_right = max(pet_geo.right(), toolbar_geo.right())
+        cluster_center_y = (toolbar_geo.top() + toolbar_geo.bottom()) // 2
+        point = QPoint(
+            cluster_left - gap - panel_w,
+            cluster_center_y - panel_h // 2,
+        )
+        if point.x() < available.left() + 10:
+            point = QPoint(
+                cluster_right + gap,
+                cluster_center_y - panel_h // 2,
+            )
+
+        margin = theme.scaled(theme.SPACE_MD)
+        if point.y() < available.top() + margin:
+            point.setY(available.top() + margin)
+        if point.y() + panel_h > available.bottom() - margin:
+            point.setY(available.bottom() - panel_h - margin)
 
         panel.move(self._clamp_point(point, panel, available))
 

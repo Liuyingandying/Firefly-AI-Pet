@@ -13,8 +13,9 @@ import json
 import time
 from pathlib import Path
 
-PROJECT_DIR = Path(__file__).resolve().parent
-SOURCES_DIR = PROJECT_DIR / "runtime" / "sources"
+from core.user_paths import get_user_data_paths
+
+SOURCES_DIR = get_user_data_paths().runtime / "sources"
 
 VALID_STATES = {"idle", "thinking", "working", "waiting", "success", "error", "sleeping"}
 AGENTS = ("claude", "codex", "manual")

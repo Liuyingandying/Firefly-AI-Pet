@@ -141,3 +141,56 @@ class QwenVisionProvider(VisionProvider):
         except ValueError as exc:
             raise ProviderSchemaError(str(exc))
         return to_observation(parsed, raw_model_text=raw_text)
+
+    def answer_direct(
+        self,
+        frame: ScreenFrame,
+        question: str,
+        style_context: str | None = None,
+    ) -> str:
+        """One-shot FAST answer for the TJU v3 multimodal endpoint.
+
+        Mirrors :meth:`inspect` but returns the model's raw text directly
+        (no JSON extraction), so the direct vision path can reuse this
+        provider as a drop-in ``answer_direct``. Same endpoint, same error
+        taxonomy — no new provider or SDK.
+        """
+        cfg = self._config
+        payload = {
+            "model": cfg.model,
+            "messages": build_vision_messages(frame, question),
+            "stream": False,
+            "max_tokens": 1500,
+        }
+        extra = dict(cfg.extra_body)
+        extra.update(self._extra_body)
+        if extra:
+            payload.update(extra)
+        try:
+            response = requests.post(
+                f"{cfg.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {cfg.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=VISION_TIMEOUT_SECONDS,
+            )
+        except requests.RequestException as exc:
+            raise ProviderNetworkError(exc) from None
+        if not response.ok:
+            raise ProviderHTTPError(
+                response.status_code,
+                sanitize_error_text(response.text[:300], cfg.api_key),
+            )
+        try:
+            body = response.json()
+            message = body["choices"][0]["message"]
+        except (ValueError, KeyError, IndexError) as exc:
+            raise ProviderSchemaError(f"unexpected vision response shape: {exc}")
+        text = (message.get("content") or "").strip()
+        if not text:
+            from core.screen_vision.provider_errors import EmptyProviderResponse
+
+            raise EmptyProviderResponse()
+        return text

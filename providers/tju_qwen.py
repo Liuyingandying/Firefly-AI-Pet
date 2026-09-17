@@ -5,10 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from .base import DEFAULT_TIMEOUT_SECONDS, OpenAICompatibleProvider, Transport, resolve_setting
+from core.providers.catalog import CATALOG
 
 
-DEFAULT_BASE_URL = "https://ai.tju.edu.cn/api/v3"
-DEFAULT_MODEL = "tju-llm"
+DEFAULT_BASE_URL = CATALOG["tju"].base_url
+DEFAULT_MODEL = CATALOG["tju"].model
 
 
 class TJUQwenProvider(OpenAICompatibleProvider):

@@ -24,10 +24,11 @@ from __future__ import annotations
 
 import logging
 import sys
+from enum import Enum
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QRect, QRectF, QPoint, QSize, QTimer, Signal, Slot, QThread
-from PySide6.QtGui import QPainter, QPainterPath, QFont, QFontMetrics, QPixmap
+from PySide6.QtCore import Qt, QRect, QRectF, QPoint, QSize, QTimer, Signal, Slot, QThread, QEvent
+from PySide6.QtGui import QPainter, QPainterPath, QFont, QFontMetrics, QPixmap, QColor, QPen, QCursor
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -40,10 +41,12 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QFileDialog,
     QTextBrowser,
+    QPushButton,
 )
 
 from . import theme
 from .image_ocr_worker import ImageOcrSignalRelay, ImageOcrWorker
+from .image_vision_worker import ImageVisionSignalRelay, ImageVisionWorker
 
 log = logging.getLogger("firefly.pagelens")
 
@@ -63,6 +66,68 @@ def _pl_scaled_px(value: int | float) -> int:
 
 def _pl_font_px(value: int | float) -> int:
     return max(9, _pl_scaled(value))
+
+
+def _tier_opacity_of(widget: QWidget) -> float:
+    """Tier opacity of the owning PageLensPanel (walks up the parent chain).
+
+    Painter children (chips, question rows) read the live tier at paint time
+    so their fills stay in sync with the translucent glass surface.
+    """
+    cursor: QWidget | None = widget
+    while cursor is not None:
+        if isinstance(cursor, PageLensPanel):
+            return cursor.tier_opacity()
+        cursor = cursor.parentWidget()
+    return theme.PAGELENS_OPACITY_FOCUSED
+
+
+class _ViewState(Enum):
+    """Which body view the concept card area is showing."""
+
+    VIEW_CONCEPT = "concept"
+    VIEW_QUESTION = "question"
+    # A related-concept detail card is on screen and the origin card is kept
+    # locally so the back arrow can restore it without a bridge round-trip.
+    VIEW_RELATED = "related"
+
+
+class PageLensState(Enum):
+    """Public reading-surface state used by the consolidated UI."""
+
+    COMPACT = "compact"
+    EXPLAIN = "explain"
+    VISUAL_EXPLAIN = "visual_explain"
+
+
+class _PageLensGlass(theme.GlassPanel):
+    """PageLens glass surface with a three-tier readability opacity.
+
+    The fill alpha follows the panel's current tier (idle / hover / focused)
+    so the page behind shows through when the user is merely reading, while
+    hover and window focus restore full clarity for interaction.
+    """
+
+    def set_tier_opacity(self, opacity: float) -> None:
+        self._tier_opacity = opacity
+        self.update()
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        opacity = getattr(self, "_tier_opacity", 1.0)
+        fill = QColor(
+            theme.GLASS_BACKGROUND[0],
+            theme.GLASS_BACKGROUND[1],
+            theme.GLASS_BACKGROUND[2],
+        )
+        fill.setAlphaF(theme.GLASS_BACKGROUND[3] / 255.0 * opacity)
+        painter.setBrush(fill)
+        pen = QPen(theme.qcolor(theme.GLASS_BORDER), 0.8)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        bounds = QRectF(self.rect()).adjusted(0.6, 0.6, -0.6, -0.6)
+        painter.drawRoundedRect(bounds, self._radius, self._radius)
 
 
 class _FlowLayout(QLayout):
@@ -156,6 +221,9 @@ class PageLensPanel(QWidget):
     concept_requested = Signal(str)
     back_requested = Signal()
     close_requested = Signal()
+    selection_requested = Signal()
+    visual_region_requested = Signal()
+    consent_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -166,6 +234,7 @@ class PageLensPanel(QWidget):
         w = _pl_scaled_px(theme.PAGELENS_WIDTH)
         h = _pl_scaled_px(theme.PAGELENS_HEIGHT)
         self._default_height = h
+        self._compact_height = _pl_scaled_px(197)
         self.setFixedWidth(w)
         self.resize(w, h)
         self._apply_height_limits()
@@ -174,6 +243,15 @@ class PageLensPanel(QWidget):
         self._visible = False
         self._anchor_side = "left"
         self._bridge_connected = False
+        self._surface_state = PageLensState.COMPACT
+
+        # Three-tier readability: the window tracks hover / focus and scales
+        # the glass surface alpha accordingly (idle is the most transparent).
+        self._opacity_tier = "idle"
+        self._exploration_expanded = False
+        # Body scroll position held while the question/answer view is active,
+        # restored when the back arrow returns to the concept card.
+        self._saved_scroll_pos = 0
 
         # Image attachment state (Stage 1A)
         self._image_path: str | None = None
@@ -190,13 +268,31 @@ class PageLensPanel(QWidget):
             self._on_ocr_error, Qt.QueuedConnection,
         )
 
+        # Image vision understanding state (Stage 1C): parallel to OCR, runs
+        # the shared vision provider so the panel understands figures/formulas
+        # that RapidOCR cannot. Empty string = no vision context available.
+        self._vision_text: str = ""
+        self._vision_thread: QThread | None = None
+        self._vision_worker: ImageVisionWorker | None = None
+        self._vision_relay = ImageVisionSignalRelay(self)
+        self._vision_relay.finished.connect(
+            self._on_vision_finished, Qt.QueuedConnection,
+        )
+        self._vision_relay.error.connect(
+            self._on_vision_error, Qt.QueuedConnection,
+        )
+
+        # Stage 1B: store original question for UI display (outbound is augmented)
+        self._last_original_question: str = ""
+
         # Root layout with shadow
         root = QVBoxLayout(self)
         shadow = theme.SHADOW_MARGIN - 2
         root.setContentsMargins(shadow, shadow, shadow, shadow)
         root.setSpacing(0)
 
-        self._glass = theme.GlassPanel(theme.RADIUS_CARD, self)
+        self._glass = _PageLensGlass(theme.RADIUS_CARD, self)
+        self._glass.set_tier_opacity(theme.PAGELENS_OPACITY_IDLE)
         theme.apply_soft_shadow(self._glass)
         root.addWidget(self._glass)
 
@@ -211,17 +307,16 @@ class PageLensPanel(QWidget):
 
         # Image attachment toolbar (Stage 1A)
         self._image_toolbar = self._build_image_toolbar()
+        # Image/OCR attachment remains implemented, but is no longer a
+        # permanent top-level strip in the quiet PageLens surface.
+        self._image_toolbar.setVisible(False)
         inner.addWidget(self._image_toolbar)
 
         # Standalone collapsible OCR text panel (between toolbar and concepts)
         self._ocr_text_panel = QFrame(self._glass)
         self._ocr_text_panel.setVisible(False)
         self._ocr_text_panel.setMaximumHeight(_pl_scaled_px(220))
-        self._ocr_text_panel.setStyleSheet(
-            f"background: {theme.css_color(theme.GLASS_BACKGROUND_HOVER)}; "
-            f"border: 1px solid {theme.css_color(theme.GLASS_BORDER)}; "
-            f"border-radius: {_pl_scaled_px(6)}px;"
-        )
+        self._ocr_text_panel.setStyleSheet(self._ocr_panel_style())
         ocr_inner = QVBoxLayout(self._ocr_text_panel)
         ocr_inner.setContentsMargins(_pl_scaled_px(8), _pl_scaled_px(6), _pl_scaled_px(8), _pl_scaled_px(6))
         ocr_inner.setSpacing(_pl_scaled_px(2))
@@ -246,10 +341,11 @@ class PageLensPanel(QWidget):
         self._top_concepts = self._build_top_concepts()
         inner.addWidget(self._top_concepts)
 
-        # Separator
+        # Separator kept for spacing parity (height math unchanged); the line
+        # itself is dropped — the concepts bar's own border is enough.
         sep = QFrame(self._glass)
         sep.setFixedHeight(1)
-        sep.setStyleSheet(f"background: {theme.css_color(theme.GLASS_BORDER)};")
+        sep.setStyleSheet("background: transparent;")
         inner.addWidget(sep)
 
         # Scroll area for concept card / question view
@@ -271,7 +367,211 @@ class PageLensPanel(QWidget):
         self._content = _ScrollContent(self._glass, self)
         self._scroll.setWidget(self._content)
 
+        # Footer: pinned below the scroll area so the exploration entry stays
+        # visible no matter how long the body content is. Must be created
+        # AFTER self._content because the button expands the body questions.
+        self._footer = self._build_footer()
+        self._footer.setVisible(False)
+        inner.addWidget(self._footer)
+
+        # No explanation card occupies space until a real concept/selection
+        # asks for one. PageLens is the single selection/region result UI.
+        self._scroll.setVisible(False)
+
         log.info("[PageLensPanel] created")
+
+    # ------------------------------------------------------------------
+    # Footer (pinned "继续探索" entry)
+    # ------------------------------------------------------------------
+
+    def _build_footer(self) -> QFrame:
+        footer = QFrame(self._glass)
+        footer.setObjectName("pageLensFooter")
+        footer.setStyleSheet(self._footer_style())
+        footer.setFixedHeight(_pl_scaled_px(46))
+        footer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        layout = QHBoxLayout(footer)
+        layout.setContentsMargins(
+            _pl_scaled_px(14), _pl_scaled_px(6),
+            _pl_scaled_px(14), _pl_scaled_px(6),
+        )
+
+        # Secondary entry: a compact centered pill, not a full-width call to
+        # action — the footer must not outweigh the reading content.
+        self._explore_btn = QPushButton("继续探索", footer)
+        self._explore_btn.setObjectName("pageLensExploreButton")
+        self._explore_btn.setCursor(Qt.PointingHandCursor)
+        self._explore_btn.setToolTip("展开本页相关的探索问题")
+        self._explore_btn.setFixedHeight(_pl_scaled_px(30))
+        self._explore_btn.setFixedWidth(_pl_scaled_px(150))
+        self._explore_btn.clicked.connect(self._on_explore_clicked)
+        self._update_explore_button_style()
+        layout.addStretch(1)
+        layout.addWidget(self._explore_btn)
+
+        self._consent_btn = QPushButton("授权并解释", footer)
+        self._consent_btn.setObjectName("pageLensConsentButton")
+        self._consent_btn.setCursor(Qt.PointingHandCursor)
+        self._consent_btn.setFixedHeight(_pl_scaled_px(30))
+        self._consent_btn.setFixedWidth(_pl_scaled_px(150))
+        self._consent_btn.setStyleSheet(theme.popover_button_style("pageLensConsentButton"))
+        self._consent_btn.clicked.connect(self.consent_requested.emit)
+        self._consent_btn.setVisible(False)
+        layout.addWidget(self._consent_btn)
+        layout.addStretch(1)
+
+        return footer
+
+    def _update_explore_button_style(self) -> None:
+        accent = theme.css_color(theme.CYAN_ACCENT)
+        accent_text = theme.css_color(theme.PAGELENS_TEXT_ACCENT)
+        border = theme.css_color(theme.GLASS_BORDER)
+        secondary = theme.css_color(theme.TEXT_SECONDARY)
+        fill = self.tiered_css(theme.GLASS_BACKGROUND_SELECTED)
+        base = (
+            f"QPushButton#pageLensExploreButton {{ "
+            f"color: {secondary}; "
+            f"background: {fill}; "
+            f"border: 1px solid {border}; "
+            f"border-radius: {_pl_scaled_px(15)}px; "
+            f"padding: 0 {_pl_scaled_px(10)}px; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(9)}pt; "
+            f"font-weight: {theme.FONT_WEIGHT_MEDIUM}; "
+            "}"
+        )
+        if self._exploration_expanded:
+            # Expanded state keeps the cyan emphasis as a persistent highlight.
+            self._explore_btn.setStyleSheet(
+                base
+                + f"QPushButton#pageLensExploreButton {{ "
+                f"border: 1px solid {accent}; "
+                f"color: {accent_text}; "
+                "}"
+            )
+        else:
+            self._explore_btn.setStyleSheet(
+                base
+                + f"QPushButton#pageLensExploreButton:hover {{ "
+                f"border: 1px solid {accent}; "
+                f"color: {accent_text}; "
+                "}"
+                f"QPushButton#pageLensExploreButton:disabled {{ "
+                f"color: {theme.css_color(theme.UNAVAILABLE_STATUS)}; "
+                "}"
+            )
+
+    def _on_explore_clicked(self) -> None:
+        """Toggle the exploration question list inside the scrollable body."""
+        self._exploration_expanded = not self._exploration_expanded
+        self._content.set_questions_expanded(self._exploration_expanded)
+        self._update_explore_button_style()
+        self._request_height_fit()
+        if self._exploration_expanded:
+            QTimer.singleShot(0, self._scroll_to_questions)
+
+    def _scroll_to_questions(self) -> None:
+        sb = self._scroll.verticalScrollBar()
+        qh = self._content._questions_header
+        target = qh.mapTo(self._content, qh.rect().topLeft()).y() - _pl_scaled_px(4)
+        sb.setValue(max(0, min(target, sb.maximum())))
+
+    # ------------------------------------------------------------------
+    # Readability tiers (idle / hover / focused)
+    # ------------------------------------------------------------------
+
+    def _apply_opacity_tier(self, tier: str) -> None:
+        if tier == "focused":
+            opacity = theme.PAGELENS_OPACITY_FOCUSED
+        elif tier == "hover":
+            opacity = theme.PAGELENS_OPACITY_HOVER
+        else:
+            tier = "idle"
+            opacity = theme.PAGELENS_OPACITY_IDLE
+        if tier == self._opacity_tier:
+            return
+        self._opacity_tier = tier
+        self._glass.set_tier_opacity(opacity)
+        # Every internal glass surface follows the tier, not just the panel
+        # background — fixed-alpha children would float as bright patches on
+        # the translucent surface.
+        self._apply_tier_visuals()
+
+    # -- tier-aware surface styles -----------------------------------------
+
+    def tier_opacity(self) -> float:
+        return {
+            "idle": theme.PAGELENS_OPACITY_IDLE,
+            "hover": theme.PAGELENS_OPACITY_HOVER,
+            "focused": theme.PAGELENS_OPACITY_FOCUSED,
+        }.get(self._opacity_tier, theme.PAGELENS_OPACITY_IDLE)
+
+    def tiered_css(self, rgba: tuple[int, int, int, int]) -> str:
+        return theme.css_color(theme.scale_alpha(rgba, self.tier_opacity()))
+
+    def _concepts_bar_style(self) -> str:
+        return (
+            f"QFrame#pageLensTopConcepts {{ "
+            f"background-color: {self.tiered_css(theme.GLASS_BACKGROUND_SELECTED)}; "
+            f"border-top: 1px solid {theme.css_color(theme.GLASS_BORDER)}; "
+            "}"
+        )
+
+    def _footer_style(self) -> str:
+        return (
+            f"QFrame#pageLensFooter {{ "
+            f"background-color: {self.tiered_css(theme.GLASS_BACKGROUND_SELECTED)}; "
+            f"border-bottom-left-radius: {_pl_scaled_px(theme.RADIUS_CARD - 2)}px; "
+            f"border-bottom-right-radius: {_pl_scaled_px(theme.RADIUS_CARD - 2)}px; "
+            "}"
+        )
+
+    def _ocr_panel_style(self) -> str:
+        return (
+            f"background: {self.tiered_css(theme.GLASS_BACKGROUND_HOVER)}; "
+            f"border: 1px solid {theme.css_color(theme.GLASS_BORDER)}; "
+            f"border-radius: {_pl_scaled_px(6)}px;"
+        )
+
+    def _apply_tier_visuals(self) -> None:
+        """Re-style stylesheet surfaces and repaint painter children."""
+        self._top_concepts.setStyleSheet(self._concepts_bar_style())
+        self._footer.setStyleSheet(self._footer_style())
+        self._ocr_text_panel.setStyleSheet(self._ocr_panel_style())
+        self._update_explore_button_style()
+        self._content.apply_tier_visuals(self.tier_opacity())
+        for widget in (
+            *self._top_concept_widgets,
+            *self._content._related_widgets,
+            *self._content._question_widgets,
+        ):
+            widget.update()
+
+    def _recompute_opacity_tier(self) -> None:
+        # Child widgets trigger parent leave/enter events when the cursor
+        # crosses onto them, so hover is resolved from the global cursor
+        # position instead of the last enter/leave event.
+        if self.isActiveWindow():
+            tier = "focused"
+        elif self.rect().contains(self.mapFromGlobal(QCursor.pos())):
+            tier = "hover"
+        else:
+            tier = "idle"
+        self._apply_opacity_tier(tier)
+
+    def changeEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        if event.type() == QEvent.ActivationChange:
+            self._recompute_opacity_tier()
+        super().changeEvent(event)
+
+    def enterEvent(self, event) -> None:  # type: ignore[override]
+        self._recompute_opacity_tier()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # type: ignore[override]
+        self._recompute_opacity_tier()
+        super().leaveEvent(event)
 
     # ------------------------------------------------------------------
     # Header
@@ -311,6 +611,25 @@ class PageLensPanel(QWidget):
         self._update_status_badge()
         layout.addWidget(self._badge)
 
+        # Secondary PageLens actions reuse the existing PDF overlay handlers.
+        self._select_btn = QPushButton("划词", header)
+        self._select_btn.setObjectName("pageLensSelectMode")
+        self._select_btn.setCursor(Qt.PointingHandCursor)
+        self._select_btn.setToolTip("PDF 划词解释")
+        self._select_btn.setFixedHeight(_pl_scaled_px(24))
+        self._select_btn.setStyleSheet(theme.link_button_style("pageLensSelectMode"))
+        self._select_btn.clicked.connect(self.selection_requested.emit)
+        layout.addWidget(self._select_btn)
+
+        self._region_btn = QPushButton("框选", header)
+        self._region_btn.setObjectName("pageLensRegionMode")
+        self._region_btn.setCursor(Qt.PointingHandCursor)
+        self._region_btn.setToolTip("框选公式、图表或混合区域进行解释")
+        self._region_btn.setFixedHeight(_pl_scaled_px(24))
+        self._region_btn.setStyleSheet(theme.link_button_style("pageLensRegionMode"))
+        self._region_btn.clicked.connect(self.visual_region_requested.emit)
+        layout.addWidget(self._region_btn)
+
         # Close button (×)
         self._close_btn = _CloseButton(header)
         self._close_btn.clicked.connect(lambda: self.close_requested.emit())
@@ -339,6 +658,12 @@ class PageLensPanel(QWidget):
             f"background-color: {theme.css_color((*color[:3], bg_alpha))}; "
             f"border-radius: 10px;"
         )
+
+    def _on_top_concept_clicked(self, text: str) -> None:
+        # Top-concept navigation is a new root: don't let a stale pending
+        # related-navigation mark the arriving card as a related detail.
+        self._content.cancel_pending_related()
+        self.concept_requested.emit(text)
 
     def set_bridge_connected(self, connected: bool) -> None:
         self._bridge_connected = connected
@@ -490,6 +815,26 @@ class PageLensPanel(QWidget):
         self._ocr_thread = thread
         self._ocr_worker = worker
 
+        # Start the vision understanding pass in parallel (same generation).
+        vision_thread = QThread(self)
+        vision_worker = ImageVisionWorker(image_path, generation=gen)
+        vision_worker.moveToThread(vision_thread)
+        vision_worker.finished.connect(
+            self._vision_relay.forward_finished, Qt.QueuedConnection,
+        )
+        vision_worker.error.connect(
+            self._vision_relay.forward_error, Qt.QueuedConnection,
+        )
+        vision_worker.finished.connect(vision_thread.quit)
+        vision_worker.error.connect(vision_thread.quit)
+        vision_thread.finished.connect(vision_thread.deleteLater)
+        vision_worker.finished.connect(vision_worker.deleteLater)
+        vision_worker.error.connect(vision_worker.deleteLater)
+        vision_thread.started.connect(vision_worker.run)
+        vision_thread.start()
+        self._vision_thread = vision_thread
+        self._vision_worker = vision_worker
+
     @Slot(int, str)
     def _on_ocr_finished(self, gen: int, ocr_text: str) -> None:
         """Handle OCR completion (runs in Qt main thread via QueuedConnection)."""
@@ -516,6 +861,47 @@ class PageLensPanel(QWidget):
         self._update_ocr_status()
         log.warning("[PageLensPanel] OCR error gen=%d: %s", gen, message)
 
+    @Slot(int, str)
+    def _on_vision_finished(self, gen: int, vision_text: str) -> None:
+        """Handle vision completion (main thread via QueuedConnection)."""
+        if gen != self._ocr_generation:
+            return  # stale result from a previous image
+        self._vision_worker = None
+        self._vision_text = vision_text
+        log.info("[PageLensPanel] vision understood image gen=%d", gen)
+
+    @Slot(int, str)
+    def _on_vision_error(self, gen: int, message: str) -> None:
+        """Vision failed: fall back to OCR-only augmentation (zero regression)."""
+        if gen != self._ocr_generation:
+            return
+        self._vision_worker = None
+        log.warning("[PageLensPanel] vision error gen=%d: %s", gen, message)
+
+    def _cancel_vision(self) -> None:
+        """Stop accepting the current vision job and exit its thread."""
+        self._vision_worker = None
+        if self._vision_thread is not None:
+            thread = self._vision_thread
+            self._vision_thread = None
+            try:
+                if thread.isRunning():
+                    thread.quit()
+            except RuntimeError:
+                pass
+
+    def _stop_vision_thread(self) -> None:
+        """Cooperatively stop the vision thread and wait for it to finish."""
+        self._cancel_vision()
+        if self._vision_thread is not None:
+            thread = self._vision_thread
+            self._vision_thread = None
+            try:
+                if thread.isRunning():
+                    thread.wait(2000)
+            except RuntimeError:
+                pass
+
     def _update_ocr_status(self) -> None:
         status_colors = {
             "未识别": theme.TEXT_SECONDARY,
@@ -532,12 +918,13 @@ class PageLensPanel(QWidget):
         self._ocr_status_label.setText(self._ocr_status)
 
     def _on_remove_image(self) -> None:
-        """Remove the attached image and clear OCR state."""
+        """Remove the attached image and clear OCR / vision state."""
         # Invalidate any result already queued by the current worker.
         self._ocr_generation += 1
         self._stop_ocr_thread()
         self._image_path = None
         self._ocr_text = ""
+        self._vision_text = ""
         self._ocr_status = "未识别"
         self._img_preview.setVisible(False)
         self._img_filename.setVisible(False)
@@ -574,12 +961,13 @@ class PageLensPanel(QWidget):
                     thread.quit()
             except RuntimeError:
                 pass
+        self._cancel_vision()
 
     def _stop_ocr_thread(self) -> None:
-        """Cooperatively stop the OCR thread and wait for it to finish.
+        """Cooperatively stop the OCR/vision threads and wait for them.
 
         Called from closeEvent / remove / cancel to guarantee the native
-        QThread has exited before Python discards the widget.
+        QThreads have exited before Python discards the widget.
         """
         self._cancel_ocr()
         if self._ocr_thread is not None:
@@ -591,6 +979,7 @@ class PageLensPanel(QWidget):
             except RuntimeError:
                 pass
             self._ocr_worker = None
+        self._stop_vision_thread()
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         """Gracefully shut down background threads before closing."""
@@ -604,22 +993,19 @@ class PageLensPanel(QWidget):
     def _build_top_concepts(self) -> QFrame:
         frame = QFrame(self._glass)
         frame.setObjectName("pageLensTopConcepts")
-        frame.setStyleSheet(
-            f"QFrame#pageLensTopConcepts {{ "
-            f"background-color: {theme.css_color(theme.GLASS_BACKGROUND_SELECTED)}; "
-            f"border-top: 1px solid {theme.css_color(theme.GLASS_BORDER)}; "
-            f"border-bottom: 1px solid {theme.css_color(theme.GLASS_BORDER)}; "
-            "}"
-        )
-        context_height = max(70, min(_pl_scaled_px(82), 90))
-        frame.setFixedHeight(context_height)
+        frame.setStyleSheet(self._concepts_bar_style())
+        frame.setFixedHeight(_pl_scaled_px(82))
 
-        layout = QHBoxLayout(frame)
+        layout = QVBoxLayout(frame)
         layout.setContentsMargins(
             _pl_scaled_px(14), _pl_scaled_px(8),
             _pl_scaled_px(10), _pl_scaled_px(8),
         )
-        layout.setSpacing(_pl_scaled_px(8))
+        layout.setSpacing(_pl_scaled_px(4))
+
+        concept_row = QHBoxLayout()
+        concept_row.setContentsMargins(0, 0, 0, 0)
+        concept_row.setSpacing(_pl_scaled_px(8))
 
         # Title
         self._top_concepts_header = QLabel("本页概念", frame)
@@ -631,7 +1017,7 @@ class PageLensPanel(QWidget):
         )
         self._top_concepts_header.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self._top_concepts_header.setFixedWidth(_pl_scaled_px(56))
-        layout.addWidget(self._top_concepts_header, 0, Qt.AlignTop)
+        concept_row.addWidget(self._top_concepts_header, 0, Qt.AlignTop)
 
         # Chips viewport: wrapping is preserved, overflow scrolls inside the bar.
         self._top_concepts_scroll = QScrollArea(frame)
@@ -654,13 +1040,29 @@ class PageLensPanel(QWidget):
         self._top_concepts_layout.setContentsMargins(0, 0, 0, 0)
         self._top_concept_widgets: list[QWidget] = []
         self._top_concepts_scroll.setWidget(self._top_concepts_content)
-        layout.addWidget(self._top_concepts_scroll, 1)
+        concept_row.addWidget(self._top_concepts_scroll, 1)
+        layout.addLayout(concept_row, 1)
+
+        self._current_context_label = QLabel("", frame)
+        self._current_context_label.setObjectName("pageLensCurrentContext")
+        self._current_context_label.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {_pl_font_px(8)}pt;"
+        )
+        self._current_context_label.setWordWrap(True)
+        self._current_context_label.setVisible(False)
+        layout.addWidget(self._current_context_label)
 
         frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         return frame
 
     def set_top_concepts(self, items: list[str]) -> None:
-        """Render top concept chips. Clicking sends concept_requested signal."""
+        """Render a new page's chips and return the detail area to compact."""
+        # A concepts refresh means the reading context changed.  Keep the
+        # compact header/context, but never leave the previous page's expanded
+        # explanation underneath the new chips.
+        self.collapse_to_compact()
         # Clear old chips
         for widget in self._top_concept_widgets:
             widget.deleteLater()
@@ -671,7 +1073,7 @@ class PageLensPanel(QWidget):
         # Show at most 8 concepts
         for text in (items or [])[:8]:
             chip = _TopConceptChip(text, self)
-            chip.clicked.connect(lambda t=text: self.concept_requested.emit(t))
+            chip.clicked.connect(self._on_top_concept_clicked)
             self._top_concepts_layout.addWidget(chip)
             self._top_concept_widgets.append(chip)
         self._top_concepts_content.updateGeometry()
@@ -679,15 +1081,30 @@ class PageLensPanel(QWidget):
         self._top_concepts.updateGeometry()
         self._request_height_fit()
 
+    def set_current_context(self, primary: str, secondary: str = "") -> None:
+        """Show the current section/page without exposing implementation modes."""
+        primary = (primary or "").strip()
+        secondary = (secondary or "").strip()
+        lines = [value for value in (primary, secondary) if value]
+        self._current_context_label.setText("当前：\n" + "\n".join(lines) if lines else "")
+        self._current_context_label.setVisible(bool(lines))
+        self._top_concepts.setFixedHeight(_pl_scaled_px(116 if lines else 82))
+        self._request_height_fit()
+
     def _screen_height_limit(self) -> int:
-        screen = QApplication.screenAt(self.frameGeometry().center()) or QApplication.primaryScreen()
+        # The shell itself is anchored to the primary screen; using a stale
+        # pre-position frame here can accidentally pick a secondary monitor.
+        screen = QApplication.primaryScreen()
         if screen is None:
             return self._default_height
-        return max(_pl_scaled_px(320), int(screen.availableGeometry().height() * 0.85))
+        # P0.1 keeps expanded PageLens below half the usable screen. Longer
+        # concept content scrolls internally instead of reclaiming the old
+        # near-560px reading panel footprint.
+        return max(_pl_scaled_px(320), int(screen.availableGeometry().height() * 0.48))
 
     def _apply_height_limits(self) -> None:
         maximum = self._screen_height_limit()
-        self.setMinimumHeight(min(self._default_height, maximum))
+        self.setMinimumHeight(0)
         self.setMaximumHeight(maximum)
 
     def _request_height_fit(self) -> None:
@@ -705,21 +1122,22 @@ class PageLensPanel(QWidget):
             root_margins.top()
             + root_margins.bottom()
             + self._header.sizeHint().height()
-            + self._image_toolbar.sizeHint().height()
         )
+
+        if not self._image_toolbar.isHidden():
+            natural_height += self._image_toolbar.sizeHint().height()
 
         # Include OCR panel height only when visible
         if hasattr(self, "_ocr_text_panel") and not self._ocr_text_panel.isHidden():
             natural_height += self._ocr_text_panel.sizeHint().height()
 
-        natural_height += (
-            1
-            + self._top_concepts.sizeHint().height()
-            + 1
-            + self._content.sizeHint().height()
-        )
+        natural_height += 1 + self._top_concepts.sizeHint().height() + 1
+        if not self._scroll.isHidden():
+            natural_height += self._content.sizeHint().height()
+        if not self._footer.isHidden():
+            natural_height += self._footer.sizeHint().height()
         target_height = min(
-            max(self.minimumHeight(), natural_height),
+            max(self._compact_height, natural_height),
             self.maximumHeight(),
         )
         if target_height == self.height():
@@ -739,16 +1157,91 @@ class PageLensPanel(QWidget):
     # ------------------------------------------------------------------
 
     def set_concept(self, card: dict) -> None:
+        self._surface_state = (
+            PageLensState.VISUAL_EXPLAIN
+            if card.get("_surface_kind") == "visual"
+            else PageLensState.EXPLAIN
+        )
         self._content.set_concept(card)
+        # A fresh card starts with the exploration list collapsed.
+        self._set_exploration_expanded(False)
+        questions = bool(card.get("questions"))
+        self._explore_btn.setEnabled(questions)
+        self._explore_btn.setVisible(questions)
+        self._consent_btn.setVisible(False)
+        self._scroll.setVisible(bool(any(card.get(key) for key in (
+            "term", "english", "summary", "context", "related", "questions",
+        ))))
+        self._footer.setVisible(questions)
         self._request_height_fit()
 
     def show_loading(self, term: str) -> None:
+        self._surface_state = PageLensState.EXPLAIN
         self._content.show_loading(term)
+        self._set_exploration_expanded(False)
+        self._explore_btn.setEnabled(False)
+        self._explore_btn.setVisible(False)
+        self._consent_btn.setVisible(False)
+        self._scroll.setVisible(True)
+        self._footer.setVisible(False)
         self._request_height_fit()
 
     def show_error(self, message: str) -> None:
+        self._surface_state = PageLensState.EXPLAIN
         self._content.show_error(message)
+        self._set_exploration_expanded(False)
+        self._explore_btn.setEnabled(False)
+        self._explore_btn.setVisible(False)
+        self._consent_btn.setVisible(False)
+        self._scroll.setVisible(True)
+        self._footer.setVisible(False)
         self._request_height_fit()
+
+    def show_surface_loading(self, payload: dict) -> None:
+        """Show controller loading inside PageLens, never in a second window."""
+        title = str(payload.get("title") or "选中文本")
+        page = payload.get("page")
+        if isinstance(page, int) and page >= 1:
+            title = f"{title} · 第 {page} 页"
+        self._surface_state = (
+            PageLensState.VISUAL_EXPLAIN
+            if payload.get("kind") == "visual"
+            else PageLensState.EXPLAIN
+        )
+        self._content.show_loading(title)
+        self._content._summary_label.setText("流萤正在看看这里……")
+        self._explore_btn.setVisible(False)
+        self._consent_btn.setVisible(False)
+        self._scroll.setVisible(True)
+        self._footer.setVisible(False)
+        self._request_height_fit()
+
+    def show_consent_request(self, payload: dict) -> None:
+        """Render the existing external-provider consent gate in PageLens."""
+        title = str(payload.get("title") or "选中文本")
+        page = payload.get("page")
+        if isinstance(page, int) and page >= 1:
+            title = f"{title} · 第 {page} 页"
+        self.set_concept({
+            "term": title,
+            "summary": "首次解释需授权：将把你明确选择的文本发送到 AI 提供商。",
+            "_standalone_surface": True,
+        })
+        self._explore_btn.setVisible(False)
+        self._consent_btn.setVisible(True)
+        self._footer.setVisible(True)
+        self._request_height_fit()
+
+    def show_surface_card(self, card: dict) -> None:
+        """Render a selection/concept/visual result from the reused controller."""
+        surface_card = dict(card)
+        surface_card["_standalone_surface"] = True
+        self.set_concept(surface_card)
+
+    def _set_exploration_expanded(self, expanded: bool) -> None:
+        self._exploration_expanded = expanded
+        self._content.set_questions_expanded(expanded)
+        self._update_explore_button_style()
 
     def show_panel(self) -> None:
         self._visible = True
@@ -758,9 +1251,25 @@ class PageLensPanel(QWidget):
         log.info("[PageLensPanel] show")
 
     def hide_panel(self) -> None:
+        self.collapse_to_compact()
         self._visible = False
         self.hide()
         log.info("[PageLensPanel] hide")
+
+    def collapse_to_compact(self) -> None:
+        """Hide all concept-detail state while preserving page chips/context."""
+        if not hasattr(self, "_content"):
+            return
+        self._set_exploration_expanded(False)
+        self._surface_state = PageLensState.COMPACT
+        self._explore_btn.setEnabled(False)
+        self._explore_btn.setVisible(True)
+        self._consent_btn.setVisible(False)
+        self._footer.setVisible(False)
+        self._scroll.setVisible(False)
+        self._content.reset_to_idle()
+        self._saved_scroll_pos = 0
+        self._request_height_fit()
 
     def toggle(self) -> bool:
         if self._visible:
@@ -777,8 +1286,49 @@ class PageLensPanel(QWidget):
     # -- Question view delegation (bridge / app → _content) ----------------
 
     def show_question_loading(self, parent_term: str, question: str) -> None:
-        self._content.show_question_loading(parent_term, question)
+        # UI displays original question, not the augmented outbound version
+        display_question = self._last_original_question if self._last_original_question else question
+        # Remember where the reader was in the concept card so the back arrow
+        # can put them back exactly.
+        if not self._content._in_question_view:
+            self._saved_scroll_pos = self._scroll.verticalScrollBar().value()
+        self._content.show_question_loading(parent_term, display_question)
+        # Question view replaces the body; the footer entry is inert meanwhile.
+        self._explore_btn.setEnabled(False)
+        self._scroll.setVisible(True)
+        self._footer.setVisible(False)
         self._request_height_fit()
+
+    def _restore_related_origin(self) -> None:
+        """Back arrow target for the related-concept view: the origin card."""
+        origin = self._content.pop_related_origin()
+        if origin is None:
+            return
+        self._set_exploration_expanded(False)
+        self._explore_btn.setEnabled(bool(origin.get("questions")))
+        self._footer.setVisible(bool(origin.get("questions")))
+        self._request_height_fit()
+        QTimer.singleShot(0, self._scroll_body_to_saved)
+
+    def _save_body_scroll(self) -> None:
+        self._saved_scroll_pos = self._scroll.verticalScrollBar().value()
+
+    def _restore_concept_view(self) -> None:
+        """Back arrow target: bring back the concept card behind the question view."""
+        content = self._content
+        if not content.has_stored_concept():
+            return
+        content.restore_concept_view()
+        # The footer entry is inert during the question view; reactivate it
+        # when the stored card carries exploration questions.
+        self._explore_btn.setEnabled(bool(content._question_widgets))
+        self._footer.setVisible(bool(content._question_widgets))
+        self._request_height_fit()
+        QTimer.singleShot(0, self._scroll_body_to_saved)
+
+    def _scroll_body_to_saved(self) -> None:
+        sb = self._scroll.verticalScrollBar()
+        sb.setValue(max(0, min(self._saved_scroll_pos, sb.maximum())))
 
     def append_question_delta(self, delta: str) -> None:
         self._content.append_question_delta(delta)
@@ -827,6 +1377,10 @@ class PageLensPanel(QWidget):
         return self._visible
 
     @property
+    def surface_state(self) -> PageLensState:
+        return self._surface_state
+
+    @property
     def anchor_side(self) -> str:
         return self._anchor_side
 
@@ -836,6 +1390,58 @@ class PageLensPanel(QWidget):
         if side != self._anchor_side:
             self._anchor_side = side
             log.info("[PageLensPanel] anchor side: %s", side)
+
+    def _augment_question(self, question: str) -> str:
+        """Augment outbound question with vision + OCR context when available.
+
+        Returns the original question unchanged when no context exists. When
+        only OCR exists the output is byte-identical to the pre-vision format
+        (browser-extension compatible); the vision block is added in front
+        only when the vision pass produced a description.
+        """
+        vision = self._vision_text.strip() if isinstance(self._vision_text, str) else ""
+        ocr = self._ocr_text.strip() if isinstance(self._ocr_text, str) else ""
+        if not vision and not ocr:
+            return question
+        if not vision:
+            # Legacy format preserved verbatim for the OCR-only path.
+            MAX_OCR = 6000
+            TRUNCATE_HEAD = 3000
+            TRUNCATE_TAIL = 3000
+            if len(ocr) > MAX_OCR:
+                ocr = (
+                    ocr[:TRUNCATE_HEAD]
+                    + "\n\n[... OCR context truncated ...]\n\n"
+                    + ocr[-TRUNCATE_TAIL:]
+                )
+                log.info(
+                    "[PageLensPanel] OCR text truncated to %d chars (head %d + tail %d)",
+                    MAX_OCR, TRUNCATE_HEAD, TRUNCATE_TAIL,
+                )
+            return (
+                "[Attached Image OCR Context]\n"
+                + ocr
+                + "\n[End Attached Image OCR Context]\n\n"
+                "[User Question]\n"
+                + question
+            )
+        blocks = ["[Attached Image Vision Context]\n" + vision]
+        if ocr:
+            blocks.append("[Attached Image OCR Context]\n" + ocr)
+        return (
+            "\n\n".join(blocks)
+            + "\n[End Attached Image Context]\n\n"
+            "[User Question]\n"
+            + question
+        )
+
+    def _emit_question(self, text: str) -> None:
+        log.info("[PageLensPanel] question: %s", text)
+        # Store original question for UI display
+        self._last_original_question = text
+        # Augment outbound question with OCR context (if any)
+        outbound = self._augment_question(text)
+        self.question_requested.emit(outbound)
 
 
 # ---------------------------------------------------------------------------
@@ -882,14 +1488,15 @@ class _TopConceptChip(QFrame):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        opacity = _tier_opacity_of(self)
         path = QPainterPath()
         path.addRoundedRect(QRectF(self.rect()), 11, 11)
 
         if self._hovered:
-            painter.fillPath(path, theme.qcolor(theme.GLASS_BACKGROUND_HOVER))
+            painter.fillPath(path, theme.qcolor(theme.scale_alpha(theme.GLASS_BACKGROUND_HOVER, opacity)))
             painter.setPen(theme.qcolor(theme.CYAN_ACCENT))
         else:
-            painter.fillPath(path, theme.qcolor(theme.GLASS_BACKGROUND))
+            painter.fillPath(path, theme.qcolor(theme.scale_alpha(theme.GLASS_BACKGROUND, opacity)))
             painter.setPen(theme.qcolor(theme.GLASS_BORDER))
 
         painter.drawPath(path)
@@ -924,13 +1531,7 @@ class _ScrollContent(QWidget):
         # --- Title card: back action, bilingual title, divider ---
         self._title_card = QFrame(self)
         self._title_card.setObjectName("pageLensConceptTitleCard")
-        self._title_card.setStyleSheet(
-            f"QFrame#pageLensConceptTitleCard {{ "
-            f"background-color: {theme.css_color(theme.GLASS_BACKGROUND_HOVER)}; "
-            f"border: 1px solid {theme.css_color(theme.GLASS_BORDER)}; "
-            f"border-radius: {_pl_scaled_px(theme.RADIUS_ITEM)}px; "
-            "}"
-        )
+        self._title_card.setStyleSheet(self._title_card_style())
         title_layout = QVBoxLayout(self._title_card)
         title_layout.setContentsMargins(
             _pl_scaled_px(14), _pl_scaled_px(9),
@@ -941,7 +1542,7 @@ class _ScrollContent(QWidget):
         # --- Back button (hidden by default) ---
         self._back_btn = _BackButton(self._title_card)
         self._back_btn.hidden = True
-        self._back_btn.clicked.connect(lambda: None)  # placeholder
+        self._back_btn.clicked.connect(self._on_back_clicked)
         title_layout.addWidget(self._back_btn)
 
         # --- Term label ---
@@ -960,7 +1561,7 @@ class _ScrollContent(QWidget):
         # --- English subtitle ---
         self._english_label = QLabel(self._title_card)
         self._english_label.setStyleSheet(
-            f"color: {theme.css_color(theme.CYAN_ACCENT)}; "
+            f"color: {theme.css_color(theme.PAGELENS_TEXT_ACCENT)}; "
             f"font-family: '{theme.FONT_FAMILY}'; "
             f"font-size: {_pl_font_px(11)}pt; "
             f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
@@ -996,10 +1597,10 @@ class _ScrollContent(QWidget):
         self._layout.addWidget(self._summary_label)
 
         # --- Separator ---
-        sep2 = QFrame(self)
-        sep2.setFixedHeight(1)
-        sep2.setStyleSheet(f"background: {theme.css_color(theme.GLASS_BORDER)};")
-        self._layout.addWidget(sep2)
+        self._summary_sep = QFrame(self)
+        self._summary_sep.setFixedHeight(1)
+        self._summary_sep.setStyleSheet("background: transparent;")
+        self._layout.addWidget(self._summary_sep)
 
         # --- Context section ---
         self._context_header = QLabel(self)
@@ -1033,10 +1634,10 @@ class _ScrollContent(QWidget):
         self._layout.addWidget(self._context_label)
 
         # --- Separator ---
-        sep3 = QFrame(self)
-        sep3.setFixedHeight(1)
-        sep3.setStyleSheet(f"background: {theme.css_color(theme.GLASS_BORDER)};")
-        self._layout.addWidget(sep3)
+        self._context_sep = QFrame(self)
+        self._context_sep.setFixedHeight(1)
+        self._context_sep.setStyleSheet("background: transparent;")
+        self._layout.addWidget(self._context_sep)
 
         # --- Related concepts header ---
         self._related_header = QLabel(self)
@@ -1060,10 +1661,10 @@ class _ScrollContent(QWidget):
         self._layout.addLayout(self._related_layout)
 
         # --- Separator ---
-        sep4 = QFrame(self)
-        sep4.setFixedHeight(1)
-        sep4.setStyleSheet(f"background: {theme.css_color(theme.GLASS_BORDER)};")
-        self._layout.addWidget(sep4)
+        self._related_sep = QFrame(self)
+        self._related_sep.setFixedHeight(1)
+        self._related_sep.setStyleSheet("background: transparent;")
+        self._layout.addWidget(self._related_sep)
 
         # --- Questions header ---
         self._questions_header = QLabel(self)
@@ -1082,23 +1683,37 @@ class _ScrollContent(QWidget):
         self._questions_layout = QVBoxLayout()
         self._questions_layout.setSpacing(_pl_scaled_px(4))
         self._question_widgets: list[QWidget] = []
-        self._layout.addLayout(self._questions_layout)
+        self._questions_wrapper = QWidget(self)
+        self._questions_wrapper.setLayout(self._questions_layout)
+        self._questions_wrapper.setVisible(False)
+        self._layout.addWidget(self._questions_wrapper)
+
+        # Exploration questions start collapsed; the pinned footer button
+        # expands/collapses them via set_questions_expanded().
+        self._questions_expanded = False
+        # Unified body view state + local concept navigation memory. The
+        # related-concept detail is delivered as a fresh set_concept() card,
+        # so the origin card dict is pushed on a stack and re-rendered on back.
+        self._view_state: _ViewState = _ViewState.VIEW_CONCEPT
+        self._current_card: dict | None = None
+        self._concept_stack: list[dict] = []
+        self._related_pending = False
 
         self._concept_section_widgets = (
             self._summary_label,
-            sep2,
+            self._summary_sep,
             self._context_header,
             self._context_label,
-            sep3,
+            self._context_sep,
             self._related_header,
-            sep4,
+            self._related_sep,
             self._questions_header,
         )
 
         # --- Question view elements (hidden by default) ---
         self._question_parent_label = QLabel(self)
         self._question_parent_label.setStyleSheet(
-            f"color: {theme.css_color(theme.CYAN_ACCENT)}; "
+            f"color: {theme.css_color(theme.PAGELENS_TEXT_ACCENT)}; "
             f"font-family: '{theme.FONT_FAMILY}'; "
             f"font-size: {_pl_font_px(10)}pt; "
             f"font-weight: {theme.FONT_WEIGHT_MEDIUM};"
@@ -1150,14 +1765,34 @@ class _ScrollContent(QWidget):
         )
         self._idle_label.setAlignment(Qt.AlignCenter)
         self._idle_label.setText("等待网页内容…")
-        self._idle_label.setVisible(True)
+        self._idle_label.setVisible(False)
         self._layout.addWidget(self._idle_label)
 
     # -- Concept card methods -------------------------------------------
 
     def set_concept(self, card: dict) -> None:
+        """Render a bridge-delivered card and update the navigation state."""
+        if self._related_pending:
+            # This card is the related-concept detail: keep the origin card
+            # locally so the back arrow can restore it.
+            if self._current_card is not None:
+                self._concept_stack.append(self._current_card)
+            self._related_pending = False
+        else:
+            # Bridge-initiated navigation (top concept / page card) starts a
+            # new local chain; previously saved origins are no longer valid.
+            self._concept_stack.clear()
+        self._render_concept(card)
+
+    def _render_concept(self, card: dict) -> None:
+        self._current_card = dict(card)
         self._show_concept_view()
-        self._back_btn.set_text(card.get("_back_term", ""))
+        back_term = card.get("_back_term", "")
+        if self._concept_stack:
+            # Local navigation truth wins: the back arrow returns to the
+            # origin card held on the stack.
+            back_term = self._concept_stack[-1].get("term", "") or back_term
+        self._back_btn.set_text(back_term)
         self._term_label.setText(card.get("term", ""))
         self._english_label.setText(card.get("english", ""))
         self._summary_label.setText(card.get("summary", ""))
@@ -1191,9 +1826,21 @@ class _ScrollContent(QWidget):
             qitem.clicked.connect(self._emit_question)
             self._questions_layout.addWidget(qitem)
             self._question_widgets.append(qitem)
+        self._apply_concept_visibility(card)
+
+    def _emit_question(self, text: str) -> None:
+        # Forwarded to the owning panel, which stores the original text and
+        # augments the outbound question with OCR context when available.
+        if self._parent_panel is not None:
+            self._parent_panel._emit_question(text)
 
     def show_loading(self, term: str) -> None:
         self._show_concept_view()
+        loading_card = {"term": term, "summary": "加载中..."}
+        # Related navigation must keep the origin card until the arriving
+        # concept_card is rendered, otherwise Back would restore "加载中".
+        if not self._related_pending:
+            self._current_card = loading_card
         self._back_btn.hidden = True
         self._term_label.setText(term)
         self._english_label.setText("")
@@ -1207,9 +1854,11 @@ class _ScrollContent(QWidget):
         for w in self._question_widgets:
             w.deleteLater()
         self._question_widgets.clear()
+        self._apply_concept_visibility(loading_card)
 
     def show_error(self, message: str) -> None:
         self._show_concept_view()
+        self._current_card = {"term": "PageLens", "summary": message}
         self._back_btn.hidden = True
         self._term_label.setText("PageLens")
         self._english_label.setText("")
@@ -1223,6 +1872,7 @@ class _ScrollContent(QWidget):
         for w in self._question_widgets:
             w.deleteLater()
         self._question_widgets.clear()
+        self._apply_concept_visibility(self._current_card)
 
     # -- Question view methods ------------------------------------------
 
@@ -1256,14 +1906,65 @@ class _ScrollContent(QWidget):
 
     # -- Helpers --------------------------------------------------------
 
+    def _title_card_style(self) -> str:
+        opacity = _tier_opacity_of(self)
+        return (
+            f"QFrame#pageLensConceptTitleCard {{ "
+            f"background-color: {theme.css_color(theme.scale_alpha(theme.GLASS_BACKGROUND_HOVER, opacity))}; "
+            f"border: 1px solid {theme.css_color(theme.GLASS_BORDER)}; "
+            f"border-radius: {_pl_scaled_px(theme.RADIUS_ITEM)}px; "
+            "}"
+        )
+
+    def apply_tier_visuals(self, _opacity: float) -> None:
+        """Follow the panel tier: stylesheet surfaces here + painter children."""
+        self._title_card.setStyleSheet(self._title_card_style())
+        for widget in (*self._related_widgets, *self._question_widgets):
+            widget.update()
+
+    def _on_back_clicked(self) -> None:
+        """Back arrow semantics depend on the active view.
+
+        Question/answer view: restore the concept card stored behind it.
+        Related-concept view: restore the origin card from the local stack.
+        Concept view ("← term"): walk the concept chain via the bridge, the
+        back_requested signal the panel already exposes for that purpose.
+        """
+        if self._parent_panel is None:
+            return
+        if (
+            self._view_state is _ViewState.VIEW_CONCEPT
+            and bool((self._current_card or {}).get("_standalone_surface"))
+        ):
+            self._parent_panel.collapse_to_compact()
+        elif self._view_state is _ViewState.VIEW_QUESTION:
+            self._parent_panel._restore_concept_view()
+        elif self._view_state is _ViewState.VIEW_RELATED:
+            self._parent_panel._restore_related_origin()
+        else:
+            self._parent_panel.back_requested.emit()
+
+    def has_stored_concept(self) -> bool:
+        """True when a concept card sits behind the active question view."""
+        return bool(self._term_label.text())
+
+    def restore_concept_view(self) -> None:
+        """Re-show the concept card sections hidden by the question view."""
+        self._show_concept_view()
+
+    def set_questions_expanded(self, expanded: bool) -> None:
+        """Show/hide the exploration question list inside the scrollable body."""
+        self._questions_expanded = expanded
+        self._apply_concept_visibility(self._current_card or {})
+
     def _show_concept_view(self) -> None:
         self._back_btn.hidden = False
+        self._view_state = (
+            _ViewState.VIEW_RELATED if self._concept_stack else _ViewState.VIEW_CONCEPT
+        )
         self._term_label.setVisible(True)
         self._english_label.setVisible(True)
-        for widget in self._concept_section_widgets:
-            widget.setVisible(True)
-        for widget in (*self._related_widgets, *self._question_widgets):
-            widget.setVisible(True)
+        self._apply_concept_visibility(self._current_card or {})
         # Hide question view
         self._question_parent_label.setVisible(False)
         self._question_title_label.setVisible(False)
@@ -1271,8 +1972,35 @@ class _ScrollContent(QWidget):
         self._question_answer_label.setVisible(False)
         self._idle_label.setVisible(False)
 
+    def _apply_concept_visibility(self, card: dict) -> None:
+        """Collapse every empty concept section instead of reserving space."""
+        has_title = bool(card.get("term") or card.get("english"))
+        has_summary = bool(card.get("summary"))
+        has_context = bool(card.get("context"))
+        has_related = bool(card.get("related"))
+        has_questions = bool(card.get("questions"))
+
+        self._title_card.setVisible(has_title)
+        self._term_label.setVisible(bool(card.get("term")))
+        self._english_label.setVisible(bool(card.get("english")))
+        self._summary_label.setVisible(has_summary)
+        self._summary_sep.setVisible(has_summary)
+        self._context_header.setVisible(has_context)
+        self._context_label.setVisible(has_context)
+        self._context_sep.setVisible(has_context)
+        self._related_header.setVisible(has_related)
+        self._related_sep.setVisible(has_related)
+        for widget in self._related_widgets:
+            widget.setVisible(has_related)
+        show_questions = has_questions and self._questions_expanded
+        self._questions_header.setVisible(show_questions)
+        self._questions_wrapper.setVisible(show_questions)
+        for widget in self._question_widgets:
+            widget.setVisible(show_questions)
+
     def _show_question_view(self) -> None:
         self._back_btn.hidden = False
+        self._view_state = _ViewState.VIEW_QUESTION
         self._back_btn.set_text("")  # no back term for question view
         self._term_label.setVisible(False)
         self._english_label.setVisible(False)
@@ -1314,16 +2042,79 @@ class _ScrollContent(QWidget):
             widget.setVisible(False)
         for widget in (*self._related_widgets, *self._question_widgets):
             widget.setVisible(False)
+        self._questions_wrapper.setVisible(False)
 
     def _emit_related(self, text: str) -> None:
         log.info("[PageLensPanel] related: %s", text)
-        if self._parent_panel is not None:
-            self._parent_panel.related_requested.emit(text)
+        if self._parent_panel is None:
+            return
+        if self._current_card is not None and self._view_state is not _ViewState.VIEW_QUESTION:
+            # The bridge will deliver the detail as a fresh set_concept();
+            # mark the pending navigation so that call stacks this card.
+            self._related_pending = True
+            self._parent_panel._save_body_scroll()
+        self._parent_panel.related_requested.emit(text)
 
-    def _emit_question(self, text: str) -> None:
-        log.info("[PageLensPanel] question: %s", text)
-        if self._parent_panel is not None:
-            self._parent_panel.question_requested.emit(text)
+    def pop_related_origin(self) -> dict | None:
+        """Back from a related-concept detail: re-render the origin card."""
+        if not self._concept_stack:
+            return None
+        origin = self._concept_stack.pop()
+        self._render_concept(origin)
+        return origin
+
+    def cancel_pending_related(self) -> None:
+        """A non-related navigation started; the arriving card is a new root."""
+        self._related_pending = False
+
+    def reset_to_idle(self) -> None:
+        """Drop rendered detail/navigation state without touching page context."""
+        self._current_card = None
+        self._concept_stack.clear()
+        self._related_pending = False
+        self._questions_expanded = False
+        self._view_state = _ViewState.VIEW_CONCEPT
+
+        self._back_btn.hidden = True
+        self._back_btn.set_text("")
+        for label in (
+            self._term_label,
+            self._english_label,
+            self._summary_label,
+            self._context_label,
+            self._question_parent_label,
+            self._question_title_label,
+            self._question_status_label,
+            self._question_answer_label,
+        ):
+            label.setText("")
+
+        for widget in self._related_widgets:
+            widget.deleteLater()
+        self._related_widgets.clear()
+        while self._related_layout.count():
+            self._related_layout.takeAt(0)
+
+        for widget in self._question_widgets:
+            widget.deleteLater()
+        self._question_widgets.clear()
+        while self._questions_layout.count():
+            self._questions_layout.takeAt(0)
+
+        self._title_card.setVisible(False)
+        for widget in self._concept_section_widgets:
+            widget.setVisible(False)
+        self._questions_wrapper.setVisible(False)
+        self._question_parent_label.setVisible(False)
+        self._question_title_label.setVisible(False)
+        self._question_status_label.setVisible(False)
+        self._question_answer_label.setVisible(False)
+        self._idle_label.setVisible(False)
+
+    @property
+    def _in_question_view(self) -> bool:
+        """Backward-compatible read for the question-view flag."""
+        return self._view_state is _ViewState.VIEW_QUESTION
 
 
 # ---------------------------------------------------------------------------
@@ -1422,17 +2213,18 @@ class _RelatedChip(QFrame):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        opacity = _tier_opacity_of(self)
         path = QPainterPath()
         path.addRoundedRect(QRectF(self.rect()), 13, 13)
 
         if self._selected:
             painter.fillPath(path, theme.qcolor(theme.CYAN_ACCENT))
-            painter.setPen(theme.qcolor(theme.TRANSPARENT))
+            painter.setPen(Qt.transparent)
         elif self._hovered:
-            painter.fillPath(path, theme.qcolor(theme.GLASS_BACKGROUND_HOVER))
+            painter.fillPath(path, theme.qcolor(theme.scale_alpha(theme.GLASS_BACKGROUND_HOVER, opacity)))
             painter.setPen(theme.qcolor(theme.CYAN_ACCENT))
         else:
-            painter.fillPath(path, theme.qcolor(theme.GLASS_BACKGROUND))
+            painter.fillPath(path, theme.qcolor(theme.scale_alpha(theme.GLASS_BACKGROUND, opacity)))
             painter.setPen(theme.qcolor(theme.GLASS_BORDER))
 
         painter.drawPath(path)
@@ -1510,7 +2302,12 @@ class _QuestionItem(QFrame):
         if self._hovered:
             path = QPainterPath()
             path.addRoundedRect(QRectF(self.rect()), theme.RADIUS_ITEM, theme.RADIUS_ITEM)
-            painter.fillPath(path, theme.qcolor(theme.GLASS_BACKGROUND_HOVER))
+            painter.fillPath(
+                path,
+                theme.qcolor(theme.scale_alpha(
+                    theme.GLASS_BACKGROUND_HOVER, _tier_opacity_of(self)
+                )),
+            )
 
         painter.setPen(theme.qcolor(theme.TEXT_PRIMARY if self._hovered else theme.TEXT_SECONDARY))
         painter.drawText(
@@ -1565,7 +2362,10 @@ class _PlIconButton(QFrame):
 
         if self._hovered:
             painter.fillRect(
-                self.rect(), theme.qcolor(theme.GLASS_BACKGROUND_HOVER)
+                self.rect(),
+                theme.qcolor(theme.scale_alpha(
+                    theme.GLASS_BACKGROUND_HOVER, _tier_opacity_of(self)
+                )),
             )
         else:
             painter.fillRect(self.rect(), Qt.transparent)

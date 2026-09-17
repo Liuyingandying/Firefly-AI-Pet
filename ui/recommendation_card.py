@@ -269,6 +269,10 @@ class RecommendationCard(PopoverBase):
                 # the plain native open.
                 self._secondary_action = "plan_with_claude"
                 self._secondary_btn.setText("Plan with Claude")
+                self._secondary_btn.setToolTip(
+                    "Plan via the local Claude-compatible provider "
+                    "(DeepSeek-backed reasoning), not the Claude Code CLI."
+                )
                 self._secondary_btn.setVisible(True)
                 self._light_btn.setText("Open only")
                 self._light_btn.setVisible(True)

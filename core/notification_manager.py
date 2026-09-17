@@ -10,9 +10,12 @@ unit-test without a display.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from .models import AgentState, LifecycleState
+
+if TYPE_CHECKING:
+    from core.runtime_bus import RuntimeBus
 
 AGENT_NAMES = {"claude": "Claude", "codex": "Codex"}
 NOTIFY_AGENTS = frozenset(AGENT_NAMES)
@@ -67,6 +70,11 @@ class NotificationManager:
         self._baseline_done: set[str] = set()
         self._notified: dict[str, tuple[str, int]] = {}
         self._enabled = True
+        self._bus: RuntimeBus | None = None
+
+    def set_bus(self, bus: RuntimeBus | None) -> None:
+        """Attach a RuntimeBus for notification event forwarding (Phase 3B-3)."""
+        self._bus = bus
 
     @property
     def enabled(self) -> bool:
@@ -141,3 +149,15 @@ class NotificationManager:
             return
         for listener in list(self._listeners):
             listener(event)
+        # Phase 3B-3: forward to RuntimeBus (lazy import keeps module Qt-free).
+        if self._bus is not None:
+            from core.runtime_bus import RuntimeEvent
+
+            self._bus.publish_event(
+                RuntimeEvent(
+                    kind="notification",
+                    source="notification_manager",
+                    timestamp=event.timestamp,
+                    payload=event,
+                )
+            )

@@ -70,6 +70,9 @@ _INCOMING_TYPES = frozenset({
     "view_state",
     "pagelens-desktop-sync-request",
     "ai_chat_request",
+    "selection",
+    "pdf_opened",
+    "pdf_view_state",
 })
 
 # ---------------------------------------------------------------------------
@@ -103,6 +106,7 @@ class PageLensBridge(QObject):
         concepts(list): top concepts list for "本页概念" area
         view_state(dict): browser view state mirror
         page_context(dict): page metadata (title, url)
+        selection(str, int): browser text selection (text, 1-based page; -1 unknown)
     """
 
     # Signals
@@ -118,6 +122,23 @@ class PageLensBridge(QObject):
     concepts = Signal(list)
     view_state = Signal(dict)
     page_context = Signal(dict)
+    # PaperLens Bridge: a browser selection (text + optional page number).
+    # page is 1-based; -1 when the client could not determine it.
+    # source is "user_action" when the user explicitly asked for an
+    # explanation (e.g. the context-menu entry), "ambient" for a plain
+    # text highlight / unknown senders — the desktop only opens the explain
+    # surface for user_action selections.
+    selection = Signal(str, int, str)
+    # Browser-initiated explain intent: the browser's own Explain UI asked
+    # the desktop AI for a concept (ai_chat_request, source in the explain
+    # whitelist). The desktop opens its explain gate so the concept result
+    # that follows is rendered — a browser-side user click, not background.
+    explain_intent = Signal(str)
+    # Ambient PDF v1.0: a PDF was opened in the browser (tabs.url/title) and
+    # the reserved view-state interface (page may be null until a real page
+    # source exists — no viewer access by design).
+    pdf_opened = Signal(dict)
+    pdf_view_state = Signal(dict)
 
     # Actions that the UI can trigger (emitted from PageLensPanel → bridge)
     action_open_concept = Signal(str)
@@ -375,6 +396,11 @@ class PageLensBridge(QObject):
             self._send_json({"type": "bridge_pong"})
 
         elif msg_type == "page_context":
+            log.info(
+                "[PageLens Bridge] 收到 page_context: title=%r url=%s",
+                (payload.get("title") or "")[:120],
+                (payload.get("url") or "")[:200],
+            )
             self.page_context.emit(payload)
 
         elif msg_type == "concepts":
@@ -407,6 +433,15 @@ class PageLensBridge(QObject):
         elif msg_type == "view_state":
             self.view_state.emit(payload)
 
+        elif msg_type == "selection":
+            self._handle_selection(payload)
+
+        elif msg_type == "pdf_opened":
+            self._handle_pdf_opened(payload)
+
+        elif msg_type == "pdf_view_state":
+            self._handle_pdf_view_state(payload)
+
         elif msg_type == "pagelens-desktop-sync-request":
             # Browser is asking Desktop to replay current state.
             # Desktop doesn't have browser state, so we just acknowledge.
@@ -416,6 +451,89 @@ class PageLensBridge(QObject):
         elif msg_type == "ai_chat_request":
             self._schedule_ai_chat(msg)
 
+    def _handle_selection(self, payload: dict) -> None:
+        """Validate and surface a browser text selection to the desktop.
+
+        Payload keys: ``text`` (or ``selectedText``), ``page`` (or
+        ``pageNumber``), ``url``, ``source``. ``page`` is 1-based; -1 when
+        the client could not determine it. ``source`` is "user_action" for
+        an explicit explain request (context-menu entry), anything else /
+        missing is treated as "ambient" (plain highlight). The bridge only
+        sanitizes, logs and emits — AI / PDF parsing stay in the consumers.
+        """
+        text = payload.get("text") or payload.get("selectedText") or ""
+        if not isinstance(text, str):
+            text = ""
+        text = text.strip()[:2_000]
+
+        raw_page = payload.get("page", payload.get("pageNumber", -1))
+        try:
+            page = int(raw_page)
+        except (TypeError, ValueError):
+            page = -1
+        if page < 1:
+            page = -1
+
+        url = payload.get("url") or payload.get("pageUrl") or ""
+        if not isinstance(url, str):
+            url = ""
+
+        # Source gate: only an explicit "user_action" selection may open the
+        # desktop explain surface. Plain highlights and unknown clients are
+        # "ambient" (compact context only) — the safe default.
+        source = payload.get("source") or ""
+        source = source if isinstance(source, str) and source == "user_action" else "ambient"
+
+        log.info(
+            "[PageLens Bridge] 收到 selection event: text=%r page=%s url=%s source=%s",
+            text[:120], page, url[:200], source,
+        )
+        if text:
+            self.selection.emit(text, page, source)
+
+    def _handle_pdf_opened(self, payload: dict) -> None:
+        """A PDF was opened in the browser (extension tabs.url/title)."""
+        url = payload.get("url") or ""
+        title = payload.get("title") or ""
+        if not isinstance(url, str):
+            url = ""
+        if not isinstance(title, str):
+            title = ""
+        log.info(
+            "[PageLens Bridge] 收到 pdf_opened: url=%r title=%r",
+            url[:200], title[:120],
+        )
+        if url.strip():
+            self.pdf_opened.emit({"url": url.strip(), "title": title.strip()})
+
+    def _handle_pdf_view_state(self, payload: dict) -> None:
+        """Reserved PDF view-state interface (no viewer access by design).
+
+        ``page`` may be null until a real page source exists; the payload is
+        forwarded sanitized so a future page source can update current_page.
+        """
+        url = payload.get("url") or ""
+        if not isinstance(url, str):
+            url = ""
+        raw_page = payload.get("page")
+        if isinstance(raw_page, bool):
+            page = None
+        elif isinstance(raw_page, int):
+            page = raw_page if raw_page >= 1 else None
+        elif isinstance(raw_page, str):
+            try:
+                page = int(raw_page)
+            except ValueError:
+                page = None
+            page = page if page is not None and page >= 1 else None
+        else:
+            page = None
+        log.info(
+            "[PageLens Bridge] 收到 pdf_view_state: url=%r page=%s",
+            url[:200], page,
+        )
+        self.pdf_view_state.emit({"url": url.strip() if url.strip() else "", "page": page})
+
     def _schedule_ai_chat(self, request: dict) -> None:
         """Validate and schedule one non-blocking AI Router request."""
         request_id, source, messages, temperature, error = self._validate_ai_chat_request(
@@ -424,6 +542,15 @@ class PageLensBridge(QObject):
         if error:
             self._send_ai_chat_error(request_id, error)
             return
+
+        # A whitelisted ai_chat_request is the browser running an explicit
+        # explain flow (its own Explain UI, or answering an open_concept the
+        # desktop sent after a chip click). Emit the intent so the desktop
+        # can open the explain gate for the concept result that follows.
+        # Emitted before the scheduling checks: the intent is about the
+        # browser's explain flow, not about whether the AI task can start.
+        self.explain_intent.emit(source)
+
         if request_id in self._ai_chat_tasks:
             self._send_ai_chat_error(request_id, "duplicate requestId")
             return

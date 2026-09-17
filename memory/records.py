@@ -9,7 +9,7 @@ import math
 import secrets
 import time
 import uuid
-from dataclasses import dataclass, fields
+from dataclasses import MISSING, dataclass, fields
 from enum import Enum
 from threading import Lock
 from typing import Any, Mapping, TypeVar
@@ -124,6 +124,10 @@ class MemoryRecord:
     last_accessed_ts: int
     retention_half_life_days: float
     vector_id: str | None = None
+    # M2A lifecycle (optional, backward compatible): absent/active by default.
+    lifecycle_status: str = "active"  # active | superseded
+    superseded_by: str | None = None
+    supersede_reason: str | None = None  # explicit_revision | explicit_correction | confirmed_conflict
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _required_text(self.id, "id"))
@@ -168,6 +172,23 @@ class MemoryRecord:
         if self.vector_id is not None:
             object.__setattr__(
                 self, "vector_id", _required_text(self.vector_id, "vector_id")
+            )
+
+        lifecycle = self.lifecycle_status if self.lifecycle_status else "active"
+        if lifecycle not in ("active", "superseded"):
+            raise ValueError("lifecycle_status must be 'active' or 'superseded'")
+        object.__setattr__(self, "lifecycle_status", lifecycle)
+        if lifecycle == "superseded":
+            object.__setattr__(
+                self,
+                "superseded_by",
+                _required_text(self.superseded_by, "superseded_by"),
+            )
+        elif self.superseded_by is not None:
+            object.__setattr__(
+                self,
+                "superseded_by",
+                _required_text(self.superseded_by, "superseded_by"),
             )
 
     @classmethod
@@ -222,18 +243,32 @@ class MemoryRecord:
             "last_accessed_ts": self.last_accessed_ts,
             "retention_half_life_days": self.retention_half_life_days,
             "vector_id": self.vector_id,
+            "lifecycle_status": self.lifecycle_status,
+            "superseded_by": self.superseded_by,
+            "supersede_reason": self.supersede_reason,
         }
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> MemoryRecord:
-        """Deserialize and validate a record, rejecting unknown/missing fields."""
+        """Deserialize and validate a record, rejecting unknown/missing fields.
+
+        Fields with declared defaults (vector_id / M2A lifecycle fields) are
+        optional for backward compatibility with pre-M2A payloads.
+        """
         if not isinstance(data, Mapping):
             raise ValueError("memory record data must be a mapping")
         field_names = {field.name for field in fields(cls)}
         unknown = set(data) - field_names
         if unknown:
             raise ValueError(f"unknown MemoryRecord fields: {sorted(unknown)}")
-        required = field_names - {"vector_id"}
+        # Optional = has a declared default (covers vector_id + lifecycle fields
+        # added after STORE_VERSION 1 payloads were written).
+        optional = {
+            field.name
+            for field in fields(cls)
+            if field.default is not MISSING or field.default_factory is not MISSING
+        }
+        required = field_names - optional
         missing = required - set(data)
         if missing:
             raise ValueError(f"missing MemoryRecord fields: {sorted(missing)}")

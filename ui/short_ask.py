@@ -40,6 +40,7 @@ from core.agent_events import (
 )
 
 from . import theme
+from .chat_markup import markdown_to_html
 from .popover_base import PopoverBase
 
 
@@ -147,10 +148,15 @@ class ScrollFollowTextBrowser(QTextBrowser):
         self.set_answer("")
 
     def set_answer(self, text: str) -> None:
-        """Replace the whole answer and (when following) pin to the tail."""
+        """Replace the whole answer and (when following) pin to the tail.
+
+        Final answers may contain markdown; render through the shared
+        converter (escaped, span-wrapped) so markers never leak. Plain text
+        is visually unchanged.
+        """
         self._guard = True
         try:
-            self.setPlainText(text or "")
+            self.setHtml(markdown_to_html(text or ""))
         finally:
             self._guard = False
         if self._follow_tail:

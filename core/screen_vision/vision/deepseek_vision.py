@@ -32,9 +32,11 @@ from core.screen_vision.provider_errors import (
 from core.screen_vision.safety import sanitize_error_text
 from core.screen_vision.vision.base import DEFAULT_VISION_INSTRUCTION
 from core.screen_vision.vision.qwen_vision import extract_json, to_observation
+from core.providers.catalog import CATALOG
 
-DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_VISION_MODEL = "deepseek-v4-flash-vision-exp"
+# Catalog-provided defaults (Phase 2.1); values unchanged.
+DEFAULT_DEEPSEEK_BASE_URL = CATALOG["deepseek-vision"].base_url
+DEEPSEEK_VISION_MODEL = CATALOG["deepseek-vision"].model
 VISION_TIMEOUT_SECONDS = 180
 
 DEFAULT_DIRECT_STYLE_CONTEXT = """You are Firefly, the user's desktop companion.

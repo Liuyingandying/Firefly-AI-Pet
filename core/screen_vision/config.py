@@ -28,15 +28,18 @@ Provider chain policy:
 import os
 
 from providers.base import resolve_setting
+from core.providers.catalog import CATALOG
 
 VISION_TIMEOUT_SECONDS = 180
 BRAIN_TIMEOUT_SECONDS = 120
 
-DEFAULT_VISION_BASE_URL = "https://ai.tju.edu.cn/api/v3"
-DEFAULT_VISION_MODEL = "tju-llm"
-DEFAULT_REASONING_BASE_URL = "https://ai.tju.edu.cn/api/v1"
-DEFAULT_REASONING_MODEL = "deepseek-v4-flash"
-DEFAULT_GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
+# Endpoint/model defaults now come from the provider catalog (Phase 2.1) —
+# single source of truth; values unchanged.
+DEFAULT_VISION_BASE_URL = CATALOG["tju-qwen"].base_url
+DEFAULT_VISION_MODEL = CATALOG["tju-qwen"].model
+DEFAULT_REASONING_BASE_URL = CATALOG["tju-reasoning"].base_url
+DEFAULT_REASONING_MODEL = CATALOG["tju-reasoning"].model
+DEFAULT_GLM_BASE_URL = CATALOG["glm-vision"].base_url
 
 DEPRECATED_VISION_KEY_ALIASES = ("TJU_QWEN_API_KEY", "FIREFLY_VISION_API_KEY")
 DEPRECATED_REASONING_KEY_ALIASES = ("FIREFLY_REASONING_API_KEY",)
@@ -100,7 +103,7 @@ def load_reasoning_config() -> ReasoningConfig:
     )
 
 
-DEFAULT_GLM_VISION_MODEL = "glm-4.6v-flash"  # verified VISION_CAPABLE (free tier)
+DEFAULT_GLM_VISION_MODEL = CATALOG["glm-vision"].model  # verified VISION_CAPABLE (free tier)
 
 
 def glm_vision_fallback_enabled() -> bool:
@@ -202,15 +205,20 @@ def _get_provider(name: str):
 
 
 def get_fast_direct_provider():
-    """The existing DeepSeek vision client, reused for one-shot FAST turns."""
-    return _get_provider("deepseek_vision")
+    """One-shot FAST vision client, reused by camera/screen/attachment and
+    visual-region turns. Uses the TJU v3 multimodal provider (tju-llm) —
+    the project's primary verified vision endpoint — instead of the
+    official DeepSeek client when the latter is out of balance."""
+    return _get_provider("qwen_vision")
 
 
 def get_vision_provider_order(mode: str) -> tuple:
-    """Vision priority order. FAST = DeepSeek first; RESILIENT = the frozen
-    TJU-first fallback order."""
+    """Vision priority order. Both routes are TJU-first (the project's
+    verified multimodal endpoint); the official DeepSeek client remains as a
+    fallback, so a balance/billing failure on it never breaks the primary
+    one-shot vision path."""
     if mode == ROUTING_FAST:
-        return ("deepseek_vision", "qwen_vision", "glm_vision")
+        return ("qwen_vision", "deepseek_vision", "glm_vision")
     return ("qwen_vision", "glm_vision", "deepseek_vision")
 
 

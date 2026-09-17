@@ -84,15 +84,12 @@ class MemoryManager:
         }
 
     def get_memory_context(self, query: str) -> str:
-        memories = self.search_memory(query)
-        lines = [
-            str(item.get("memory") or item.get("text") or "").strip()
-            for item in memories
-        ]
-        lines = [line for line in lines if line]
-        if not lines:
-            return ""
-        return "Relevant memories:\n" + "\n".join(f"- {line}" for line in lines)
+        """M3B.4: routed through the unified injection pipeline (ranking →
+        recall gate → <long_term_memory> fence) — no direct search formatting."""
+        from .m3b import render_memory_block
+
+        records = self.service.retrieve_for_prompt(query)
+        return render_memory_block(records)
 
 
 _default_manager: MemoryManager | None = None

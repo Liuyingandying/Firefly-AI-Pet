@@ -50,6 +50,7 @@ class TurnStage(str, Enum):
 
     BOND_READ = "bond_read"
     MEMORY_RETRIEVAL = "memory_retrieval"
+    MEMORY_WRITE = "memory_write"
     CONVERSATION_LOAD = "conversation_load"
     CONVERSATION_SAVE = "conversation_save"
     NARRATIVE_READ = "narrative_read"
@@ -74,13 +75,30 @@ class TurnError:
 
 
 class _LegacyMemoryReader:
-    """Adapt the v0.2 MemoryManager read shape at the composition boundary."""
+    """Deprecated read-only compatibility view over a v0.2 MemoryManager.
+
+    M1 (Firefly_Global_Memory_Audit P0-1): production wiring no longer
+    substitutes this reader for the real memory service. Kept only for
+    out-of-tree callers that need a narrow read view — never assign it to
+    :attr:`CompanionRuntime.memory_service`, which must be a full
+    :class:`MemoryService` (remember/delete/clear/export included).
+    """
 
     def __init__(self, manager: MemoryManager) -> None:
         self.manager = manager
 
     def search(self, query: str, *, limit: int = 5) -> list[Any]:
         return self.manager.search_memory(query)[:limit]
+
+
+def _suggestion_store():
+    """M3B.7: production persistent suggestion store in user data.
+
+    Tests redirect the default path via conftest.
+    """
+    from memory.suggestion_store import SuggestionStore
+
+    return SuggestionStore()
 
 
 class CompanionRuntime:
@@ -163,17 +181,29 @@ class CompanionRuntime:
         if suggestion_service is not None:
             self.suggestion_service: SuggestionService | None = suggestion_service
         elif config.suggestion.enabled:
+            extractor = None
+            if config.suggestion.auto_extract_enabled and provider_router is not None:
+                from memory.suggestion.candidate_extractor import MemoryCandidateExtractor
+
+                extractor = MemoryCandidateExtractor(
+                    provider_router,
+                    max_candidates=config.suggestion.max_candidates_per_turn,
+                )
             self.suggestion_service = SuggestionService(
                 memory_service,
+                extractor=extractor,
                 enabled=config.suggestion.enabled,
                 auto_extract_enabled=config.suggestion.auto_extract_enabled,
                 max_candidates_per_turn=config.suggestion.max_candidates_per_turn,
                 semantic_dedup_enabled=config.suggestion.semantic_dedup_enabled,
                 semantic_dedup_threshold=config.suggestion.semantic_dedup_threshold,
-                # P5A-3: explicit auto-approve config
                 explicit_auto_approve_enabled=config.suggestion.explicit_auto_approve_enabled,
                 explicit_auto_approve_min_confidence=config.suggestion.explicit_auto_approve_min_confidence,
                 explicit_auto_approve_allowed_categories=config.suggestion.explicit_auto_approve_allowed_categories,
+                auto_write_enabled=config.suggestion.auto_write_enabled,
+                auto_write_min_chars=config.suggestion.auto_write_min_chars,
+                auto_write_allowed_categories=config.suggestion.auto_write_allowed_categories,
+                store=_suggestion_store(),
             )
         else:
             self.suggestion_service = None
@@ -192,8 +222,16 @@ class CompanionRuntime:
         character_loader: CharacterLoader | None = None,
         conversation_store: ConversationStore | None = None,
         _bond_path: str | None = None,
+        config: CompanionConfig | None = None,
     ) -> CompanionRuntime:
-        """Build the graph for the ConversationRuntime compatibility facade."""
+        """Build the graph for the ConversationRuntime compatibility facade.
+
+        M1 (Firefly_Global_Memory_Audit P0-1): the runtime now holds the FULL
+        :class:`MemoryService` owned by the manager — remember / delete /
+        clear / export and the panel all work. Reads go through the same
+        service's ``search()`` (previously a ``_LegacyMemoryReader`` stripped
+        every write capability).
+        """
         manager = memory_manager if memory_manager is not None else MemoryManager()
         loader = character_loader if character_loader is not None else CharacterLoader()
         if provider_router is None:
@@ -202,10 +240,11 @@ class CompanionRuntime:
             provider_router = ProviderRouter()
         return cls(
             character=loader.load(),
-            memory_service=_LegacyMemoryReader(manager),
+            memory_service=manager.service,
             conversation_store=conversation_store,
             bond_state_engine=BondStateEngine(_bond_path),
             provider_router=provider_router,
+            config=config,
         )
 
     def build_messages(
@@ -243,6 +282,11 @@ class CompanionRuntime:
             messages = self._build_messages(user_text, history=history)
             if turn_context:
                 messages.insert(-1, {"role": "system", "content": turn_context})
+            # M1: explicit "记住…" requests persist through the authoritative
+            # MemoryService immediately (repository first, then semantic
+            # index). Ordinary chat text is rejected by the write policy, so
+            # this is a no-op unless the user explicitly asked to remember.
+            self._try_explicit_remember(user_text)
             response = self.provider_router.chat(
                 messages,
                 model=model,
@@ -303,6 +347,25 @@ class CompanionRuntime:
             exc,
             exc_info=True,
         )
+
+    # ------------------------------------------------------------------ M1
+    def _try_explicit_remember(self, user_message: str) -> None:
+        """Persist an explicit "记住…" request through the full MemoryService.
+
+        The service's write policy does the gating: under the default
+        ``EXPLICIT_ONLY`` policy only messages matching the explicit-remember
+        patterns produce a record — ordinary chat returns ``None`` without
+        touching repository or index. Automatic extraction stays OFF (M1
+        boundary); a read-only memory view simply skips the hook.
+        """
+        remember_detailed = getattr(self.memory_service, "remember_detailed", None)
+        if not callable(remember_detailed):
+            return  # read-only compatibility view: writes unsupported
+        try:
+            remember_detailed(user_message, trigger="explicit-command")
+        except Exception as exc:
+            # The turn continues; the failure is surfaced in diagnostics.
+            self._record_error(TurnStage.MEMORY_WRITE, exc)
 
     # ------------------------------------------------------------------ P5A-1
     def _try_extract_suggestions(

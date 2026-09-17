@@ -32,13 +32,24 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Sequence
+
+from core.pdf_processor import RapidOcrBackend
+
+if TYPE_CHECKING:
+    from core.video_vision import VideoVisionAdapter
 
 log = logging.getLogger("firefly.p10_video")
+
+# Hard cap on keyframes sent to the vision adapter per video, so a long video
+# can never fan out into an unbounded number of remote vision calls.
+MAX_VISION_KEYFRAMES = 8
 
 
 # ======================================================================
@@ -52,7 +63,7 @@ class VideoSegment:
 
     start: float  # seconds
     end: float  # seconds
-    summary: str = ""
+    summary: str | None = None
     key_timestamps: list[float] = field(default_factory=list)
 
 
@@ -73,7 +84,7 @@ class KeyframeInfo:
     timestamp: float  # seconds
     image_bytes: bytes = b""
     ocr_text: str = ""
-    description: str = ""
+    description: str | None = None
 
 
 @dataclass
@@ -85,8 +96,14 @@ class VideoTimeline:
     segments: list[VideoSegment] = field(default_factory=list)
     subtitles: list[SubtitleEntry] = field(default_factory=list)
     keyframes: list[KeyframeInfo] = field(default_factory=list)
-    summary: str = ""
+    summary: str | None = None
     key_timestamps: list[float] = field(default_factory=list)
+    stages: dict[str, str] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+    asr_backend: str | None = None
+    scene_backend: str | None = None
+    ocr_backend: str | None = None
+    visual_description_supported: bool = False
 
     @property
     def full_transcript(self) -> str:
@@ -116,7 +133,13 @@ class VideoProcessor:
     Uses core.pdf_processor for OCR on frames.
     """
 
-    def __init__(self, ffmpeg_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        ffmpeg_path: str | Path | None = None,
+        *,
+        asr_model: str = "tiny",
+        vision_adapter: "VideoVisionAdapter | None" = None,
+    ) -> None:
         if ffmpeg_path:
             self._ffmpeg = str(ffmpeg_path)
             # Validate it exists
@@ -131,8 +154,13 @@ class VideoProcessor:
                 self._ffmpeg = ""
         else:
             self._ffmpeg = self._find_ffmpeg()
+        self._ffprobe = self._find_ffprobe()
+        self._asr_model_name = asr_model
         self._whisper_model = None
         self._scenedetect_available = self._check_scenedetect()
+        self._ocr_backend: RapidOcrBackend | None = None
+        self._last_asr_backend: str | None = None
+        self._vision_adapter = vision_adapter
 
     def _find_ffmpeg(self) -> str:
         """Find ffmpeg on PATH."""
@@ -149,11 +177,21 @@ class VideoProcessor:
                 continue
         return ""
 
+    def _find_ffprobe(self) -> str:
+        """Resolve ffprobe next to ffmpeg or from PATH."""
+        if self._ffmpeg:
+            ffmpeg_path = Path(self._ffmpeg)
+            if ffmpeg_path.parent != Path("."):
+                sibling = ffmpeg_path.with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
+                if sibling.is_file():
+                    return str(sibling)
+        return shutil.which("ffprobe") or shutil.which("ffprobe.exe") or ""
+
     @staticmethod
     def _check_scenedetect() -> bool:
         """Check if PySceneDetect is available."""
         try:
-            import scene_detect  # noqa: F401
+            import scenedetect  # noqa: F401
             return True
         except ImportError:
             return False
@@ -165,7 +203,9 @@ class VideoProcessor:
         extract_audio: bool = True,
         extract_frames: bool = True,
         scene_detection: bool = True,
-        ocr_on_frames: bool = False,
+        ocr_on_frames: bool = True,
+        vision_on_frames: bool = False,
+        video_analysis_enabled: Callable[[], bool] | None = None,
     ) -> VideoTimeline:
         """Process a video file through the full pipeline.
 
@@ -175,68 +215,184 @@ class VideoProcessor:
             extract_frames: Extract video frames.
             scene_detection: Run scene detection to find keyframes.
             ocr_on_frames: Run OCR on keyframe images.
+            vision_on_frames: Describe keyframes through the injected vision
+                adapter. Off by default: no vision model is called, no network
+                I/O happens, and outputs are identical to the legacy pipeline.
+            video_analysis_enabled: Optional capability gate (returns the live
+                ``firefly-video`` plugin state). When provided and False, the
+                pipeline raises :class:`VideoAnalysisDisabledError` BEFORE any
+                ffprobe/ffmpeg/OCR work. None = legacy behavior (no gate).
 
         Returns:
             VideoTimeline with all extracted data.
         """
+        if video_analysis_enabled is not None and not video_analysis_enabled():
+            from core.capabilities.video_gate import VideoAnalysisDisabledError
+
+            raise VideoAnalysisDisabledError()
         file_path = Path(file_path)
         if not file_path.exists():
             raise FileNotFoundError(f"Video not found: {file_path}")
 
         timeline = VideoTimeline(file_path=str(file_path))
 
+        timeline.stages["visual_description"] = "unsupported"
+
         # Get video duration
         timeline.duration = self._get_duration(file_path)
+        timeline.stages["duration"] = "success" if timeline.duration > 0 else "error"
+        if timeline.duration <= 0:
+            timeline.errors.append("duration: ffprobe returned no positive duration")
 
-        # Extract audio for ASR
-        if extract_audio:
-            audio_path = self._extract_audio(file_path)
-            if audio_path:
-                subtitles = self._transcribe_audio(audio_path)
-                timeline.subtitles = subtitles
-                os.unlink(audio_path)
+        with tempfile.TemporaryDirectory(prefix="firefly-video-") as temp_dir:
+            work_dir = Path(temp_dir)
 
-        # Scene detection + keyframe extraction
-        if scene_detection and self._scenedetect_available:
-            keyframes = self._detect_scenes(file_path)
-            if ocr_on_frames:
-                for kf in keyframes:
-                    kf.ocr_text = self._ocr_frame(kf.image_bytes)
+            if extract_audio:
+                audio_path = self._extract_audio(file_path, work_dir=work_dir)
+                if audio_path:
+                    timeline.stages["audio"] = "success"
+                    try:
+                        timeline.subtitles = self._transcribe_audio(audio_path)
+                        timeline.asr_backend = self._last_asr_backend
+                        timeline.stages["asr"] = (
+                            "success" if timeline.subtitles else "empty"
+                        )
+                    except Exception as exc:
+                        timeline.stages["asr"] = "error"
+                        timeline.errors.append(f"asr: {type(exc).__name__}: {exc}")
+                        log.warning("[VideoProcessor] ASR failed: %s", exc)
+                else:
+                    timeline.stages["audio"] = "error"
+                    timeline.stages["asr"] = "blocked"
+                    timeline.errors.append("audio: FFmpeg did not produce a WAV file")
+            else:
+                timeline.stages["audio"] = "skipped"
+                timeline.stages["asr"] = "skipped"
+
+            keyframes: list[KeyframeInfo] = []
+            if scene_detection and self._scenedetect_available:
+                try:
+                    segments, keyframes = self._detect_scene_data(file_path, work_dir)
+                    timeline.segments = segments
+                    timeline.scene_backend = "PySceneDetect"
+                    timeline.stages["scenes"] = "success" if segments else "empty"
+                except Exception as exc:
+                    timeline.stages["scenes"] = "error"
+                    timeline.errors.append(f"scenes: {type(exc).__name__}: {exc}")
+                    log.warning("[VideoProcessor] scene detection failed: %s", exc)
+            elif scene_detection:
+                timeline.stages["scenes"] = "blocked"
+                timeline.errors.append("scenes: PySceneDetect is unavailable")
+            else:
+                timeline.stages["scenes"] = "skipped"
+
+            if not keyframes and extract_frames:
+                keyframes = self._extract_keyframes(
+                    file_path,
+                    interval=5.0,
+                    work_dir=work_dir,
+                )
             timeline.keyframes = keyframes
-        elif extract_frames:
-            # Fallback: extract frames at regular intervals
-            keyframes = self._extract_keyframes(file_path, interval=5.0)
-            if ocr_on_frames:
-                for kf in keyframes:
-                    kf.ocr_text = self._ocr_frame(kf.image_bytes)
-            timeline.keyframes = keyframes
+            timeline.key_timestamps = [frame.timestamp for frame in keyframes]
+            timeline.stages["keyframes"] = "success" if keyframes else "empty"
+
+            if ocr_on_frames and keyframes:
+                self._ocr_backend = self._ocr_backend or RapidOcrBackend()
+                timeline.ocr_backend = self._ocr_backend.label
+                ocr_successes = 0
+                for keyframe in keyframes:
+                    try:
+                        keyframe.ocr_text = self._ocr_frame(keyframe.image_bytes)
+                        if keyframe.ocr_text:
+                            ocr_successes += 1
+                    except Exception as exc:
+                        timeline.errors.append(
+                            f"frame OCR at {keyframe.timestamp:.3f}s: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+                timeline.stages["ocr"] = "success" if ocr_successes else "empty"
+            else:
+                timeline.stages["ocr"] = "skipped"
+
+            self._run_vision_pass(timeline, keyframes, enabled=vision_on_frames)
 
         return timeline
 
+    @staticmethod
+    def _select_vision_frames(keyframes: list[KeyframeInfo]) -> list[KeyframeInfo]:
+        """Pick at most MAX_VISION_KEYFRAMES frames, spread over the video."""
+        total = len(keyframes)
+        if total <= MAX_VISION_KEYFRAMES:
+            return list(keyframes)
+        step = total / MAX_VISION_KEYFRAMES
+        return [keyframes[int(i * step)] for i in range(MAX_VISION_KEYFRAMES)]
+
+    def _run_vision_pass(
+        self,
+        timeline: VideoTimeline,
+        keyframes: list[KeyframeInfo],
+        *,
+        enabled: bool,
+    ) -> None:
+        """Optionally describe keyframes via the injected vision adapter.
+
+        Serial, capped, and per-frame fault isolated: one failing frame is
+        recorded in timeline.errors and never fails the video.
+        """
+        if not enabled:
+            return  # legacy default: stage stays "unsupported", no provider call
+        if self._vision_adapter is None:
+            timeline.stages["visual_description"] = "blocked"
+            timeline.errors.append("visual_description: no vision_adapter configured")
+            return
+        timeline.visual_description_supported = True
+        if not keyframes:
+            timeline.stages["visual_description"] = "empty"
+            return
+        described = 0
+        for keyframe in self._select_vision_frames(keyframes):
+            try:
+                keyframe.description = self._vision_adapter.describe(
+                    image_bytes=keyframe.image_bytes,
+                    timestamp=keyframe.timestamp,
+                    ocr_text=keyframe.ocr_text,
+                )
+                if keyframe.description:
+                    described += 1
+            except Exception as exc:
+                timeline.errors.append(
+                    f"frame vision at {keyframe.timestamp:.3f}s: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                log.warning(
+                    "[VideoProcessor] vision failed at %.3fs: %s",
+                    keyframe.timestamp,
+                    exc,
+                )
+        timeline.stages["visual_description"] = "success" if described else "empty"
+
     def _get_duration(self, file_path: Path) -> float:
         """Get video duration in seconds using ffprobe."""
-        if not self._ffmpeg:
+        if not self._ffprobe:
             return 0.0
         try:
             result = subprocess.run(
                 [
-                    self._ffmpeg, "-i", str(file_path),
-                    "-hide_banner", "-loglevel", "error",
+                    self._ffprobe,
+                    "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    str(file_path),
                 ],
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
-            # Parse Duration from stderr
-            for line in result.stderr.split("\n"):
-                if "Duration" in line:
-                    # Format: Duration: 00:12:34.56, start: ...
-                    parts = line.split(",")[0].strip()
-                    if "Duration:" in parts:
-                        time_str = parts.split("Duration:")[1].strip()
-                        return self._parse_time(time_str)
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
+            if result.returncode == 0:
+                duration = float(result.stdout.strip())
+                return duration if duration > 0 else 0.0
+        except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
+            return 0.0
         return 0.0
 
     @staticmethod
@@ -251,13 +407,21 @@ class VideoProcessor:
             return int(m) * 60 + float(s)
         return 0.0
 
-    def _extract_audio(self, file_path: Path) -> str | None:
+    def _extract_audio(
+        self,
+        file_path: Path,
+        *,
+        work_dir: Path | None = None,
+    ) -> str | None:
         """Extract audio from video as WAV. Returns temp file path."""
         if not self._ffmpeg:
             return None
-        temp_path = str(file_path.with_suffix(".wav"))
+        if work_dir is None:
+            work_dir = Path(tempfile.mkdtemp(prefix="firefly-video-audio-"))
+        work_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = str(work_dir / "audio.wav")
         try:
-            subprocess.run(
+            result = subprocess.run(
                 [
                     self._ffmpeg, "-y", "-i", str(file_path),
                     "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
@@ -266,7 +430,11 @@ class VideoProcessor:
                 capture_output=True,
                 timeout=120,
             )
-            if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+            if (
+                result.returncode == 0
+                and os.path.exists(temp_path)
+                and os.path.getsize(temp_path) > 0
+            ):
                 return temp_path
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
@@ -274,98 +442,146 @@ class VideoProcessor:
 
     def _transcribe_audio(self, audio_path: str) -> list[SubtitleEntry]:
         """Transcribe audio to subtitles using faster-whisper or whisper."""
-        entries: list[SubtitleEntry] = []
-
-        # Try faster-whisper first
+        errors: list[str] = []
         try:
             from faster_whisper import WhisperModel
-            model = WhisperModel("tiny", device="cpu", compute_type="int8")
-            segments, info = model.transcribe(audio_path, language="zh" if info.language and "zh" in info.language else None)
-            idx = 1
-            for seg in segments:
-                entries.append(SubtitleEntry(
-                    index=idx,
-                    start=seg.start,
-                    end=seg.end,
-                    text=seg.text.strip(),
-                ))
-                idx += 1
+
+            if self._whisper_model is None:
+                self._whisper_model = WhisperModel(
+                    self._asr_model_name,
+                    device="cpu",
+                    compute_type="int8",
+                )
+            segments, _info = self._whisper_model.transcribe(
+                audio_path,
+                language=None,
+            )
+            entries = [
+                SubtitleEntry(
+                    index=index,
+                    start=float(segment.start),
+                    end=float(segment.end),
+                    text=segment.text.strip(),
+                )
+                for index, segment in enumerate(segments, start=1)
+                if segment.text.strip()
+            ]
+            self._last_asr_backend = f"faster-whisper:{self._asr_model_name}:cpu-int8"
             return entries
         except ImportError:
-            pass
+            errors.append("faster-whisper is not installed")
+        except Exception as exc:
+            errors.append(f"faster-whisper failed: {type(exc).__name__}: {exc}")
 
-        # Try openai-whisper
         try:
             import whisper
-            model = whisper.load_model("tiny")
-            result = model.transcribe(audio_path, language="zh")
-            idx = 1
-            for seg in result["segments"]:
-                entries.append(SubtitleEntry(
-                    index=idx,
-                    start=seg["start"],
-                    end=seg["end"],
-                    text=seg["text"].strip(),
-                ))
-                idx += 1
+
+            model = whisper.load_model(self._asr_model_name)
+            result = model.transcribe(audio_path)
+            entries = [
+                SubtitleEntry(
+                    index=index,
+                    start=float(segment["start"]),
+                    end=float(segment["end"]),
+                    text=str(segment["text"]).strip(),
+                )
+                for index, segment in enumerate(result.get("segments", []), start=1)
+                if str(segment.get("text", "")).strip()
+            ]
+            self._last_asr_backend = f"openai-whisper:{self._asr_model_name}"
             return entries
         except ImportError:
-            pass
+            errors.append("openai-whisper is not installed")
+        except Exception as exc:
+            errors.append(f"openai-whisper failed: {type(exc).__name__}: {exc}")
 
-        log.warning("[VideoProcessor] No ASR engine available (faster-whisper or whisper)")
-        return entries
+        raise RuntimeError("; ".join(errors))
 
     def _detect_scenes(self, file_path: Path) -> list[KeyframeInfo]:
         """Detect scenes using PySceneDetect."""
-        keyframes: list[KeyframeInfo] = []
-
         try:
-            from scene_detect import OpenCVDetector, detect_scenes
-            from scene_detect.detectors import ContentDetector
+            with tempfile.TemporaryDirectory(prefix="firefly-scenes-") as temp_dir:
+                _segments, keyframes = self._detect_scene_data(
+                    file_path,
+                    Path(temp_dir),
+                )
+                return keyframes
+        except Exception as exc:
+            log.warning("[VideoProcessor] PySceneDetect failed: %s", exc)
+            return []
 
-            result = detect_scenes(
-                str(file_path),
-                ContentDetector(threshold=27.0),
-                start_time=None,
-                end_time=None,
+    def _detect_scene_data(
+        self,
+        file_path: Path,
+        work_dir: Path,
+    ) -> tuple[list[VideoSegment], list[KeyframeInfo]]:
+        """Return real scene ranges and midpoint keyframes via PySceneDetect."""
+        from scenedetect import ContentDetector, detect
+
+        scene_list = detect(
+            str(file_path),
+            ContentDetector(threshold=27.0),
+            show_progress=False,
+        )
+        segments: list[VideoSegment] = []
+        keyframes: list[KeyframeInfo] = []
+        for start_time, end_time in scene_list:
+            start_sec = float(start_time.get_seconds())
+            end_sec = float(end_time.get_seconds())
+            midpoint = (start_sec + end_sec) / 2.0
+            keyframe = self._extract_frame_at(
+                file_path,
+                midpoint,
+                work_dir=work_dir,
             )
+            segments.append(
+                VideoSegment(
+                    start=start_sec,
+                    end=end_sec,
+                    key_timestamps=[midpoint] if keyframe else [],
+                )
+            )
+            if keyframe:
+                keyframes.append(keyframe)
+        return segments, keyframes
 
-            for scene in result:
-                start_sec = scene[0].get_seconds()
-                end_sec = scene[1].get_seconds() if len(scene) > 1 else start_sec + 1.0
-                # Extract keyframe at middle of scene
-                mid = (start_sec + end_sec) / 2
-                kf = self._extract_frame_at(file_path, mid)
-                if kf:
-                    keyframes.append(kf)
-
-        except ImportError:
-            log.warning("[VideoProcessor] PySceneDetect not available, using interval extraction")
-
-        return keyframes
-
-    def _extract_keyframes(self, file_path: Path, interval: float = 5.0) -> list[KeyframeInfo]:
+    def _extract_keyframes(
+        self,
+        file_path: Path,
+        interval: float = 5.0,
+        *,
+        work_dir: Path | None = None,
+    ) -> list[KeyframeInfo]:
         """Extract frames at regular intervals as fallback."""
         keyframes: list[KeyframeInfo] = []
         duration = self._get_duration(file_path)
 
         t = 0.0
         while t < duration:
-            kf = self._extract_frame_at(file_path, t)
+            kf = self._extract_frame_at(file_path, t, work_dir=work_dir)
             if kf:
                 keyframes.append(kf)
             t += interval
 
         return keyframes
 
-    def _extract_frame_at(self, file_path: Path, timestamp: float) -> KeyframeInfo | None:
+    def _extract_frame_at(
+        self,
+        file_path: Path,
+        timestamp: float,
+        *,
+        work_dir: Path | None = None,
+    ) -> KeyframeInfo | None:
         """Extract a single frame at a specific timestamp."""
         if not self._ffmpeg:
             return None
 
-        temp_path = str(file_path.with_suffix(f"_frame_{int(timestamp * 1000)}.png"))
+        if work_dir is None:
+            work_dir = Path(tempfile.mkdtemp(prefix="firefly-video-frame-"))
+        work_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = str(work_dir / f"frame-{int(timestamp * 1000):012d}.png")
         try:
-            subprocess.run(
+            result = subprocess.run(
                 [
                     self._ffmpeg, "-y", "-ss", str(timestamp),
                     "-i", str(file_path),
@@ -375,7 +591,7 @@ class VideoProcessor:
                 capture_output=True,
                 timeout=30,
             )
-            if os.path.exists(temp_path):
+            if result.returncode == 0 and os.path.exists(temp_path):
                 img_bytes = Path(temp_path).read_bytes()
                 os.unlink(temp_path)
                 return KeyframeInfo(timestamp=timestamp, image_bytes=img_bytes)
@@ -385,15 +601,10 @@ class VideoProcessor:
 
     def _ocr_frame(self, image_bytes: bytes) -> str:
         """Run OCR on a frame image."""
-        try:
-            from rapidocr_onnxruntime import RapidOCR
-            ocr = RapidOCR()
-            result, _ = ocr(image_bytes)
-            if result:
-                return "\n".join(line[0] for line in result if line)
-        except ImportError:
-            log.warning("[VideoProcessor] rapidocr_onnxruntime not available")
-        return ""
+        self._ocr_backend = self._ocr_backend or RapidOcrBackend()
+        if not self._ocr_backend.available:
+            raise RuntimeError(self._ocr_backend.error or "RapidOCR unavailable")
+        return self._ocr_backend.extract_text(image_bytes)
 
     def generate_srt(self, subtitles: list[SubtitleEntry], file_path: str | Path) -> str:
         """Generate SRT subtitle file from subtitle entries."""
@@ -458,7 +669,7 @@ class VideoQa:
         if timeline.keyframes:
             ocr_texts = [kf.ocr_text for kf in timeline.keyframes if kf.ocr_text]
             if ocr_texts:
-                context_parts.append("关键帧OCR:\n" + "\n".join(ocr_texts[:3000]))
+                context_parts.append("关键帧OCR:\n" + "\n".join(ocr_texts)[:3000])
 
         if not context_parts:
             return VideoQaResult(answer="视频内容未提取到可分析的信息。")

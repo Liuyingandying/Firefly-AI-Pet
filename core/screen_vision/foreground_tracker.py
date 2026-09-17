@@ -35,9 +35,69 @@ def get_foreground_hwnd() -> int:
 def window_process_id(hwnd: int) -> int:
     if _user32 is None or not hwnd:
         return 0
-    pid = 0
-    _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(ctypes.c_uint32(pid)))
-    return int(pid)
+    pid = ctypes.c_uint32(0)
+    _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return int(pid.value)
+
+
+def window_process_name(hwnd: int) -> str:
+    """Image file name (lowercase basename) of the window's process, "" when
+    unknown."""
+    if _user32 is None or not hwnd:
+        return ""
+    pid = window_process_id(hwnd)
+    if not pid:
+        return ""
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return ""
+    try:
+        buffer = ctypes.create_unicode_buffer(512)
+        size = ctypes.c_uint32(512)
+        if kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+            return (buffer.value or "").rsplit("\\", 1)[-1].lower()
+        return ""
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def find_window_hwnd(
+    title_needles: list[str],
+    processes: tuple[str, ...] = ("msedge.exe", "chrome.exe"),
+) -> int:
+    """Top-level visible window whose title contains any needle and whose
+    process is one of ``processes`` (empty tuple = any process).
+
+    Deterministic window resolution for the PDF OCR Overlay entry: the
+    caller derives needles from the open PDF's title/file name, so a
+    maximized browser whose ACTIVE tab is the paper matches while an
+    unrelated foreground window does not. Returns 0 when nothing matches.
+    """
+    if _user32 is None:
+        return 0
+    needles = [str(n).lower() for n in (title_needles or []) if n]
+    if not needles:
+        return 0
+    found: list[int] = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    def callback(hwnd, _lparam):
+        if not _user32.IsWindowVisible(hwnd) or _user32.IsIconic(hwnd):
+            return True
+        buffer = ctypes.create_unicode_buffer(512)
+        _user32.GetWindowTextW(hwnd, buffer, 512)
+        title = (buffer.value or "").lower()
+        if not title or not any(needle in title for needle in needles):
+            return True
+        if processes and window_process_name(hwnd) not in processes:
+            return True
+        found.append(int(hwnd) if hwnd else 0)
+        return False
+
+    _user32.EnumWindows(callback, None)
+    return found[0] if found else 0
 
 
 def is_firefly_hwnd(hwnd: int) -> bool:

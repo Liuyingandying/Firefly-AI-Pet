@@ -16,8 +16,9 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-METRICS_DIR = PROJECT_DIR / "runtime" / "metrics"
+from core.user_paths import get_user_data_paths
+
+METRICS_DIR = get_user_data_paths().runtime / "metrics"
 LATEST_FILE = METRICS_DIR / "quick_ask_latest.json"
 HISTORY_FILE = METRICS_DIR / "quick_ask_history.json"
 RING_BUFFER_SIZE = 20

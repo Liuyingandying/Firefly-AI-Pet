@@ -1,0 +1,11 @@
+# Optional external capability roots.
+# Priority: environment variable > value below > portable user-data default.
+# Leave blank for the portable defaults under %LOCALAPPDATA%/FireflyAI/plugins.
+
+paths:
+  # Environment override: FIREFLY_PLUGIN_ROOT
+  plugin_root: ""
+
+  # Environment override: FIREFLY_BILI_INSIGHT_ROOT
+  # Legacy FIREFLY_BILI_SERVICE_DIR remains accepted for compatibility.
+  bili_insight_root: ""

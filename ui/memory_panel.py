@@ -266,12 +266,18 @@ class MemoryPanel(QWidget):
         return self.memory_service.delete(record_id)
 
     def clear_all_memories(self) -> int:
-        """Clear all long-term memory records via repository.
+        """Clear all long-term memory records via the full MemoryService.
 
-        Returns the number of records removed, or -1 on error.
+        M1: clears BOTH the authoritative repository and the derived semantic
+        index (repository first). Returns the number of records removed,
+        or -1 on error.
         """
         try:
-            return self.memory_service.repository.clear()
+            clear_all = getattr(self.memory_service, "clear_all", None)
+            if callable(clear_all):
+                return int(clear_all())
+            # Legacy read-only views have no clear; never half-clear.
+            return -1
         except Exception:
             return -1
 

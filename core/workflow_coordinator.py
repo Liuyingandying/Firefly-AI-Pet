@@ -22,7 +22,10 @@ Transitions are immutable: every method returns a new :class:`WorkflowPlan`
 from __future__ import annotations
 
 import dataclasses
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from core.runtime_bus import RuntimeBus
 
 from core.routing_models import (
     DEFAULT_CAPABILITY_REGISTRY,
@@ -88,6 +91,11 @@ class WorkflowCoordinator:
         self._clock = clock if clock is not None else _now_ms
         self._listeners: list[Callable[[WorkflowEvent], None]] = []
         self._plans: dict[str, WorkflowPlan] = {}
+        self._bus: RuntimeBus | None = None
+
+    def set_bus(self, bus: RuntimeBus | None) -> None:
+        """Attach a RuntimeBus for workflow event forwarding (Phase 3B-2)."""
+        self._bus = bus
 
     # -- listeners --------------------------------------------------------
 
@@ -101,6 +109,18 @@ class WorkflowCoordinator:
     def _emit(self, event: WorkflowEvent) -> None:
         for listener in list(self._listeners):
             listener(event)
+        # Phase 3B-2: forward to RuntimeBus (lazy import keeps module Qt-free).
+        if self._bus is not None:
+            from core.runtime_bus import RuntimeEvent  # noqa: lazy
+
+            self._bus.publish_event(
+                RuntimeEvent(
+                    kind="workflow.event",
+                    source="workflow_coordinator",
+                    timestamp=event.timestamp,
+                    payload=event,
+                )
+            )
 
     # -- reads ------------------------------------------------------------
 

@@ -10,10 +10,13 @@ from .base import (
     Transport,
     resolve_setting,
 )
+from core.providers.catalog import CATALOG
 
 
-DEFAULT_BASE_URL = "https://api.deepseek.com/chat/completions"
-DEFAULT_MODEL = "deepseek-chat"
+# Catalog exposes both forms; this adapter needs the full chat endpoint
+# (normalize_chat_endpoint keeps it verbatim).
+DEFAULT_BASE_URL = CATALOG["deepseek"].completion_endpoint
+DEFAULT_MODEL = CATALOG["deepseek"].model
 
 
 class DeepSeekProvider(OpenAICompatibleProvider):

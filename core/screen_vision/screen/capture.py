@@ -108,6 +108,13 @@ def _primary_screen_phys(screen) -> Tuple[int, int, int, int]:
 MIN_CROP_DIMENSION = 40  # narrower/taller than this is a degenerate sliver
 
 
+def _crop_origin_abs(crop, screen) -> tuple[int, int]:
+    """Absolute physical-screen coordinate of a pixmap-relative crop's
+    top-left (the window's on-screen origin after screen clamping)."""
+    screen_phys = _primary_screen_phys(screen)
+    return (int(screen_phys[0] + crop[0]), int(screen_phys[1] + crop[1]))
+
+
 def _crop_rect_for_rect(rect, screen, pixmap) -> Tuple[int, int, int, int] | None:
     """Intersect a physical-pixel window rect with the grabbed primary
     pixmap; None when the window is not (meaningfully) on this screen
@@ -122,9 +129,18 @@ def _crop_rect_for_rect(rect, screen, pixmap) -> Tuple[int, int, int, int] | Non
     return (x0 - screen_phys[0], y0 - screen_phys[1], x1 - screen_phys[0], y1 - screen_phys[1])
 
 
-def _encode_pixmap(pixmap, crop=None, max_edge=DEFAULT_MAX_EDGE,
+def _encode_pixmap(pixmap, crop=None, crop_origin=None, max_edge=DEFAULT_MAX_EDGE,
                    jpeg_quality=DEFAULT_JPEG_QUALITY) -> ScreenFrame:
-    """Encode a pixmap (optionally cropped) into an in-memory JPEG frame."""
+    """Encode a pixmap (optionally cropped) into an in-memory JPEG frame.
+
+    ``crop`` is in grabbed-pixmap (device) pixels; ``crop_origin`` is the
+    absolute physical-screen coordinate of the image's top-left (the
+    pixmap-relative crop origin shifted by the screen origin, or the screen
+    origin itself when uncropped). The resulting ScreenFrame records
+    ``crop_offset`` and the post-resize ``scale_x``/``scale_y`` so callers
+    can map screen coordinates onto OCR image coordinates
+    (``image = (screen - crop_offset) * scale``).
+    """
     png_buffer = QBuffer()
     png_buffer.open(QIODevice.WriteOnly)
     if not pixmap.save(png_buffer, "PNG"):
@@ -141,10 +157,16 @@ def _encode_pixmap(pixmap, crop=None, max_edge=DEFAULT_MAX_EDGE,
     else:
         pil_image = pil_image.convert("RGB")
 
+    pre_width, pre_height = pil_image.size
     if max_edge and max(pil_image.size) > max_edge:
         scale = max_edge / max(pil_image.size)
         new_size = (round(pil_image.width * scale), round(pil_image.height * scale))
         pil_image = pil_image.resize(new_size, Image.LANCZOS)
+    scale_x = (pil_image.width / pre_width) if pre_width else 1.0
+    scale_y = (pil_image.height / pre_height) if pre_height else 1.0
+
+    if crop_origin is None:
+        crop_origin = (0, 0)
 
     encode_buffer = BytesIO()
     pil_image.save(encode_buffer, format="JPEG", quality=jpeg_quality)
@@ -156,6 +178,9 @@ def _encode_pixmap(pixmap, crop=None, max_edge=DEFAULT_MAX_EDGE,
         mime_type="image/jpeg",
         image_bytes=encoded,
         captured_at=datetime.now(),
+        crop_offset=(int(crop_origin[0]), int(crop_origin[1])),
+        scale_x=scale_x,
+        scale_y=scale_y,
     )
 
 
@@ -181,9 +206,12 @@ class ScreenCaptureService:
         jpeg_quality: int = DEFAULT_JPEG_QUALITY,
     ) -> ScreenFrame:
         """Grab the full primary screen into a JPEG ScreenFrame."""
-        _screen, pixmap = _grab_primary_pixmap()
+        screen, pixmap = _grab_primary_pixmap()
         self._set_info("primary_screen", False)
-        return _encode_pixmap(pixmap, max_edge=max_edge, jpeg_quality=jpeg_quality)
+        origin = _primary_screen_phys(screen)[:2]
+        return _encode_pixmap(
+            pixmap, crop_origin=origin, max_edge=max_edge, jpeg_quality=jpeg_quality
+        )
 
     def capture_active_window(
         self,
@@ -200,7 +228,13 @@ class ScreenCaptureService:
                 "active-window capture currently supports the primary screen only."
             )
         self._set_info("active_window", False)
-        return _encode_pixmap(pixmap, crop=crop, max_edge=max_edge, jpeg_quality=jpeg_quality)
+        return _encode_pixmap(
+            pixmap,
+            crop=crop,
+            crop_origin=_crop_origin_abs(crop, screen),
+            max_edge=max_edge,
+            jpeg_quality=jpeg_quality,
+        )
 
     def capture_last_non_firefly_window(
         self,
@@ -218,17 +252,63 @@ class ScreenCaptureService:
             crop = _crop_rect_for_rect(_window_rect(recorded), screen, pixmap)
             if crop is not None:
                 self._set_info("last_non_firefly_window", False)
-                return _encode_pixmap(pixmap, crop=crop, max_edge=max_edge, jpeg_quality=jpeg_quality)
+                return _encode_pixmap(
+                    pixmap,
+                    crop=crop,
+                    crop_origin=_crop_origin_abs(crop, screen),
+                    max_edge=max_edge,
+                    jpeg_quality=jpeg_quality,
+                )
 
         current = get_foreground_hwnd()
         if current and not is_firefly_hwnd(current) and _window_hwnd_valid(current):
             crop = _crop_rect_for_rect(_window_rect(current), screen, pixmap)
             if crop is not None:
                 self._set_info("last_non_firefly_window", True, "current_foreground")
-                return _encode_pixmap(pixmap, crop=crop, max_edge=max_edge, jpeg_quality=jpeg_quality)
+                return _encode_pixmap(
+                    pixmap,
+                    crop=crop,
+                    crop_origin=_crop_origin_abs(crop, screen),
+                    max_edge=max_edge,
+                    jpeg_quality=jpeg_quality,
+                )
 
         self._set_info("last_non_firefly_window", True, "primary_screen")
-        return _encode_pixmap(pixmap, max_edge=max_edge, jpeg_quality=jpeg_quality)
+        return _encode_pixmap(
+            pixmap,
+            crop_origin=_primary_screen_phys(screen)[:2],
+            max_edge=max_edge,
+            jpeg_quality=jpeg_quality,
+        )
+
+    def capture_window_hwnd(
+        self,
+        hwnd: int,
+        max_edge: int = DEFAULT_MAX_EDGE,
+        jpeg_quality: int = DEFAULT_JPEG_QUALITY,
+    ) -> ScreenFrame:
+        """Capture a specific top-level window by HWND (PDF OCR Overlay
+        Phase 3-B: the browser window resolved from the open PDF's title).
+
+        Raises RuntimeError when the window is gone, minimized, or not
+        (meaningfully) on the primary screen — callers treat that as a
+        snapshot failure instead of silently capturing the wrong region.
+        """
+        if not _window_hwnd_valid(hwnd):
+            raise RuntimeError("capture window is gone or minimized")
+        screen, pixmap = _grab_primary_pixmap()
+        rect = _window_rect(hwnd)
+        crop = _crop_rect_for_rect(rect, screen, pixmap)
+        if crop is None:
+            raise RuntimeError("capture window is not on the primary screen")
+        self._set_info("window_hwnd", False)
+        return _encode_pixmap(
+            pixmap,
+            crop=crop,
+            crop_origin=_crop_origin_abs(crop, screen),
+            max_edge=max_edge,
+            jpeg_quality=jpeg_quality,
+        )
 
     def capture_firefly_companion(
         self,
@@ -243,10 +323,21 @@ class ScreenCaptureService:
             crop = _crop_rect_for_rect(_window_rect(companion), screen, pixmap)
             if crop is not None:
                 self._set_info("firefly_companion", False)
-                return _encode_pixmap(pixmap, crop=crop, max_edge=max_edge, jpeg_quality=jpeg_quality)
+                return _encode_pixmap(
+                    pixmap,
+                    crop=crop,
+                    crop_origin=_crop_origin_abs(crop, screen),
+                    max_edge=max_edge,
+                    jpeg_quality=jpeg_quality,
+                )
 
         self._set_info("firefly_companion", True, "primary_screen")
-        return _encode_pixmap(pixmap, max_edge=max_edge, jpeg_quality=jpeg_quality)
+        return _encode_pixmap(
+            pixmap,
+            crop_origin=_primary_screen_phys(screen)[:2],
+            max_edge=max_edge,
+            jpeg_quality=jpeg_quality,
+        )
 
 
 # Module-level convenience wrappers keep the original PoC API available.

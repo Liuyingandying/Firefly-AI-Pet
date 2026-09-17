@@ -124,7 +124,21 @@ class CompanionContextBuilder:
         return state, self._bond_context_builder.build(state).to_prompt()
 
     def _memory(self, user_message: str) -> str:
+        """M3B.4 unified injection path: every long-term memory entering a
+        prompt flows through retrieve_for_prompt (ranking → recall gate) and
+        render_memory_block (the <long_term_memory> data fence).
+
+        Readers that only expose the v0.2 ``search`` shape (the deprecated
+        ``_LegacyMemoryReader``, duck-typed test doubles) keep the legacy
+        formatting — production wiring always supplies a full MemoryService.
+        """
         try:
+            retrieve = getattr(self.memory_reader, "retrieve_for_prompt", None)
+            if callable(retrieve):
+                from memory.m3b import render_memory_block
+
+                records = list(retrieve(user_message))
+                return render_memory_block(records)
             memories = list(self.memory_reader.search(user_message))
         except Exception as exc:
             self._record("memory_retrieval", exc)

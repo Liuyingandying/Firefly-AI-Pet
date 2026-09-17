@@ -9,6 +9,8 @@ Character or Bond state.
 from __future__ import annotations
 
 import re
+import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,21 +19,43 @@ from ..records import MemoryCategory
 
 @dataclass(frozen=True)
 class MemorySuggestion:
-    """A candidate memory awaiting user confirmation."""
+    """A candidate memory awaiting user confirmation.
+
+    v1 boundary repair: ``source`` records where the candidate came from —
+    ``"explicit"`` (user typed a remember-style request), ``"companion_auto"``
+    (LLM extraction from ordinary chat), ``"conversation_summary"`` (session
+    wrap-up).  Automatic sources are CANDIDATES ONLY: they can never write a
+    MemoryRecord by themselves, and they must never carry an explicit marker.
+    ``status`` tracks the user decision: pending / accepted / rejected.
+    """
 
     content: str
     category: MemoryCategory
     reason: str
     evidence: tuple[str, ...]
     confidence: float
+    id: str = ""
+    source: str = "explicit"
+    status: str = "pending"
+    created_at: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            object.__setattr__(self, "id", uuid.uuid4().hex)
+        if not self.created_at:
+            object.__setattr__(self, "created_at", time.time_ns() // 1_000_000)
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "id": self.id,
             "content": self.content,
             "category": self.category.value,
             "reason": self.reason,
             "evidence": list(self.evidence),
             "confidence": self.confidence,
+            "source": self.source,
+            "status": self.status,
+            "created_at": self.created_at,
         }
 
 

@@ -35,6 +35,12 @@ from core.pdf_processor import PdfPageStatus
 # apparatus / structure words that imply a figure question even without 图.
 _EXTENDED_VISUAL_MARKERS = ("装置", "结构", "布局", "怎么工作")
 
+# Formula / math words: a rendered page image is the only reliable source for
+# these. They are gated on a resolved page (see rule 1b below) so a page-free
+# "这个公式在讲什么" still falls through to ordinary text QA instead of
+# erroring on an unresolved render target.
+_FORMULA_MARKERS = ("公式", "方程", "推导", "算式", "怎么解", "如何解", "证明过程", "这个式子")
+
 # The user says the page has no readable text -> only the rendered image helps.
 _NO_TEXT_CLAIM_MARKERS = (
     "没有文字", "没文字", "没有文本", "没有字", "识别不出", "扫不出",
@@ -68,6 +74,11 @@ def _is_visual_question(question: str) -> bool:
     return is_document_vision_request(lowered) or any(
         marker in lowered for marker in _EXTENDED_VISUAL_MARKERS
     )
+
+
+def _is_formula_question(question: str) -> bool:
+    lowered = (question or "").strip().lower()
+    return any(marker in lowered for marker in _FORMULA_MARKERS)
 
 
 def _claims_no_text(question: str) -> bool:
@@ -117,6 +128,18 @@ def route_document_question(
             "visual_trigger" if resolve_document_location(text, context) is None
             else "visual_trigger+page",
         )
+
+    # 1b. Formula / equation questions anchor to the page image when the user
+    #     pointed at a page (公式页的文字抽取经常失真，图像才可靠)。Page-free
+    #     formula questions fall through to ordinary text QA below.
+    if renderable and _is_formula_question(text):
+        formula_location = (
+            resolve_document_location(text, context) if context is not None else None
+        )
+        if formula_location is not None:
+            return DocumentRoute(
+                DocumentAction.DOCUMENT_VISION, "formula_trigger+page"
+            )
 
     # 2. "第五页没有文字": text lookup is declared useless, show the page image.
     if renderable and _claims_no_text(text):

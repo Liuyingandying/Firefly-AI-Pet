@@ -56,6 +56,18 @@ class SuggestionSettings(BaseModel):
         default_factory=lambda: [MemoryCategory.PREFERENCE.value, MemoryCategory.PROJECT.value]
     )
 
+    # v1.1 Companion Mode: 通过筛选门的候选直接写入 (不再等待人工批准)
+    auto_write_enabled: bool = False
+    auto_write_min_chars: int = Field(default=8, ge=0)
+    auto_write_allowed_categories: list[str] = Field(
+        default_factory=lambda: [
+            MemoryCategory.PROJECT.value,
+            MemoryCategory.PREFERENCE.value,
+            MemoryCategory.SHARED_EXPERIENCE.value,
+            MemoryCategory.USER_FACT.value,
+        ]
+    )
+
 
 class SecuritySettings(BaseModel):
     model_config = ConfigDict(extra="ignore")

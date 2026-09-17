@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 import threading
 import time
-from typing import Any
+from typing import Any, NamedTuple
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 from core.agent_events import (
     STATUS_READING,
@@ -16,10 +18,12 @@ from core.agent_events import (
     AgentEventType,
     ErrorCategory,
 )
+from core.runtime_bus import CameraObservedEvent, RuntimeEvent
 from core.conversation_runtime import ConversationRuntime
 from core.conversation_store import ConversationStore
 from core.screen_vision.trigger import (
     format_screen_vision_context,
+    is_camera_vision_request,
     is_explicit_screen_vision_request,
     is_look_command,
     resolve_capture_target,
@@ -76,9 +80,51 @@ from core.lazy_pdf_ocr import (
     run_ocr_batch,
 )
 from core.pdf_processor import PdfPageStatus
+from core.video_frame_vision import analyze_video_frame
+from core.video_reader import (
+    SessionVideoContext,
+    analyze_video_message,
+    detect_bilibili_reference,
+    is_video_followup,
+    video_reading_failure_reply,
+)
+from core.video_time_parser import (
+    format_timestamp,
+    parse_video_time_expression,
+)
+from core.video_study import (
+    STUDY_ENTRY_REPLY,
+    VideoStudyContext,
+    handle_study_turn,
+    is_quiz_request,
+    is_study_entry,
+    is_study_exit,
+    study_failure_reply,
+)
 
 
 logger = logging.getLogger(__name__)
+
+# P0.2 diagnostic tracing start anchor (env-gated, behavior-neutral).
+_TRACE_START = time.monotonic()
+
+
+# M1.5: the LLM prompt only ever sees the most recent WORKING_WINDOW_MESSAGES
+# messages of conversation history (bounded Working Memory). The full session
+# history remains in ConversationStore. Keep this distinct from the store's
+# own persistence ring (`max_messages`) -- they may differ by configuration.
+WORKING_WINDOW_MESSAGES = 40
+
+
+class WorkingContextStats(NamedTuple):
+    """Bounded working-memory diagnostics (M1.5; no tokenizer dependency).
+
+    ``turns`` = chat messages currently in the working window;
+    ``chars`` = total content characters across those messages.
+    """
+
+    turns: int
+    chars: int
 
 SCREEN_VISION_FAILURE_REPLY = (
     "我这边的视觉模块这次没能看成屏幕（{reason}）。"
@@ -90,6 +136,101 @@ SCREEN_VISION_UNAVAILABLE_REPLY = (
 )
 SCREEN_VISION_REASONING_UNAVAILABLE_REPLY = (
     "我已经看到了，但这次分析服务好像有些不稳定，稍后再问我一次吧。"
+)
+CAMERA_VISION_DISABLED_REPLY = "Camera Vision 当前已关闭，可以在 Quick Tools 中开启。"
+CAMERA_OBSERVATION_DISABLED_REPLY = (
+    "Camera Vision 当前已关闭，我不会继续使用之前的摄像头观察结果。"
+)
+CAMERA_VISION_UNAVAILABLE_REPLY = (
+    "Camera Vision 当前不可用：未检测到可用摄像头，或摄像头没有返回画面。"
+)
+VIDEO_ANALYSIS_DISABLED_REPLY = (
+    "Video Analysis 当前已关闭。可以在 Quick Tools 中开启后再让我分析这个视频。"
+)
+TJU_RETRIEVAL_DISABLED_REPLY = (
+    "TJU Info Retrieval 当前已关闭，可以在 Quick Tools 中开启后再使用信息检索。"
+)
+TJU_RETRIEVAL_AUTH_REQUIRED_REPLY = (
+    "TJU Info Retrieval 的天津大学登录状态已过期。请重新登录后再试。\n"
+    "回复「用 TJU 信息检索重新登录」即可打开受控浏览器完成登录。"
+)
+TJU_RETRIEVAL_RELOGIN_DONE_REPLY = (
+    "已打开受控浏览器，请在天津大学登录页完成登录。登录完成后可以重新发送检索指令。"
+)
+
+# 保守触发：只有显式的「用 TJU 信息检索/用信息检索系统」才算；绝不因「天津大学」
+# 字样自动启动插件。普通聊天不受影响。
+_TJU_TRIGGERS = (
+    "用TJU信息检索查",
+    "用TJU信息检索搜索",
+    "用信息检索系统搜索",
+    "用信息检索系统查",
+    "用TJU检索",
+)
+
+
+def _tju_query(text: str) -> str | None:
+    """Extract the query after an explicit TJU-retrieval trigger; None otherwise."""
+    compact = re.sub(r"\s+", "", text or "")
+    if not compact:
+        return None
+    for prefix in _TJU_TRIGGERS:
+        if compact.startswith(prefix):
+            query = compact[len(prefix):].strip(" ：:，,。.!！?？")
+            return query or None
+    return None
+
+
+def _tju_relogin_request(text: str) -> bool:
+    """True only for the explicit re-login trigger (opens the controlled Edge)."""
+    compact = re.sub(r"\s+", "", text or "")
+    return any(
+        marker in compact
+        for marker in ("用TJU信息检索重新登录", "TJU重新登录", "重新登录TJU")
+    )
+
+
+def _tju_open_request(text: str) -> bool:
+    """True only for the explicit「打开 TJU 信息检索系统」trigger (open_ui).
+
+    Deliberately disjoint from the search triggers ("用 TJU 信息检索搜索 xxx"):
+    "打开 TJU 信息检索" never runs a search, and a search request never opens
+    the GUI.
+    """
+    compact = re.sub(r"\s+", "", text or "")
+    return any(
+        marker in compact
+        for marker in ("打开TJU信息检索", "打开信息检索系统", "打开科研检索")
+    )
+
+
+def _format_tju_results(query: str, results) -> str:
+    """Render search results in the chat area (plain text, no new window)."""
+    if not results:
+        return f"TJU Info Retrieval\n\n没有找到「{query}」的相关结果。"
+    lines = ["TJU Info Retrieval", f"找到 {len(results)} 条结果：", ""]
+    for index, item in enumerate(results, start=1):
+        title = getattr(item, "title", "") or ""
+        snippet = getattr(item, "snippet", "") or ""
+        lines.append(f"{index}. {title}")
+        if snippet:
+            lines.append(f"   {snippet[:160]}")
+        source = getattr(item, "source", "") or ""
+        meta = dict(getattr(item, "metadata", {}) or {})
+        year = meta.get("year")
+        url = meta.get("detail_url")
+        detail = " · ".join(
+            part for part in (str(source), str(year) if year else "", str(url) if url else "") if part
+        )
+        if detail:
+            lines.append(f"   {detail}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+CAMERA_VISION_FAILURE_REPLY = (
+    "我的视觉分析服务暂时没有响应，可以稍后再让我看看。"
+)
+CAMERA_VISION_REASONING_UNAVAILABLE_REPLY = (
+    "Camera Vision 已取得画面，但这次分析服务不稳定，请稍后再试。"
 )
 
 # Image-attachment turns (v1). The dot/capability is completely independent of
@@ -138,8 +279,81 @@ _ATTACHMENT_NEGATION_MARKERS = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Vision-1C: recent camera observation ("刚看到你") follow-up context.
+# Session-local: only the answer text is injected through the existing
+# turn_context channel, within a freshness window; nothing is persisted and
+# nothing but text ever enters the model context.
+# ---------------------------------------------------------------------------
+
+_RECENT_VISUAL_FOLLOWUPS = (
+    "刚才看到我了吗",
+    "我刚才什么样",
+    "你刚刚看到什么",
+    "刚才我的状态",
+    "你看到我了吗",
+    "你刚才看到我什么",
+    "刚看到我什么",
+    "你刚才看到什么",
+    "刚才看到我",
+)
+_RECENT_VISUAL_WINDOW_S = 300.0  # 5 minutes
+
+
+def _is_recent_visual_followup(text: str) -> bool:
+    """True only for an explicit follow-up about the last camera look.
+
+    Deliberately disjoint from the video follow-up markers ("刚才" alone is
+    NOT enough), so a video reference never becomes a camera reference and
+    vice versa.
+    """
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return False
+    return any(phrase in normalized for phrase in _RECENT_VISUAL_FOLLOWUPS)
+
+
+def _recent_visual_window_valid(observed_at: float | None, now: float | None = None) -> bool:
+    if observed_at is None:
+        return False
+    return (now if now is not None else time.time()) - observed_at <= _RECENT_VISUAL_WINDOW_S
+
+
+def _camera_note_context_block(note: str) -> str:
+    """Render the recent-camera-observation turn_context block (text only)."""
+    return (
+        "[Recent Visual Context]\n"
+        "本会话最近一次通过摄像头看到你时的描述：\n"
+        f"{note}\n"
+        "基于这次摄像头观察回答用户；画面之外或看不清的内容不要编造。\n"
+        "[End Recent Visual Context]"
+    )
+
+
 class CharacterConversationRunner(QObject):
     """Run non-streaming character turns without blocking the Qt UI thread."""
+
+    _CAMERA_TRACE = logging.getLogger("firefly.camera_trace")
+
+    def _camera_trace(self, event: str, extra: str = "") -> None:
+        """P0.2 diagnostic tracing: env-gated (FIREFLY_CAMERA_TRACE=1),
+        behavior-neutral, thread-identified."""
+        if not os.environ.get("FIREFLY_CAMERA_TRACE"):
+            return
+        try:
+            current = QThread.currentThread()
+            qname = current.objectName() or type(current).__name__
+        except Exception:  # noqa: BLE001
+            qname = "?"
+        self._CAMERA_TRACE.info(
+            "CAMTRACE %-24s dt=%7.1fms py_tid=%s py_name=%s qt=%s %s",
+            event,
+            (time.monotonic() - _TRACE_START) * 1000.0,
+            threading.get_ident(),
+            (threading.current_thread().name or "?"),
+            qname,
+            extra,
+        )
 
     AGENT_ID = "firefly"
 
@@ -156,6 +370,14 @@ class CharacterConversationRunner(QObject):
         attachment_vision_provider: Any | None = None,
         document_chat_handler: Any | None = None,
         document_vision_renderer: Any | None = None,
+        runtime_bus: Any | None = None,
+        camera_vision_enabled: Any | None = None,
+        learning_controller: Any | None = None,
+        video_analysis_enabled: Any | None = None,
+        tju_retrieval_enabled: Any | None = None,
+        tju_retrieval_search: Any | None = None,
+        tju_retrieval_open_login: Any | None = None,
+        tju_retrieval_open_ui: Any | None = None,
     ) -> None:
         super().__init__(parent)
         self.runtime = runtime or ConversationRuntime(
@@ -163,8 +385,43 @@ class CharacterConversationRunner(QObject):
         )
         self._screen_vision_service = screen_vision_service
         self._screen_vision_settings = screen_vision_settings
+        # Phase 1B: learning-mode controller (optional). When present, its
+        # context_block() is injected through the existing turn_context
+        # channel on ordinary chat turns while learning mode is enabled.
+        # It never changes routing, providers or history persistence.
+        self.learning_controller = learning_controller
+        # Phase 9B-1: the outcome of the last response-contract enforcement
+        # ({"met": bool, "missing": (...), "action": str}) — observable for
+        # tests and diagnostics. None when no contract applied.
+        self.last_contract_state = None
+        # Vision-1B: RuntimeBus for session events (camera.observed). The bus
+        # is created after this runner in app.py, so it is attached later via
+        # set_runtime_bus(); None keeps the runner fully standalone.
+        self._runtime_bus = runtime_bus
+        # Managed Camera Vision gate. Standalone/test runners keep the legacy
+        # enabled default; production injects PluginLoader's persisted state.
+        self._camera_vision_enabled = camera_vision_enabled or (lambda: True)
+        # Managed Video Analysis gate (Quick Tools「Video Analysis」). Read LIVE
+        # on every request (never cached) so toggling takes effect immediately.
+        # Standalone/test runners keep the legacy allow default; production
+        # injects PluginLoader.is_plugin_enabled("firefly-video").
+        self._video_analysis_enabled = video_analysis_enabled or (lambda: True)
+        # TJU Info Retrieval capability gate (Quick Tools「TJU Info Retrieval」).
+        # Read LIVE on every request; production injects
+        # PluginLoader.is_plugin_enabled("tju-info-retrieval").
+        self._tju_retrieval_enabled = tju_retrieval_enabled or (lambda: True)
+        # The thin adapter callable (plugin.search) wired by app.py; None means
+        # the capability is not wired (trigger degrades with a friendly note).
+        self._tju_retrieval_search = tju_retrieval_search
+        # Re-login action (plugin.open_login) — opens the controlled Edge for a
+        # MANUAL TJU login. Never touches credentials.
+        self._tju_retrieval_open_login = tju_retrieval_open_login
+        # Open-GUI action (plugin.open_ui) — launches the original TJU desktop
+        # app. An explicit user action, independent of the search capability
+        # gate (Firefly's own search stays gated).
+        self._tju_retrieval_open_ui = tju_retrieval_open_ui
         # Direct vision provider for image-attachment turns (injectable for
-        # tests; defaults to the shared FAST DeepSeek vision provider).
+        # tests; defaults to the shared FAST TJU-Qwen vision provider).
         self._attachment_vision_provider = attachment_vision_provider
         # Text chat handler for document-attachment turns (injectable for
         # tests; defaults to core.ai_router.chat — no Memory/Bond/suggestion).
@@ -174,6 +431,11 @@ class CharacterConversationRunner(QObject):
         self._document_vision_renderer = document_vision_renderer
         self.last_screen_vision_timings: dict[str, float] | None = None
         self.last_screen_vision_meta: dict[str, Any] | None = None
+        # Vision-1B: most recent explicit camera observation answer text.
+        # Session-local, in-RAM only: never persisted, cleared at exit.
+        self.last_camera_observation: str | None = None
+        # Vision-1C: monotonic time of that observation (freshness window).
+        self.last_camera_observation_at: float | None = None
         self.last_attachment_timings: dict[str, Any] | None = None
         self.last_attachment_meta: dict[str, Any] | None = None
         self.last_document_timings: dict[str, Any] | None = None
@@ -188,7 +450,18 @@ class CharacterConversationRunner(QObject):
         self._cancel_event: threading.Event | None = None
         self._thread: threading.Thread | None = None
         self._history = self._load_persisted_history()
+        # Session video context ("刚才那个视频…" follow-ups). In-RAM only:
+        # never persisted, cleared when the process ends.
+        self._session_video: SessionVideoContext | None = None
+        # Study companion mode over the session video ("陪我学习"/"考考我").
+        self._video_study: VideoStudyContext | None = None
         self._lock = threading.RLock()
+
+    def set_runtime_bus(self, runtime_bus: Any | None) -> None:
+        """Attach the RuntimeBus after construction (app.py creates the bus
+        after this runner). Passing None detaches and keeps the runner
+        standalone; event publishing is optional at every call site."""
+        self._runtime_bus = runtime_bus
 
     def _get_screen_vision_service(self) -> Any:
         """Lazily build the real service on first explicit request.
@@ -208,16 +481,88 @@ class CharacterConversationRunner(QObject):
             sync()
         return self._screen_vision_service
 
+    def _working_window_limit(self) -> int:
+        """M1.5: bounded working window = recent WORKING_WINDOW_MESSAGES
+        messages, never exceeding the store's own persistence ring."""
+        store = getattr(self.runtime, "conversation_store", None)
+        ring = getattr(store, "max_messages", None)
+        if isinstance(ring, int) and ring > 0:
+            return min(WORKING_WINDOW_MESSAGES, ring)
+        return WORKING_WINDOW_MESSAGES
+
+    def _append_history(self, messages: list[dict[str, str]]) -> None:
+        """M1.5: the only append path for in-RAM working memory.
+
+        ``_history`` represents the CURRENT WORKING WINDOW (the recent
+        conversation the LLM request needs), never the full history: after
+        every append it is deterministically trimmed to
+        ``ConversationStore.max_messages`` messages -- the same bound the
+        store itself applies. Full history stays in ConversationStore only.
+        """
+        with self._lock:
+            self._history.extend(messages)
+            limit = self._working_window_limit()
+            excess = len(self._history) - limit
+            if excess > 0:
+                del self._history[:excess]
+
+    def working_context_stats(self) -> WorkingContextStats:
+        """Lightweight prompt-side diagnostics (turns/chars, no tokenizer)."""
+        with self._lock:
+            return WorkingContextStats(
+                turns=len(self._history),
+                chars=sum(len(m.get("content", "")) for m in self._history),
+            )
+
     def _load_persisted_history(self) -> list[dict[str, str]]:
-        """Seed the UI history from ConversationStore when one is configured."""
+        """Seed the working window from ConversationStore (M1.5: bounded).
+
+        Reloads never pull the full session -- only the recent working window
+        (``WORKING_WINDOW_MESSAGES``), so a restart cannot dump an unbounded
+        history into the next prompt.
+        """
         store = getattr(self.runtime, "conversation_store", None)
         loader = getattr(store, "load_working_window", None)
         if not callable(loader):
             return []
+        limit = self._working_window_limit()
         try:
-            return [turn.to_chat_message() for turn in loader()]
+            return [turn.to_chat_message() for turn in loader(limit=limit)]
+        except TypeError:
+            # Legacy store signature without ``limit`` support.
+            try:
+                return [turn.to_chat_message() for turn in loader()]
+            except Exception:
+                return []
         except Exception:
             return []
+
+    def open_tju_info_retrieval(self) -> str:
+        """Explicit user action: launch the original TJU GUI (shared with Quick
+        Tools「打开」/ 科研助手 / chat command). Returns a user-facing message.
+        Independent of the search capability gate."""
+        if self._tju_retrieval_open_ui is None:
+            return "（TJU Info Retrieval 打开动作未接线。）"
+        return self._tju_retrieval_open_ui()
+
+    def reload_history(self) -> None:
+        """Re-seed the in-memory history from the store's current session.
+
+        Called by the console after switching the conversation session so the
+        next turn uses the right context. No LLM call, no re-save.
+        """
+        with self._lock:
+            self._history = self._load_persisted_history()
+
+    @property
+    def session_video(self) -> SessionVideoContext | None:
+        """Read-only session video context (UI V2 console consumption)."""
+        return self._session_video
+
+    @property
+    def video_study(self) -> VideoStudyContext | None:
+        """Read-only study state over the session video (UI V2 console)."""
+        return self._video_study
 
     @property
     def running(self) -> bool:
@@ -238,8 +583,33 @@ class CharacterConversationRunner(QObject):
 
 
     @property
-    def ask(self, prompt: str) -> bool:
-        """Start a character turn and return False if the request is invalid."""
+    def memory_service(self) -> Any:
+        """Expose the underlying MemoryService for UI panels (read + write)."""
+        runtime = getattr(self, "runtime", None)
+        if runtime is None:
+            return None
+        _runtime = getattr(runtime, "_runtime", None)
+        if _runtime is None:
+            return None
+        return getattr(_runtime, "memory_service", None)
+
+    @property
+    def suggestion_service(self) -> Any:
+        """Expose the underlying SuggestionService for UI panels."""
+        runtime = getattr(self, "runtime", None)
+        if runtime is None:
+            return None
+        _runtime = getattr(runtime, "_runtime", None)
+        if _runtime is None:
+            return None
+        return getattr(_runtime, "suggestion_service", None)
+    def ask(self, prompt: str, learning_result: Any | None = None) -> bool:
+        """Start a character turn and return False if the request is invalid.
+
+        ``learning_result`` (Phase 9B-1): an already-computed
+        :class:`LearningLoopResult` from the orchestrator — its contexts and
+        decision drive the response contract directly, with NO recomputation.
+        """
         text = (prompt or "").strip()
         with self._lock:
             if self._busy or not text:
@@ -260,7 +630,7 @@ class CharacterConversationRunner(QObject):
         )
         thread = threading.Thread(
             target=self._run,
-            args=(text, cancel_event),
+            args=(text, cancel_event, learning_result),
             daemon=True,
             name="FireflyCharacterConversation",
         )
@@ -377,7 +747,7 @@ class CharacterConversationRunner(QObject):
             f"{HISTORY_IMAGE_PLACEHOLDER} {text}"
         )
         with self._lock:
-            self._history.extend(
+            self._append_history(
                 [
                     {"role": "user", "content": history_user},
                     {"role": "assistant", "content": answer},
@@ -422,7 +792,8 @@ class CharacterConversationRunner(QObject):
             self.agent_event.emit(event)
 
     def _get_attachment_vision_provider(self) -> Any:
-        """The shared FAST DeepSeek vision provider (lazily; injectable)."""
+        """The shared FAST one-shot vision provider — TJU-Qwen (lazily;
+        injectable)."""
         if self._attachment_vision_provider is None:
             from core.screen_vision.config import get_fast_direct_provider
 
@@ -558,7 +929,7 @@ class CharacterConversationRunner(QObject):
         if text:
             history_user = f"{history_user} {text}"
         with self._lock:
-            self._history.extend(
+            self._append_history(
                 [
                     {"role": "user", "content": history_user},
                     {"role": "assistant", "content": answer},
@@ -747,7 +1118,7 @@ class CharacterConversationRunner(QObject):
         if text:
             history_user = f"{history_user} {text}"
         with self._lock:
-            self._history.extend(
+            self._append_history(
                 [
                     {"role": "user", "content": history_user},
                     {"role": "assistant", "content": answer},
@@ -910,7 +1281,13 @@ class CharacterConversationRunner(QObject):
 
         usable = [(p, lazy.page_text(p)) for p in capped if lazy.page_text(p).strip()]
         if not usable:
-            answer = PAGE_OCR_FAILED_REPLY
+            # OCR got nothing (formula / figure pages often do). Give the
+            # vision model the rendered page instead of a dead "无法识别".
+            answer = self._try_lazy_vision_fallback(
+                question, attachment, source, capped[0], event
+            )
+            if answer is None:
+                answer = PAGE_OCR_FAILED_REPLY
             return self._finish_lazy_turn(
                 answer, attachment, lazy, pages, cache_hits, ocr_ms,
                 ocr_mode="lazy", total_started=total_started,
@@ -926,6 +1303,48 @@ class CharacterConversationRunner(QObject):
             answer, attachment, lazy, pages, cache_hits, ocr_ms,
             ocr_mode="lazy", total_started=total_started,
         )
+
+    def _try_lazy_vision_fallback(
+        self,
+        question: str,
+        attachment: DocumentAttachment,
+        source: bytes,
+        page: int,
+        event: threading.Event,
+    ) -> str | None:
+        """When a page's OCR is empty, answer from the rendered page image.
+
+        Reuses the exact DOCUMENT_VISION pipeline (renderer + attachment
+        vision provider + document vision question); returns None so callers
+        can fall back to the existing OCR-failure reply.
+        """
+        if not source or event.is_set():
+            return None
+        try:
+            renderer = self._get_document_vision_renderer()
+            frame = renderer.render_pdf_page(source, page)
+        except Exception as exc:
+            logger.info(
+                "lazy vision fallback render failed (page %s): %s", page,
+                _attachment_failure_label(exc),
+            )
+            return None
+        try:
+            provider = self._get_attachment_vision_provider()
+            answer = provider.answer_direct(
+                frame,
+                build_document_vision_question(question, f"Page {page}", ""),
+                style_context=DOCUMENT_VISION_STYLE_CONTEXT,
+            )
+        except Exception as exc:
+            logger.info(
+                "lazy vision fallback failed (page %s): %s", page,
+                _attachment_failure_label(exc),
+            )
+            return None
+        if not isinstance(answer, str) or not answer.strip():
+            return None
+        return answer.strip()
 
     def _answer_lazy_summary(
         self,
@@ -1088,7 +1507,7 @@ class CharacterConversationRunner(QObject):
             name=attachment.display_name
         )
         with self._lock:
-            self._history.extend(
+            self._append_history(
                 [
                     {"role": "user", "content": history_user},
                     {"role": "assistant", "content": answer},
@@ -1141,6 +1560,7 @@ class CharacterConversationRunner(QObject):
         self,
         prompt: str,
         cancel_event: threading.Event | None = None,
+        learning_result: Any | None = None,
     ) -> tuple[list[AgentEvent], str]:
         """Synchronously execute one turn for deterministic offline testing."""
         text = (prompt or "").strip()
@@ -1152,8 +1572,29 @@ class CharacterConversationRunner(QObject):
         with self._lock:
             history = [dict(message) for message in self._history]
 
-        turn_context = None
-        if is_look_command(text) or is_explicit_screen_vision_request(text):
+        video_bvid = detect_bilibili_reference(text)
+        if video_bvid and not self._video_analysis_enabled():
+            # Capability gate: refuse BEFORE any video data is read (no
+            # download, no transcript fetch, no FFmpeg, no provider call).
+            answer = VIDEO_ANALYSIS_DISABLED_REPLY
+            with self._lock:
+                self._append_history(
+                    [
+                        {"role": "user", "content": text},
+                        {"role": "assistant", "content": answer},
+                    ]
+                )
+            return [
+                AgentEvent.make(
+                    self.AGENT_ID,
+                    AgentEventType.FINAL,
+                    text=answer,
+                )
+            ], answer
+        if video_bvid:
+            # Minimal video reading route: a Bilibili URL/BV id in the message
+            # is answered by the BiliInsight pipeline (metadata + transcript +
+            # AI Router summary) instead of the ordinary companion chat.
             self.agent_event.emit(
                 AgentEvent.make(
                     self.AGENT_ID,
@@ -1162,9 +1603,256 @@ class CharacterConversationRunner(QObject):
                 )
             )
             try:
+                result = analyze_video_message(text)
+                answer = result.to_answer()
+            except Exception as exc:  # video failure must not crash the turn
+                answer = video_reading_failure_reply(exc)
+            else:
+                self._session_video = SessionVideoContext.from_result(result)
+                answer = result.to_answer()
+                if is_study_entry(text) and self._video_analysis_enabled():
+                    # "陪我学习这个视频 BVxxx": analyze, then enter study mode.
+                    self._video_study = VideoStudyContext.from_session(
+                        self._session_video)
+                    answer += f"\n\n{STUDY_ENTRY_REPLY}"
+            if event.is_set():
+                return [self._cancelled_event()], ""
+            with self._lock:
+                self._append_history(
+                    [
+                        {"role": "user", "content": text},
+                        {"role": "assistant", "content": answer},
+                    ]
+                )
+            return [
+                AgentEvent.make(
+                    self.AGENT_ID,
+                    AgentEventType.FINAL,
+                    text=answer,
+                )
+            ], answer
+
+        # TJU Info Retrieval: explicit「打开 TJU 信息检索系统」(open_ui).
+        # Deliberately earlier than the search trigger and disjoint from it.
+        if _tju_open_request(text):
+            if self._tju_retrieval_open_ui is None:
+                answer = "（TJU Info Retrieval 打开动作未接线。）"
+            else:
+                try:
+                    answer = self._tju_retrieval_open_ui()
+                except Exception as exc:  # noqa: BLE001 - never leak internals
+                    safe = str(exc).strip().replace("\n", " ")
+                    answer = f"（无法打开 TJU Info Retrieval：{safe[:160]}）"
+            with self._lock:
+                self._append_history(
+                    [
+                        {"role": "user", "content": text},
+                        {"role": "assistant", "content": answer},
+                    ]
+                )
+            return [
+                AgentEvent.make(
+                    self.AGENT_ID,
+                    AgentEventType.FINAL,
+                    text=answer,
+                )
+            ], answer
+
+        # TJU Info Retrieval: explicit re-login trigger — opens the SAME
+        # controlled Edge (via the plugin) for a MANUAL TJU login. Never
+        # touches credentials; no auto-resume of the previous query.
+        if _tju_relogin_request(text):
+            if not self._tju_retrieval_enabled():
+                answer = TJU_RETRIEVAL_DISABLED_REPLY
+            elif self._tju_retrieval_open_login is None:
+                answer = "（TJU 信息检索重新登录不可用。）"
+            else:
+                try:
+                    answer = self._tju_retrieval_open_login()
+                except Exception as exc:  # noqa: BLE001 - never leak internals
+                    safe = str(exc).strip().replace("\n", " ")
+                    answer = f"（无法打开受控浏览器：{safe[:160]}）"
+            with self._lock:
+                self._append_history(
+                    [
+                        {"role": "user", "content": text},
+                        {"role": "assistant", "content": answer},
+                    ]
+                )
+            return [
+                AgentEvent.make(
+                    self.AGENT_ID,
+                    AgentEventType.FINAL,
+                    text=answer,
+                )
+            ], answer
+
+        # TJU Info Retrieval: explicit trigger ("用 TJU 信息检索查…"). Gated
+        # BEFORE any subprocess/API call — Off means the retrieval system is
+        # never invoked, with a user-readable reply.
+        tju_query = _tju_query(text)
+        if tju_query:
+            if not self._tju_retrieval_enabled():
+                answer = TJU_RETRIEVAL_DISABLED_REPLY
+            elif self._tju_retrieval_search is None:
+                answer = "（TJU 信息检索适配器未接线。）"
+            else:
+                try:
+                    results = self._tju_retrieval_search(tju_query, top_k=5)
+                    answer = _format_tju_results(tju_query, results)
+                except Exception as exc:  # noqa: BLE001 - never leak internals
+                    if type(exc).__name__ == "TjuAuthRequiredError":
+                        # 登录过期 ≠ 普通错误：给用户可操作的重新登录提示。
+                        answer = TJU_RETRIEVAL_AUTH_REQUIRED_REPLY
+                    else:
+                        safe = str(exc).strip().replace("\n", " ")
+                        answer = f"（TJU 信息检索暂时不可用：{safe[:160]}）"
+            with self._lock:
+                self._append_history(
+                    [
+                        {"role": "user", "content": text},
+                        {"role": "assistant", "content": answer},
+                    ]
+                )
+            return [
+                AgentEvent.make(
+                    self.AGENT_ID,
+                    AgentEventType.FINAL,
+                    text=answer,
+                )
+            ], answer
+
+        # Session video timestamp follow-up ("刚才2分钟那里是什么？"): only
+        # when a video was read this session AND the message carries a time
+        # expression within its duration. Otherwise the ordinary paths run.
+        frame_seconds = None
+        if self._session_video is not None:
+            frame_seconds = parse_video_time_expression(
+                text, duration_hint=self._session_video.duration_s or None)
+            duration_s = self._session_video.duration_s or 0.0
+            if frame_seconds is not None and duration_s > 0 and frame_seconds >= duration_s:
+                frame_seconds = None  # "花30分钟装环境" is not a video timestamp
+        if frame_seconds is not None:
+            self.agent_event.emit(
+                AgentEvent.make(
+                    self.AGENT_ID,
+                    AgentEventType.STATUS,
+                    status=STATUS_READING,
+                )
+            )
+            try:
+                # Tell the vision model where this frame sits in the video, so
+                # it answers the question instead of doubting the timestamp.
+                framed_question = (
+                    f"（这是视频进行到 {format_timestamp(frame_seconds)} 时的画面帧）{text}"
+                )
+                frame_analysis = analyze_video_frame(
+                    self._session_video.url, frame_seconds, question=framed_question)
+                answer = (
+                    f"我看了一下，{format_timestamp(frame_seconds)}那里："
+                    f"{frame_analysis.description}"
+                )
+            except Exception as exc:  # frame failure must not crash the turn
+                answer = (
+                    f"抱歉，{format_timestamp(frame_seconds)}那里的画面我没能看到。"
+                    f"（{video_reading_failure_reply(exc)}）"
+                )
+            if event.is_set():
+                return [self._cancelled_event()], ""
+            with self._lock:
+                self._append_history(
+                    [
+                        {"role": "user", "content": text},
+                        {"role": "assistant", "content": answer},
+                    ]
+                )
+            return [
+                AgentEvent.make(
+                    self.AGENT_ID,
+                    AgentEventType.FINAL,
+                    text=answer,
+                )
+            ], answer
+
+        # Study companion mode (Phase 8): entry / quiz / grading / exit.
+        # In the "watching" stage only explicit study markers are intercepted —
+        # other messages keep the ordinary chat path. While "quizzing", the
+        # next message counts as the learner's answer.
+        study_intercepts = (
+            self._video_study is not None
+            and self._video_analysis_enabled()
+            and (self._video_study.stage == "quizzing"
+                 or is_study_exit(text) or is_quiz_request(text) or is_study_entry(text))
+        ) or (
+            self._video_study is None
+            and self._session_video is not None
+            and is_study_entry(text)
+            and self._video_analysis_enabled()
+        )
+        if study_intercepts and self._session_video is not None:
+            self.agent_event.emit(
+                AgentEvent.make(
+                    self.AGENT_ID,
+                    AgentEventType.STATUS,
+                    status=STATUS_THINKING,
+                )
+            )
+            try:
+                answer, self._video_study = handle_study_turn(
+                    text, self._video_study, self._session_video)
+            except Exception as exc:  # study failure must not crash the turn
+                answer = study_failure_reply(exc)
+            if event.is_set():
+                return [self._cancelled_event()], ""
+            with self._lock:
+                self._append_history(
+                    [
+                        {"role": "user", "content": text},
+                        {"role": "assistant", "content": answer},
+                    ]
+                )
+            return [
+                AgentEvent.make(
+                    self.AGENT_ID,
+                    AgentEventType.FINAL,
+                    text=answer,
+                )
+            ], answer
+
+        turn_context = None
+        camera_request = is_camera_vision_request(text)
+        if camera_request:
+            self._camera_trace("T0_user_trigger_camera")
+        if camera_request and not bool(self._camera_vision_enabled()):
+            answer = CAMERA_VISION_DISABLED_REPLY
+            with self._lock:
+                self._append_history(
+                    [
+                        {"role": "user", "content": text},
+                        {"role": "assistant", "content": answer},
+                    ]
+                )
+            return [AgentEvent.make(
+                self.AGENT_ID,
+                AgentEventType.FINAL,
+                text=answer,
+            )], answer
+        if (is_look_command(text) or is_explicit_screen_vision_request(text)
+                or camera_request):
+            self.agent_event.emit(
+                AgentEvent.make(
+                    self.AGENT_ID,
+                    AgentEventType.STATUS,
+                    status=STATUS_READING,
+                )
+            )
+            capture_mode = resolve_capture_target(screen_vision_question(text))
+            is_camera = capture_mode == "camera"
+            try:
+                self._camera_trace("T1_worker_entering_vision_look", f"mode={capture_mode}")
                 result = self._get_screen_vision_service().look(
                     screen_vision_question(text),
-                    capture_mode=resolve_capture_target(screen_vision_question(text)),
+                    capture_mode=capture_mode,
                 )
             except Exception as exc:  # vision failure must not crash the turn
                 from core.screen_vision.provider_errors import (
@@ -1175,11 +1863,24 @@ class CharacterConversationRunner(QObject):
                 from core.screen_vision.safety import sanitize_error_text
 
                 logger.warning(
-                    "Screen vision look failed: %s: %s",
+                    "%s vision look failed: %s: %s",
+                    "Camera" if is_camera else "Screen",
                     type(exc).__name__,
                     sanitize_error_text(str(exc)),
                 )
-                if isinstance(exc, VisionTemporarilyUnavailable):
+                if is_camera:
+                    from core.screen_vision.screen.camera import CameraUnavailableError
+
+                    if isinstance(exc, CameraUnavailableError):
+                        answer = CAMERA_VISION_UNAVAILABLE_REPLY
+                    elif isinstance(exc, ReasoningTemporarilyUnavailable):
+                        answer = CAMERA_VISION_REASONING_UNAVAILABLE_REPLY
+                    else:
+                        # User-facing copy: never expose the internal
+                        # exception type/HTTP/billing details; the full error
+                        # stays in the logger line above.
+                        answer = CAMERA_VISION_FAILURE_REPLY
+                elif isinstance(exc, VisionTemporarilyUnavailable):
                     answer = SCREEN_VISION_UNAVAILABLE_REPLY
                 elif isinstance(exc, ReasoningTemporarilyUnavailable):
                     answer = SCREEN_VISION_REASONING_UNAVAILABLE_REPLY
@@ -1188,7 +1889,7 @@ class CharacterConversationRunner(QObject):
                         reason=type(exc).__name__
                     )
                 with self._lock:
-                    self._history.extend(
+                    self._append_history(
                         [
                             {"role": "user", "content": text},
                             {"role": "assistant", "content": answer},
@@ -1201,11 +1902,34 @@ class CharacterConversationRunner(QObject):
                 )], answer
             self._pending_vision_timings = dict(result.timings)
             self._pending_vision_meta = dict(result.meta)
+            if result.meta.get("capture_mode") == "camera":
+                # Vision-1B: record the most recent camera observation at
+                # session level and notify the companion UI via the bus.
+                # Text only, never pixels. Publishing must never break the
+                # visual answer that is about to be returned.
+                self.last_camera_observation = result.answer
+                self.last_camera_observation_at = time.time()
+                if self._runtime_bus is not None and result.answer:
+                    try:
+                        self._runtime_bus.publish_event(
+                            RuntimeEvent(
+                                kind="camera.observed",
+                                source="character_conversation_runner",
+                                timestamp=int(time.time() * 1000),
+                                payload=CameraObservedEvent(text=result.answer),
+                            )
+                        )
+                    except Exception as exc:  # noqa: BLE001 - event must not fail the turn
+                        logger.warning(
+                            "camera.observed publish failed: %s",
+                            type(exc).__name__,
+                        )
             if result.meta.get("direct_one_shot") is True:
                 # FAST already produced the final natural-language companion
                 # answer. Do not send it, the screenshot question, or chat
                 # history through a second reasoning/chat provider.
                 answer = result.answer
+                self._camera_trace("T10_caller_received_answer", f"mode={capture_mode}")
                 if event.is_set():
                     return [self._cancelled_event()], ""
                 self.last_screen_vision_timings = dict(result.timings)
@@ -1215,7 +1939,7 @@ class CharacterConversationRunner(QObject):
                     self.last_screen_vision_timings,
                 )
                 with self._lock:
-                    self._history.extend(
+                    self._append_history(
                         [
                             {"role": "user", "content": text},
                             {"role": "assistant", "content": answer},
@@ -1228,10 +1952,114 @@ class CharacterConversationRunner(QObject):
                 )], answer
             turn_context = format_screen_vision_context(result)
 
+        if (turn_context is None and self._session_video is not None
+                and is_video_followup(text)
+                and self._video_analysis_enabled()):
+            # "刚才那个视频里面…" — inject the last read video (summary +
+            # transcript excerpt) through the existing single-turn
+            # turn_context channel. Gated by the Video Analysis capability:
+            # when it is off, video-derived context must not be injected (the
+            # assistant cannot answer "from the video"). Never persisted;
+            # ordinary messages keep turn_context None.
+            turn_context = self._session_video.to_context_block()
+
+        camera_reuse_blocked = (
+            self.last_camera_observation is not None
+            and _recent_visual_window_valid(self.last_camera_observation_at)
+            and _is_recent_visual_followup(text)
+            and not self._camera_vision_enabled()
+        )
+        if camera_reuse_blocked:
+            # Camera Vision off: never reuse a stale camera observation in a
+            # NEW turn. Refuse before any observation text is injected; no
+            # camera open, no provider call, no old data leak.
+            answer = CAMERA_OBSERVATION_DISABLED_REPLY
+            with self._lock:
+                self._append_history(
+                    [
+                        {"role": "user", "content": text},
+                        {"role": "assistant", "content": answer},
+                    ]
+                )
+            return [
+                AgentEvent.make(
+                    self.AGENT_ID,
+                    AgentEventType.FINAL,
+                    text=answer,
+                )
+            ], answer
+
+        if (turn_context is None
+                and self.last_camera_observation is not None
+                and _recent_visual_window_valid(self.last_camera_observation_at)
+                and _is_recent_visual_followup(text)
+                and self._camera_vision_enabled()):
+            # Vision-1C: explicit "刚看到你" follow-up — inject the most
+            # recent camera observation (text only) through the same
+            # turn_context channel. Window-limited (5 min), never persisted,
+            # never pixel data; ordinary and video messages stay untouched.
+            turn_context = _camera_note_context_block(self.last_camera_observation)
+
+        contract = None
+        self.last_contract_state = None
+        if learning_result is not None:
+            # Phase 9B-1: the orchestrator already computed the four contexts;
+            # the runner uses them directly — NO recomputation. The response
+            # contract (course / chapter / next step / required elements)
+            # constrains the final answer.
+            from core.learning.orchestrator import build_response_contract
+
+            contract = build_response_contract(learning_result)
+            blocks = []
+            result_block = getattr(learning_result, "context_block", None)
+            if result_block:
+                blocks.append(result_block)
+            contract_block = contract.prompt_block() if contract is not None else None
+            if contract_block:
+                blocks.append(contract_block)
+            if blocks:
+                turn_context = "\n\n".join(blocks)
+        elif (turn_context is None
+                and self.learning_controller is not None):
+            # Phase 1B: while learning mode is enabled, inject the light
+            # learning context (mode + course + teaching principles) through
+            # the same channel. Never persisted, never affects routing.
+            # Phase 3/4/5: teaching posture, next-action decision and prepared
+            # action guidance are appended by the same read-only composition.
+            # Phase 6: the composition itself moved into the orchestrator
+            # (learning_loop_block) — one frozen flow order, still read-only
+            # (it never calls handle_text, so it cannot double-record or
+            # double-start an assessment). The runner decides nothing.
+            loop_block = getattr(self.learning_controller, "learning_loop_block", None)
+            if callable(loop_block):
+                turn_context = loop_block()
+
         companion_started = time.perf_counter()
         try:
             response = self.runtime.chat(text, history=history, turn_context=turn_context)
             answer = extract_assistant_text(response)
+            if contract is not None:
+                # Phase 9B-1: the contract is ENFORCED on the final answer —
+                # one deterministic retry when the anchors are missing. The
+                # check itself is pure (no LLM judge).
+                missing = contract.missing_anchors(answer)
+                if missing:
+                    retry_context = "\n\n".join([
+                        turn_context or "",
+                        "你上一次的回答没有覆盖学习契约中的要素，"
+                        "请重新回答并覆盖：课程定位、第一学习任务、下一步交互。",
+                    ])
+                    retry = self.runtime.chat(
+                        text, history=history, turn_context=retry_context)
+                    answer2 = extract_assistant_text(retry)
+                    if not contract.missing_anchors(answer2):
+                        answer = answer2
+                        missing = ()
+                self.last_contract_state = {
+                    "met": not missing,
+                    "missing": missing,
+                    "action": contract.action,
+                }
         except Exception as exc:  # provider/runtime failures must not crash Qt
             return [self._error_event(str(exc), ErrorCategory.PROVIDER)], ""
         companion_ms = (time.perf_counter() - companion_started) * 1000
@@ -1253,7 +2081,7 @@ class CharacterConversationRunner(QObject):
                 self.last_screen_vision_timings,
             )
         with self._lock:
-            self._history.extend(
+            self._append_history(
                 [
                     {"role": "user", "content": text},
                     {"role": "assistant", "content": answer},
@@ -1267,8 +2095,10 @@ class CharacterConversationRunner(QObject):
             )
         ], answer
 
-    def _run(self, prompt: str, cancel_event: threading.Event) -> None:
-        events, _ = self.perform(prompt, cancel_event)
+    def _run(self, prompt: str, cancel_event: threading.Event,
+             learning_result: Any | None = None) -> None:
+        events, _ = self.perform(prompt, cancel_event,
+                                 learning_result=learning_result)
         with self._lock:
             self._busy = False
             self._cancel_event = None

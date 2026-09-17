@@ -121,7 +121,8 @@ class SettingsManager:
 
     @property
     def screen_vision_fast_mode(self) -> bool:
-        """FAST routing for screen vision (DeepSeek-first). Default ON."""
+        """FAST one-shot routing for screen vision (TJU-Qwen primary,
+        DeepSeek/GLM as fallback only). Default ON."""
         return bool(self._preferences["screen_vision_fast_mode"])
 
     def set_screen_vision_fast_mode(self, enabled: bool) -> None:
@@ -140,6 +141,35 @@ class SettingsManager:
 
     def ui_scale(self) -> float:
         return float(self._preferences["ui_scale"])
+
+    # -- learning mode (Phase 1B): last learning project ------------------
+
+    @property
+    def learning_last_course_id(self) -> str:
+        """Last selected learning course id (user-visible "学习项目").
+        Stale references are cleared by the learning controller."""
+        return str(self._preferences.get("learning.last_course_id") or "")
+
+    def set_learning_last_course_id(self, course_id: str) -> None:
+        course_id = (course_id or "").strip()
+        if self._preferences.get("learning.last_course_id") == course_id:
+            return
+        self._preferences["learning.last_course_id"] = course_id
+        self.save()
+
+    # -- plugin enablement (Quick Tools Plugin Management P0) ------------
+
+    def plugin_enabled(self, plugin_id: str) -> bool:
+        """Source-of-truth: whether an external Quick Tool plugin is enabled.
+
+        A missing key defaults to True so already-running plugins keep their
+        current behavior on first run (backward-compatible migration).
+        """
+        value = self._preferences.get(f"plugins.{plugin_id}.enabled")
+        return True if value is None else bool(value)
+
+    def set_plugin_enabled(self, plugin_id: str, enabled: bool) -> None:
+        self._set(f"plugins.{plugin_id}.enabled", bool(enabled))
 
     def set_notifications_enabled(self, enabled: bool) -> None:
         self._set("notifications_enabled", enabled)

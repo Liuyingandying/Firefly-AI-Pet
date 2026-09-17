@@ -15,12 +15,24 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Mapping
 
+from .access_mode import (
+    MemoryAccessMode, SAFE_WRITE_PATCH_FIELDS, check_access,
+)
 from .records import MemoryCategory, MemoryRecord, MemorySource
+from core.user_paths import get_user_data_paths
 
 
 STORE_VERSION = 1
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_REPOSITORY_PATH = PROJECT_DIR / "runtime" / "companion" / "memory_records.json"
+DEFAULT_REPOSITORY_PATH = get_user_data_paths().memory / "memory_records.json"
+
+
+def _mode(access_mode: MemoryAccessMode | str | None) -> MemoryAccessMode:
+    """Coerce a caller-supplied mode; ``None`` = legacy permissive handle."""
+    if access_mode is None:
+        return MemoryAccessMode.CONFIRMED_WRITE
+    if isinstance(access_mode, MemoryAccessMode):
+        return access_mode
+    return MemoryAccessMode(str(access_mode))
 
 
 class DuplicateMemoryRecordError(ValueError):
@@ -31,12 +43,18 @@ class MemoryRepository(ABC):
     """Storage-independent contract for authoritative memory records."""
 
     @abstractmethod
-    def add(self, record: MemoryRecord) -> str:
-        """Persist ``record`` and return its ID; reject duplicate IDs."""
+    def add(self, record: MemoryRecord, *,
+            access_mode: MemoryAccessMode | str | None = None) -> str:
+        """Persist ``record`` and return its ID; reject duplicate IDs.
+
+        Requires at least SAFE_WRITE. ``access_mode=None`` keeps the legacy
+        permissive behaviour for direct storage users; the service layer
+        always forwards its handle's mode.
+        """
 
     @abstractmethod
     def get(self, record_id: str) -> MemoryRecord | None:
-        """Return a record and persist its access timestamp, or return None."""
+        """Pure read: return the record or None. Never writes."""
 
     @abstractmethod
     def list(
@@ -49,16 +67,29 @@ class MemoryRepository(ABC):
         """Return filtered records ordered by newest creation time first."""
 
     @abstractmethod
-    def update(self, record_id: str, patch: Mapping[str, Any]) -> MemoryRecord:
-        """Apply known mutable fields and advance ``updated_ts``."""
+    def update(self, record_id: str, patch: Mapping[str, Any], *,
+               access_mode: MemoryAccessMode | str | None = None) -> MemoryRecord:
+        """Apply known mutable fields and advance ``updated_ts``.
+
+        Requires at least SAFE_WRITE; a SAFE_WRITE handle may only patch
+        creation/supersede bookkeeping fields.
+        """
 
     @abstractmethod
-    def delete(self, record_id: str) -> bool:
-        """Delete a record, returning False when it does not exist."""
+    def delete(self, record_id: str, *,
+               access_mode: MemoryAccessMode | str | None = None) -> bool:
+        """Delete a record, returning False when it does not exist.
+
+        Requires CONFIRMED_WRITE.
+        """
 
     @abstractmethod
-    def clear(self) -> int:
-        """Delete every record and return the number removed."""
+    def clear(self, *,
+              access_mode: MemoryAccessMode | str | None = None) -> int:
+        """Delete every record and return the number removed.
+
+        Requires CONFIRMED_WRITE.
+        """
 
     @abstractmethod
     def all_ids(self) -> set[str]:
@@ -69,8 +100,12 @@ class MemoryRepository(ABC):
         """Return a complete JSON-compatible snapshot."""
 
     @abstractmethod
-    def import_data(self, data: Mapping[str, Any]) -> int:
-        """Validate and merge records, returning the number imported."""
+    def import_data(self, data: Mapping[str, Any], *,
+                    access_mode: MemoryAccessMode | str | None = None) -> int:
+        """Validate and merge records, returning the number imported.
+
+        Requires CONFIRMED_WRITE.
+        """
 
 
 class JsonMemoryRepository(MemoryRepository):
@@ -86,6 +121,9 @@ class JsonMemoryRepository(MemoryRepository):
         "last_accessed_ts",
         "retention_half_life_days",
         "vector_id",
+        "lifecycle_status",
+        "superseded_by",
+        "supersede_reason",
     }
 
     def __init__(self, path: Path | str | None = None) -> None:
@@ -93,9 +131,12 @@ class JsonMemoryRepository(MemoryRepository):
         self._lock = RLock()
         self._records = self._load()
 
-    def add(self, record: MemoryRecord) -> str:
+    def add(self, record: MemoryRecord, *,
+            access_mode: MemoryAccessMode | str | None = None) -> str:
         if not isinstance(record, MemoryRecord):
             raise TypeError("record must be a MemoryRecord")
+        check_access(_mode(access_mode), MemoryAccessMode.SAFE_WRITE,
+                     "repository.add")
         with self._lock:
             if record.id in self._records:
                 raise DuplicateMemoryRecordError(
@@ -108,20 +149,15 @@ class JsonMemoryRepository(MemoryRepository):
             return record.id
 
     def get(self, record_id: str) -> MemoryRecord | None:
+        """Pure read (M3B.1: no last_accessed_ts bump, no persist).
+
+        Retrieval, UI viewing, and benchmarking resolve records through this
+        method; a read must never write.  Recording an access — if ever
+        needed — is an explicit ``update`` by a CONFIRMED_WRITE entry.
+        """
         normalized_id = self._record_id(record_id)
         with self._lock:
-            current = self._records.get(normalized_id)
-            if current is None:
-                return None
-            accessed = replace(
-                current,
-                last_accessed_ts=max(self._now_ms(), current.last_accessed_ts + 1),
-            )
-            proposed = dict(self._records)
-            proposed[normalized_id] = accessed
-            self._persist(proposed)
-            self._records = proposed
-            return accessed
+            return self._records.get(normalized_id)
 
     def list(
         self,
@@ -151,10 +187,19 @@ class JsonMemoryRepository(MemoryRepository):
             reverse=True,
         )
 
-    def update(self, record_id: str, patch: Mapping[str, Any]) -> MemoryRecord:
+    def update(self, record_id: str, patch: Mapping[str, Any], *,
+               access_mode: MemoryAccessMode | str | None = None) -> MemoryRecord:
         normalized_id = self._record_id(record_id)
         if not isinstance(patch, Mapping):
             raise TypeError("patch must be a mapping")
+        # SAFE_WRITE handles may only touch creation/supersede bookkeeping;
+        # content edits, timestamps and weights need CONFIRMED_WRITE.
+        check_access(
+            _mode(access_mode), MemoryAccessMode.SAFE_WRITE,
+            "repository.update",
+            patch_keys=frozenset(patch),
+            allowed_patch_fields=SAFE_WRITE_PATCH_FIELDS,
+        )
         with self._lock:
             current = self._records.get(normalized_id)
             if current is None:
@@ -170,7 +215,10 @@ class JsonMemoryRepository(MemoryRepository):
             self._records = proposed
             return updated
 
-    def delete(self, record_id: str) -> bool:
+    def delete(self, record_id: str, *,
+               access_mode: MemoryAccessMode | str | None = None) -> bool:
+        check_access(_mode(access_mode), MemoryAccessMode.CONFIRMED_WRITE,
+                     "repository.delete")
         normalized_id = self._record_id(record_id)
         with self._lock:
             if normalized_id not in self._records:
@@ -181,7 +229,10 @@ class JsonMemoryRepository(MemoryRepository):
             self._records = proposed
             return True
 
-    def clear(self) -> int:
+    def clear(self, *,
+              access_mode: MemoryAccessMode | str | None = None) -> int:
+        check_access(_mode(access_mode), MemoryAccessMode.CONFIRMED_WRITE,
+                     "repository.clear")
         with self._lock:
             count = len(self._records)
             if count == 0:
@@ -202,7 +253,10 @@ class JsonMemoryRepository(MemoryRepository):
                 "records": [record.to_dict() for record in records],
             }
 
-    def import_data(self, data: Mapping[str, Any]) -> int:
+    def import_data(self, data: Mapping[str, Any], *,
+                    access_mode: MemoryAccessMode | str | None = None) -> int:
+        check_access(_mode(access_mode), MemoryAccessMode.CONFIRMED_WRITE,
+                     "repository.import_data")
         candidates = self._parse_payload(data)
         if not candidates:
             return 0

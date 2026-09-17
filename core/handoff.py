@@ -22,8 +22,9 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-METRICS_DIR = PROJECT_DIR / "runtime" / "metrics"
+from core.user_paths import get_user_data_paths
+
+METRICS_DIR = get_user_data_paths().runtime / "metrics"
 HANDOFF_LATEST = METRICS_DIR / "handoff_latest.json"
 
 

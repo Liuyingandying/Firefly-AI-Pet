@@ -5,10 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from .base import DEFAULT_TIMEOUT_SECONDS, OpenAICompatibleProvider, Transport, resolve_setting
+from core.providers.catalog import CATALOG
 
 
-DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
-DEFAULT_MODEL = "glm-4.7-flash"
+DEFAULT_BASE_URL = CATALOG["zhipu"].base_url
+DEFAULT_MODEL = CATALOG["zhipu"].model
 
 
 class ZhipuGLMProvider(OpenAICompatibleProvider):

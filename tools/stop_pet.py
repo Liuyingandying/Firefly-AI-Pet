@@ -14,7 +14,12 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtNetwork import QLocalSocket
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
-RUNTIME_DIR = PROJECT_DIR / "runtime"
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
+
+from core.user_paths import get_user_data_paths
+
+RUNTIME_DIR = get_user_data_paths().runtime
 PID_FILE = RUNTIME_DIR / "pet.pid"
 SERVER_NAME = "FireflyAIPet-SingleInstance"
 

@@ -43,7 +43,9 @@ from PySide6.QtWidgets import (
 from core.agent_events import AgentEventType
 from core.document_attachment import DocumentParseError, EncryptedPdfError, parse_document_bytes
 from ui import theme
+from ui.chat_markup import markdown_to_html
 from ui.character_conversation_runner import CharacterConversationRunner
+from voice_client.play_button import PlayVoiceButton
 from ui.companion_attachment import (
     LEGACY_DOCUMENT_MESSAGE,
     THUMBNAIL_SIZE,
@@ -321,7 +323,7 @@ class CompanionChatWindow(QWidget):
         self.log.setReadOnly(True)
         for message in self.runner.history:
             label = "你" if message["role"] == "user" else "流萤"
-            self.log.append(f"{label}: {message['content']}")
+            self.log.append(f"{label}: {markdown_to_html(message['content'])}")
 
         # Attachment v1: at most one in-memory image OR document per turn.
         self._pending_attachment: AttachmentImage | DocumentAttachment | None = None
@@ -360,11 +362,18 @@ class CompanionChatWindow(QWidget):
         row.addWidget(self.input, 1)
         row.addWidget(self.send_button)
 
+        self._last_assistant_text = ""
+        self.play_voice_button = PlayVoiceButton(lambda: self._last_assistant_text)
+        play_row = QHBoxLayout()
+        play_row.addStretch(1)
+        play_row.addWidget(self.play_voice_button)
+
         layout = QVBoxLayout(self)
         layout.addWidget(self.log, 1)
         layout.addWidget(self.attachment_row)
         layout.addWidget(self.hint_label)
         layout.addLayout(row)
+        layout.addLayout(play_row)
 
         self.input.returnPressed.connect(self._send)
         self.send_button.clicked.connect(self._send)
@@ -579,7 +588,8 @@ class CompanionChatWindow(QWidget):
 
     def _on_event(self, event) -> None:
         if event.type is AgentEventType.FINAL:
-            self.log.append(f"流萤: {event.text}")
+            self._last_assistant_text = event.text or ""
+            self.log.append(f"流萤: {markdown_to_html(event.text)}")
             self._set_busy(False)
             if self._turn_has_image:
                 self._clear_attachment()  # images: consumed on success
@@ -614,8 +624,18 @@ def _drop_has_attachment(mime: QMimeData) -> bool:
 
 
 def main() -> int:
+    from ui.character_conversation_runner import CharacterConversationRunner
+
     app = QApplication(sys.argv)
-    window = CompanionChatWindow()
+    # Standalone dev entry: fail-closed capability gates (no PluginLoader
+    # here). Camera / video analysis stay OFF unless explicitly enabled in
+    # code — never silently allow when Quick Tools would show them as Off.
+    window = CompanionChatWindow(
+        CharacterConversationRunner(
+            video_analysis_enabled=lambda: False,
+            camera_vision_enabled=lambda: False,
+        )
+    )
     window.show()
     return app.exec()
 

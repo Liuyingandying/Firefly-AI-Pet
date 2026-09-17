@@ -12,12 +12,15 @@ venv/
 env/
 
 __pycache__/
+**pycache**/
 *.py[cod]
 *.pyc
 *.pyo
 *.pyd
 
 .pytest_cache/
+.pytest_*
+.pytest_camera_*
 .mypy_cache/
 .ruff_cache/
 
@@ -30,6 +33,7 @@ __pycache__/
 # ----------------------------
 
 runtime/
+logs/
 
 # Historical explicit runtime ignores
 runtime/state.json.tmp
@@ -48,6 +52,9 @@ config/sessions.json.tmp
 
 config/pet_preferences.json
 config/pet_preferences.json.tmp
+
+config/provider_state.json
+config/hardware_devices.json
 
 
 # ----------------------------
@@ -84,6 +91,7 @@ hook_test.txt
 
 .env
 .env.*
+*.env
 !.env.example
 *.pem
 *.key

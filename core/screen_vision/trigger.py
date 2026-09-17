@@ -15,16 +15,15 @@ _REQUEST_KEYWORDS = (
     "看一下屏幕", "看看屏幕", "看下屏幕", "看我的屏幕", "看一下我的屏幕",
     "看看我的屏幕", "看看当前窗口", "看一下当前窗口", "帮我看看当前窗口",
     "看看现在的屏幕", "看看这个窗口",
+    "看看我电脑上是什么", "看看电脑上是什么",
     "看看这是怎么回事", "你看看这是怎么回事", "看看这是怎么了",
-    "看看我在做什么", "看看我在干什么", "看看我现在在做什么", "看看我现在在干什么",
-    "看下我在做什么", "看下我在干什么",
     "look at my screen", "look at the screen", "what's on my screen",
 )
 
 # Generic combination rule: an explicit look-verb plus a screen/window target.
 _LOOK_VERBS = ("看看", "看一下", "看下", "瞧瞧", "帮我看看", "你看看", "看看我的")
 _SCREEN_TARGETS = ("屏幕", "当前窗口", "桌面", "显示器", "这是怎么回事",
-                   "我在做什么", "我在干什么", "在做什么", "在干什么",
+                   "电脑上是什么",
                    "聊天框", "聊天窗口", "你的窗口", "流萤窗口", "companion",
                    "对话框")
 
@@ -65,10 +64,19 @@ def resolve_capture_mode(text: str) -> str:
 CAPTURE_PRIMARY_SCREEN = "primary_screen"
 CAPTURE_LAST_NON_FIREFLY_WINDOW = "last_non_firefly_window"
 CAPTURE_FIREFLY_COMPANION = "firefly_companion"
+CAPTURE_CAMERA = "camera"
 CAPTURE_TARGETS = (
     CAPTURE_PRIMARY_SCREEN,
     CAPTURE_LAST_NON_FIREFLY_WINDOW,
     CAPTURE_FIREFLY_COMPANION,
+    CAPTURE_CAMERA,
+)
+
+# Vision-1A: explicit "look at me" (camera) intents. Checked only AFTER the
+# screen/companion targets in resolve_capture_target, so "看看我的屏幕" keeps
+# routing to the screen even though it starts with "看看我".
+_CAMERA_TARGET_PHRASES = (
+    "看看我", "看一下我", "看下我", "看我", "摄像头", "我的样子", "看到我吗",
 )
 
 # Priority 1: explicit whole screen / desktop.
@@ -83,8 +91,8 @@ _COMPANION_TARGET_PHRASES = (
 )
 # Priority 3: "what I was just doing" surfaces.
 _LAST_WINDOW_TARGET_PHRASES = (
-    "我在做什么", "我在干什么", "刚才这个窗口", "刚才的窗口", "刚才在看",
-    "在看的东西", "正在看的", "这个页面", "当前页面", "当前窗口",
+    "刚才这个窗口", "刚才的窗口", "刚才在看", "在看的东西", "正在看的",
+    "这个页面", "当前页面", "当前窗口",
     "这个窗口", "现在的画面",
 )
 
@@ -112,6 +120,21 @@ def _first_positive_phrase(text: str, phrases) -> int:
     return best
 
 
+def is_camera_vision_request(text: str) -> bool:
+    """True only for explicit "look at me" (camera) requests.
+
+    Screen intents keep their existing routing: "看看我的屏幕" contains
+    "看看我" but must never open the camera. Negation is respected the same
+    way capture targets are ("不要用摄像头" is not a camera request).
+    """
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return False
+    if is_look_command(normalized) or is_explicit_screen_vision_request(normalized):
+        return False
+    return _first_positive_phrase(normalized, _CAMERA_TARGET_PHRASES) != -1
+
+
 def resolve_capture_target(text: str) -> str:
     """Map an already-gated look request to WHERE to capture.
 
@@ -129,6 +152,8 @@ def resolve_capture_target(text: str) -> str:
         return CAPTURE_FIREFLY_COMPANION
     if _first_positive_phrase(normalized, _LAST_WINDOW_TARGET_PHRASES) != -1:
         return CAPTURE_LAST_NON_FIREFLY_WINDOW
+    if is_camera_vision_request(normalized):
+        return CAPTURE_CAMERA
     return CAPTURE_LAST_NON_FIREFLY_WINDOW
 
 

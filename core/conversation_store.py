@@ -15,14 +15,13 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Mapping, Sequence
 
+from core.user_paths import get_user_data_paths
+
 
 STORE_VERSION = 1
 DEFAULT_SESSION_ID = "firefly-main"
 DEFAULT_MAX_MESSAGES = 40
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_CONVERSATION_PATH = (
-    PROJECT_DIR / "runtime" / "companion" / "conversation.json"
-)
+DEFAULT_CONVERSATION_PATH = get_user_data_paths().conversation / "conversation.json"
 _ALLOWED_ROLES = frozenset({"user", "assistant"})
 
 
@@ -60,6 +59,25 @@ class Turn:
 class _SessionState:
     turns: tuple[Turn, ...] = ()
     summary: str | None = None
+    title: str | None = None  # 用户自定义会话标题（可选；空 = 未设置）
+
+
+def build_session_summary(turns, max_chars: int = 200) -> str:
+    """v1.1 Companion Mode: 抽取式会话摘要 (无 LLM)。
+
+    取用户侧消息压缩拼接; 无用户消息返回空串。
+    """
+    import re as _re
+
+    user_lines = []
+    for t in turns:
+        role = (getattr(t, "role", "") or "").lower()
+        content = (getattr(t, "content", "") or "").strip()
+        if role in ("user", "human") and content:
+            user_lines.append(_re.sub(r"\s+", " ", content)[:60])
+    if not user_lines:
+        return ""
+    return "；".join(user_lines[:5])[:max_chars]
 
 
 class ConversationStore:
@@ -105,6 +123,26 @@ class ConversationStore:
         with self._lock:
             return sorted(self._sessions)
 
+    def most_recent_session_id(self) -> str | None:
+        """Session id whose last turn is newest (for startup restore).
+
+        Sessions with no turns count as oldest; a deterministic pick is used
+        when every session is empty. Never raises and never writes.
+        """
+        with self._lock:
+            if not self._sessions:
+                return None
+            best_id: str | None = None
+            best_ts = -1
+            for session_id, state in self._sessions.items():
+                ts = state.turns[-1].ts if state.turns else 0
+                if ts > best_ts:
+                    best_ts = ts
+                    best_id = session_id
+            if best_id is None:  # all empty
+                return sorted(self._sessions)[0]
+            return best_id
+
     def delete_session(self, session_id: str) -> bool:
         normalized = _session_id(session_id)
         with self._lock:
@@ -146,12 +184,27 @@ class ConversationStore:
         self._append(turns, session_id=session_id)
 
     def load_working_window(
-        self, *, session_id: str | None = None
+        self,
+        *,
+        session_id: str | None = None,
+        limit: int | None = None,
     ) -> list[Turn]:
+        """Return the recent conversation window for one session.
+
+        ``limit`` (M1.5) caps the returned window independently of the
+        persistence ring (``max_messages``), so the LLM prompt can stay
+        bounded even when the store is configured to retain more history.
+        Defaults to the full persisted ring; never exceeds it.
+        """
         normalized = self._resolve_session_id(session_id)
+        size = self.max_messages
+        if limit is not None:
+            if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+                raise ValueError("limit must be a positive integer")
+            size = min(size, limit)
         with self._lock:
             state = self._sessions.get(normalized, _SessionState())
-            return list(state.turns[-self.max_messages :])
+            return list(state.turns[-size:])
 
     load_recent_window = load_working_window
 
@@ -190,9 +243,39 @@ class ConversationStore:
         with self._lock:
             current = self._sessions.get(normalized, _SessionState())
             proposed = dict(self._sessions)
-            proposed[normalized] = _SessionState(current.turns, summary)
+            proposed[normalized] = _SessionState(current.turns, summary, current.title)
             self._persist(proposed)
             self._sessions = proposed
+
+    def get_session_title(self, session_id: str) -> str | None:
+        """Return a session's custom display title (None when unset)."""
+        normalized = _session_id(session_id)
+        with self._lock:
+            state = self._sessions.get(normalized)
+            return state.title if state is not None else None
+
+    def set_session_title(self, session_id: str, title: str | None) -> bool:
+        """Set or clear a session's custom display title (atomic).
+
+        ``title`` is trimmed; an empty/whitespace value clears the custom title
+        (the UI then falls back to the first user turn). Titles are limited to
+        60 characters. Raises ``KeyError`` when the session does not exist.
+        """
+        normalized = _session_id(session_id)
+        cleaned = (title or "").strip() or None
+        if cleaned is not None and len(cleaned) > 60:
+            raise ValueError("session title must not exceed 60 characters")
+        with self._lock:
+            if normalized not in self._sessions:
+                raise KeyError(f"session not found: {normalized}")
+            current = self._sessions[normalized]
+            proposed = dict(self._sessions)
+            proposed[normalized] = _SessionState(
+                current.turns, current.summary, cleaned
+            )
+            self._persist(proposed)
+            self._sessions = proposed
+        return True
 
     def _append(
         self, turns: Sequence[Turn], *, session_id: str | None = None
@@ -202,7 +285,9 @@ class ConversationStore:
             current = self._sessions.get(normalized, _SessionState())
             bounded = (current.turns + tuple(turns))[-self.max_messages :]
             proposed = dict(self._sessions)
-            proposed[normalized] = _SessionState(bounded, current.summary)
+            proposed[normalized] = _SessionState(
+                bounded, current.summary, current.title
+            )
             self._persist(proposed)
             self._sessions = proposed
 
@@ -250,8 +335,13 @@ class ConversationStore:
                 summary = None
             else:
                 summary = summary.strip()
+            title = raw_state.get("title")
+            if not isinstance(title, str) or not title.strip():
+                title = None
+            else:
+                title = title.strip()
             sessions[session_id] = _SessionState(
-                tuple(turns[-self.max_messages :]), summary
+                tuple(turns[-self.max_messages :]), summary, title
             )
         return sessions
 
@@ -262,6 +352,7 @@ class ConversationStore:
                 session_id: {
                     "turns": [turn.to_dict() for turn in state.turns],
                     "summary": state.summary,
+                    "title": state.title,
                 }
                 for session_id, state in sorted(sessions.items())
             },
@@ -306,6 +397,17 @@ def _session_id(value: Any) -> str:
     return normalized
 
 
+def new_session_id() -> str:
+    """Generate a unique, filesystem-safe session id (``chat-{ts}-{uuid6}``).
+
+    ``{ts}`` is a compact local timestamp, ``{uuid6}`` the first 6 hex chars of
+    a uuid4 — short, collision-safe and well under the 128-char limit.
+    """
+    import uuid
+
+    return f"chat-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+
+
 def _timestamp(value: int | None) -> int:
     timestamp = time.time_ns() // 1_000_000 if value is None else value
     if isinstance(timestamp, bool) or not isinstance(timestamp, int) or timestamp <= 0:
@@ -320,4 +422,5 @@ __all__ = [
     "STORE_VERSION",
     "ConversationStore",
     "Turn",
+    "new_session_id",
 ]

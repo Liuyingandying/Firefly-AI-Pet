@@ -6,13 +6,24 @@ from datetime import datetime
 
 @dataclass
 class ScreenFrame:
-    """An in-memory screenshot. Never persisted to disk."""
+    """An in-memory screenshot. Never persisted to disk.
+
+    Mapping metadata (PDF OCR Overlay Phase 2-A), populated for screen
+    captures: ``crop_offset`` is the absolute physical-screen coordinate of
+    the image's top-left pixel, and ``scale_x``/``scale_y`` convert screen
+    pixels into image pixels — ``image = (screen - crop_offset) * scale``.
+    Non-screen frames (camera, attachments) keep the encoding resize factor,
+    which is meaningless for screen mapping.
+    """
 
     width: int
     height: int
     mime_type: str
     image_bytes: bytes
     captured_at: datetime
+    crop_offset: tuple = (0, 0)  # (x, y) absolute physical screen px
+    scale_x: float = 1.0
+    scale_y: float = 1.0
 
 
 @dataclass

@@ -8,6 +8,8 @@ Capture modes (semantics v1):
                            focus (default for unqualified look requests)
 - "firefly_companion"      the Companion chat window itself
 - "active_window"          legacy: current OS foreground
+- "camera"                 Vision-1A: one camera frame ("看看我"), captured
+                           by the dedicated CameraCapture grabber
 
 Every look() performs exactly one on-demand capture. Nothing here runs or
 captures in the background, writes to disk, or touches long-term memory.
@@ -15,6 +17,8 @@ captures in the background, writes to disk, or touches long-term memory.
 
 from time import perf_counter
 from typing import Any
+
+import os
 
 from core.screen_vision.brain.base import ReasoningProvider
 from core.screen_vision.models import ScreenObservation, ScreenVisionResult
@@ -32,7 +36,8 @@ CAPTURE_MODES = (
     "last_non_firefly_window",
     "firefly_companion",
     "primary",       # legacy alias of primary_screen
-    "active_window", # legacy: current foreground
+    "active_window", # legacy: current OS foreground
+    "camera",        # Vision-1A: single camera frame ("看看我")
 )
 
 _CAPTURE_METHOD_BY_MODE = {
@@ -41,6 +46,7 @@ _CAPTURE_METHOD_BY_MODE = {
     "last_non_firefly_window": "capture_last_non_firefly_window",
     "firefly_companion": "capture_firefly_companion",
     "active_window": "capture_active_window",
+    "camera": "capture_camera",
 }
 
 
@@ -78,6 +84,7 @@ class ScreenVisionService:
         self._vision = vision_provider
         self._reasoning = reasoning_provider
         self._capture = capture_service or ScreenCaptureService()
+        self._last_capture_info: dict = {}
         candidate = getattr(self._vision, "_primary", self._vision)
         self._direct_vision = direct_vision_provider or (
             candidate if callable(getattr(candidate, "answer_direct", None)) else None
@@ -126,6 +133,40 @@ class ScreenVisionService:
                 self._resilient_reasoning = self._reasoning
         self._routing_mode = mode
 
+    def _capture_frame(self, capture_mode: str):
+        """Produce one ScreenFrame for the requested capture mode.
+
+        Screen modes go through the injected screen capture service. The
+        camera source is standalone: when the injected service has no
+        ``capture_camera`` (the production default), the dedicated
+        CameraCapture grabber is used, so tests can inject a fake
+        ``capture_camera`` instead and never touch a real camera.
+        """
+        method_name = _CAPTURE_METHOD_BY_MODE[capture_mode]
+        if hasattr(self._capture, method_name):
+            frame = getattr(self._capture, method_name)()
+            self._last_capture_info = dict(
+                getattr(self._capture, "last_capture_info", {})
+            )
+            return frame
+        from core.screen_vision.screen.camera import CameraCapture
+
+        camera = CameraCapture()
+        frame = camera.capture_camera()
+        self._last_capture_info = dict(camera.last_capture_info)
+        return frame
+
+    def _camera_trace(self, event: str, extra: str = "") -> None:
+        """P0.2 diagnostic tracing (env-gated FIREFLY_CAMERA_TRACE=1)."""
+        if not os.environ.get("FIREFLY_CAMERA_TRACE"):
+            return
+        try:
+            from core.screen_vision.screen.camera import _trace
+
+            _trace(event, extra)
+        except Exception:  # noqa: BLE001
+            pass
+
     def sync_routing_mode_from_settings(self) -> None:
         """Apply the Settings toggle immediately; no restart needed."""
         if self._settings is None:
@@ -147,9 +188,11 @@ class ScreenVisionService:
         total_started = perf_counter()
 
         capture_started = perf_counter()
-        frame = getattr(self._capture, _CAPTURE_METHOD_BY_MODE[capture_mode])()
+        frame = self._capture_frame(capture_mode)
         capture_ms = (perf_counter() - capture_started) * 1000
-        capture_info = dict(getattr(self._capture, "last_capture_info", {}))
+        capture_info = dict(self._last_capture_info)
+        if capture_mode == "camera":
+            self._camera_trace("T9_look_got_frame", f"ms={capture_ms:.0f}")
 
         common = {
             "capture_mode": capture_mode,
@@ -230,8 +273,9 @@ class ScreenVisionService:
         if direct_failure_type is None:
             observation = vision.inspect(frame)
         else:
-            # The direct DeepSeek vision request already failed this turn.
-            # Continue at TJU/GLM without immediately retrying DeepSeek.
+            # The direct one-shot vision request (TJU-Qwen primary) already
+            # failed this turn. Continue the resilient chain without
+            # immediately retrying the DeepSeek vision fallback.
             observation = vision.inspect(
                 frame, exclude_providers=("deepseek-vision",)
             )

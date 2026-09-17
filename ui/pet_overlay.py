@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QImageReader, QMovie, QPainter, QRadialGradient
+from PySide6.QtGui import QImageReader, QMovie, QPen, QPainter, QRadialGradient
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 from . import theme
@@ -21,6 +21,8 @@ class PetOverlay(QWidget):
     scale_mode_toggled = Signal()
     scale_wheel = Signal(int)  # +1 wheel-up, -1 wheel-down
     scale_exit_requested = Signal()
+
+    DROP_HINT_TEXT = "放这里，我帮你记着"
 
     def __init__(
         self,
@@ -42,6 +44,19 @@ class PetOverlay(QWidget):
         self._press_global: QPoint | None = None
         self._dragging = False
         self._shutting_down = False
+
+        # Scratchpad v1: optional drop handler (set via set_drop_handler).
+        # System drag-drop (QDrag) is a separate event family from the
+        # internal mouse press/move/release drag, so accepting drops never
+        # interferes with click / move / wheel behaviour.
+        self._drop_handler = None
+        self._drop_hover = False
+        self._toast_text: str | None = None
+        self._toast_timer = QTimer(self)
+        self._toast_timer.setSingleShot(True)
+        self._toast_timer.setInterval(1600)
+        self._toast_timer.timeout.connect(self._clear_toast)
+
 
         self._right_click_timer = QTimer(self)
         self._right_click_timer.setSingleShot(True)
@@ -65,6 +80,61 @@ class PetOverlay(QWidget):
         self._label.setMovie(self._movie)
 
         self.apply_state("idle")
+
+    # ------------------------------------------------------- Scratchpad v1
+
+    def set_drop_handler(self, handler) -> None:
+        """Install the Scratchpad drop controller (duck-typed protocol):
+
+        - ``can_accept(mime) -> bool``
+        - ``handle(mime) -> object`` with ``.ok`` / ``.message``
+
+        ``None`` disables drop handling entirely.
+        """
+        self._drop_handler = handler
+        self.setAcceptDrops(handler is not None)
+
+    def dragEnterEvent(self, event) -> None:
+        if self._drop_handler is not None and self._drop_handler.can_accept(
+            event.mimeData()
+        ):
+            self._drop_hover = True
+            self.update()
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if self._drop_hover:
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._drop_hover = False
+        self.update()
+        event.accept()
+
+    def dropEvent(self, event) -> None:
+        self._drop_hover = False
+        if self._drop_handler is None:
+            event.ignore()
+            return
+        outcome = self._drop_handler.handle(event.mimeData())
+        self._toast_text = outcome.message if outcome is not None else None
+        if outcome is not None and outcome.ok:
+            self._toast_text = "记下啦"
+        if self._toast_text:
+            self._toast_timer.start()
+        self.update()
+        if outcome is not None and outcome.ok:
+            event.acceptProposedAction()
+        else:
+            event.accept()  # consumed either way; the hint is the feedback
+
+    def _clear_toast(self) -> None:
+        self._toast_text = None
+        self.update()
 
     @property
     def current_state(self) -> str:
@@ -174,6 +244,52 @@ class PetOverlay(QWidget):
             )
         )
         super().paintEvent(event)
+        self._paint_scratchpad_layers(painter)
+
+    def _paint_scratchpad_layers(self, painter: QPainter) -> None:
+        """Scratchpad v1 feedback: a soft accept ring while a compatible
+        drag hovers, and a short-lived toast pill after a drop.  Both are
+        painted inside the existing window bounds — no geometry changes, no
+        animations, and the character GIF itself stays untouched."""
+        if not (self._drop_hover or self._toast_text):
+            return
+        painter.save()
+        ring_rect = QRectF(
+            self.width() * 0.06,
+            self.height() * 0.04,
+            self.width() * 0.88,
+            self.height() - self.height() * 0.08 - theme.scaled(theme.PET_BOTTOM_PADDING),
+        )
+        if self._drop_hover:
+            ring_color = theme.qcolor(theme.CYAN_ACCENT)
+            painter.setPen(QPen(ring_color, 2.2, Qt.SolidLine, Qt.RoundCap))
+            painter.setBrush(Qt.NoBrush)
+            painter.setOpacity(0.75)
+            painter.drawRoundedRect(ring_rect, 18, 18)
+            painter.setOpacity(0.28)
+            painter.setBrush(ring_color)
+            painter.drawRoundedRect(ring_rect.adjusted(5, 5, -5, -5), 14, 14)
+            painter.setOpacity(1.0)
+            label = self.DROP_HINT_TEXT
+            color = theme.qcolor(theme.CYAN_ACCENT)
+        else:
+            label = self._toast_text or ""
+            color = theme.qcolor(theme.CYAN_ACCENT)
+        if label:
+            painter.setOpacity(0.95)
+            font = painter.font()
+            font.setPointSize(max(10, theme.scaled(11)))
+            font.setBold(True)
+            painter.setFont(font)
+            band = QRectF(0, self.height() - theme.scaled(theme.PET_BOTTOM_PADDING) - 2,
+                          self.width(), theme.scaled(theme.PET_BOTTOM_PADDING))
+            painter.setPen(QPen(theme.qcolor((20, 30, 34, 220))))
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                painter.drawText(band.adjusted(dx, dy, dx, dy),
+                                 Qt.AlignHCenter | Qt.AlignVCenter, label)
+            painter.setPen(color)
+            painter.drawText(band, Qt.AlignHCenter | Qt.AlignVCenter, label)
+        painter.restore()
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:

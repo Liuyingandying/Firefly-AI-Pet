@@ -25,8 +25,9 @@ from pathlib import Path
 
 from core.workflow_models import ArtifactKind, ArtifactRef, make_artifact_ref
 
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_ARTIFACT_ROOT = PROJECT_DIR / "runtime" / "artifacts"
+from core.user_paths import get_user_data_paths
+
+DEFAULT_ARTIFACT_ROOT = get_user_data_paths().runtime / "artifacts"
 
 # Conservative identifier rule: a single path segment, no separators, no
 # leading dot (so ".", "..", ".hidden" are rejected), no drive characters.

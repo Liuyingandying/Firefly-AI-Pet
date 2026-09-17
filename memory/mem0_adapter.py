@@ -13,10 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from core.user_paths import get_user_data_paths
 
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_STORAGE_DIR = PROJECT_DIR / "runtime" / "memory"
-DEFAULT_MODEL_CACHE_DIR = DEFAULT_STORAGE_DIR / "models"
+
+DEFAULT_STORAGE_DIR = get_user_data_paths().memory
+DEFAULT_MODEL_CACHE_DIR = get_user_data_paths().models
 DEFAULT_USER_ID = "firefly-local-user"
 DEFAULT_COLLECTION = "firefly_memories"
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"

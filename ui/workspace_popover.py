@@ -107,6 +107,8 @@ class _PathRow(QFrame):
 
 class WorkspacePopover(PopoverBase):
     workspace_activated = Signal(str)
+    quick_tools_requested = Signal()
+    # Compatibility signal for OverlayCoordinator's existing context seam.
     sessions_requested = Signal()
 
     def __init__(self, manager, parent=None):
@@ -121,11 +123,11 @@ class WorkspacePopover(PopoverBase):
         header.setStyleSheet(theme.primary_label_style(size=11))
         header_row.addWidget(header)
         header_row.addStretch(1)
-        switch = QPushButton("Sessions")
-        switch.setObjectName("switchSessions")
+        switch = QPushButton("Quick Tools")
+        switch.setObjectName("switchQuickTools")
         switch.setCursor(Qt.PointingHandCursor)
-        switch.setStyleSheet(theme.link_button_style("switchSessions"))
-        switch.clicked.connect(lambda: self.sessions_requested.emit())
+        switch.setStyleSheet(theme.link_button_style("switchQuickTools"))
+        switch.clicked.connect(self._request_quick_tools)
         header_row.addWidget(switch)
         self.content_layout.addLayout(header_row)
 
@@ -164,6 +166,10 @@ class WorkspacePopover(PopoverBase):
         self._status_timer.timeout.connect(self._clear_status)
 
         self.refresh()
+
+    def _request_quick_tools(self) -> None:
+        self.quick_tools_requested.emit()
+        self.sessions_requested.emit()
 
     def refresh(self) -> None:
         current = self._manager.current()

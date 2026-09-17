@@ -25,6 +25,7 @@ class ConversationRuntime:
         character_loader: CharacterLoader | None = None,
         conversation_store: ConversationStore | None = None,
         companion_runtime: CompanionRuntime | None = None,
+        config=None,
         _bond_path: str | None = None,
     ) -> None:
         self.memory_manager = memory_manager
@@ -34,6 +35,7 @@ class ConversationRuntime:
             provider_router,
             character_loader=character_loader,
             conversation_store=conversation_store,
+            config=config,
             _bond_path=_bond_path,
         )
 

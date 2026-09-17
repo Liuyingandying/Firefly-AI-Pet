@@ -236,6 +236,10 @@ class WorkflowCard(PopoverBase):
         self._review_btn.setObjectName("workflowReview")
         self._review_btn.setCursor(Qt.PointingHandCursor)
         self._review_btn.setStyleSheet(theme.popover_button_style("workflowReview"))
+        self._review_btn.setToolTip(
+            "Review via the local Claude-compatible provider "
+            "(DeepSeek-backed reasoning), not the Claude Code CLI."
+        )
         self._review_btn.setVisible(False)
         self._review_btn.clicked.connect(self._on_review)
         actions2.addWidget(self._review_btn)

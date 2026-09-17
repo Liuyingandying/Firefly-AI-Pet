@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Firefly PageLens Bridge",
+  "version": "0.2.0",
+  "description": "Sends browser selections and opened-PDF events (tabs.url/title) to the Firefly desktop bridge (ws://127.0.0.1:17321).",
+  "permissions": ["contextMenus", "tabs"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end",
+      "all_frames": true
+    }
+  ]
+}

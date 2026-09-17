@@ -25,6 +25,8 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from core.user_paths import get_user_data_paths
 from typing import Any, Sequence
 
 from core.agent_router import AgentRouter
@@ -49,7 +51,7 @@ class WorkspaceLock:
     """
 
     def __init__(self, lock_dir: Path | str | None = None) -> None:
-        self._lock_dir = Path(lock_dir) if lock_dir else Path(__file__).resolve().parent.parent / "runtime" / "locks"
+        self._lock_dir = Path(lock_dir) if lock_dir else get_user_data_paths().runtime / "locks"
         self._lock_dir.mkdir(parents=True, exist_ok=True)
         self._locks: dict[str, str] = {}  # workspace_path -> agent_id
 

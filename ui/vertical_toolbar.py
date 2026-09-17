@@ -1,4 +1,4 @@
-"""Three-action vertical toolbar for the Phase 8 visual shell."""
+"""Compact primary navigation for the Firefly visual shell."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from . import theme
 
 
 TOOLBAR_ACTIONS = (
-    ("companion", "Companion", "star"),
+    ("companion", "Firefly", "star"),
+    ("scratchpad", "临时记事本", "note"),
     ("pagelens", "PageLens", "pagelens"),
     ("workspace", "Workspace", "hexagon"),
     ("settings", "Settings", "gear"),

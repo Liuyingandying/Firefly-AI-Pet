@@ -29,8 +29,8 @@ TOGGLE_KEYS = (
 
 TOGGLE_TOOLTIPS = {
     "screen_vision_fast_mode":
-        "ON: Faster screen understanding using DeepSeek first.\n"
-        "OFF: Use resilient provider fallback order.",
+        "ON: One-shot screen understanding, TJU-Qwen first (fastest).\n"
+        "OFF: Resilient fallback chain (TJU -> GLM -> DeepSeek).",
 }
 
 
@@ -120,6 +120,7 @@ class _ToggleRow(QFrame):
 
 class SettingsPopover(PopoverBase):
     reset_position_requested = Signal()
+    memory_requested = Signal()
 
     def __init__(self, manager, parent=None, autostart=None):
         super().__init__(width=theme.POPOVER_WIDTH, parent=parent)
@@ -165,6 +166,50 @@ class SettingsPopover(PopoverBase):
         self._reset_btn.clicked.connect(self.reset_position_requested.emit)
         self.content_layout.addWidget(self._reset_btn, 0, Qt.AlignLeft)
 
+        memory_separator = QFrame(self._card)
+        memory_separator.setFixedHeight(1)
+        memory_separator.setStyleSheet(theme.separator_style(vertical=False))
+        self.content_layout.addWidget(memory_separator)
+
+        memory = QLabel("MEMORY")
+        memory.setStyleSheet(theme.section_label_style())
+        self.content_layout.addWidget(memory)
+
+        self._memory_btn = QPushButton("View Memory")
+        self._memory_btn.setObjectName("viewMemory")
+        self._memory_btn.setCursor(Qt.PointingHandCursor)
+        self._memory_btn.setToolTip("Review, export, or clear Firefly memory")
+        self._memory_btn.setStyleSheet(theme.link_button_style("viewMemory"))
+        self._memory_btn.clicked.connect(self.memory_requested.emit)
+        self.content_layout.addWidget(self._memory_btn, 0, Qt.AlignLeft)
+
+        # Phase 2.2: read-only AI provider status (no switches, no edits).
+        ai_separator = QFrame(self._card)
+        ai_separator.setFixedHeight(1)
+        ai_separator.setStyleSheet(theme.separator_style(vertical=False))
+        self.content_layout.addWidget(ai_separator)
+
+        ai_header = QLabel("AI STATUS")
+        ai_header.setStyleSheet(theme.section_label_style())
+        ai_header.setToolTip(
+            "Read-only view of the providers Firefly currently uses. "
+            "Routing cannot be changed here."
+        )
+        self.content_layout.addWidget(ai_header)
+
+        self._ai_status_label = QLabel("")
+        self._ai_status_label.setObjectName("aiStatus")
+        self._ai_status_label.setWordWrap(True)
+        self._ai_status_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self._ai_status_label.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {theme.FONT_SIZE_SMALL}pt;"
+        )
+        self.content_layout.addWidget(self._ai_status_label)
+
         self._manager.connect(self._on_settings_changed)
         self.refresh()
 
@@ -173,7 +218,19 @@ class SettingsPopover(PopoverBase):
     def refresh(self) -> None:
         for key, row in self._rows.items():
             row.set_state(self._initial_state(key))
+        self._refresh_ai_status()
         self.adjustSize()
+
+    def _refresh_ai_status(self) -> None:
+        """Render the read-only provider status snapshot. Never throws:
+        a failing status view must not break Settings."""
+        try:
+            from core.providers.status import ProviderStatusService
+
+            text = ProviderStatusService().render_text()
+        except Exception:  # noqa: BLE001 - read-only view degrades to empty
+            text = "AI status unavailable"
+        self._ai_status_label.setText(text)
 
     # -- test helpers ---------------------------------------------------
 

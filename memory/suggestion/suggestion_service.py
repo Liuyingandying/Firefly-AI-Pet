@@ -15,6 +15,7 @@ P5A-1 upgrades:
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any, Sequence
 
 from memory.records import MemoryCategory, MemoryRecord
@@ -34,6 +35,7 @@ from memory.suggestion.memory_candidate_detector import (
     MemorySuggestion,
 )
 from memory.suggestion.semantic_dedup import SemanticDedup
+from memory.suggestion_store import SuggestionStore
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,10 @@ class SuggestionService:
         explicit_auto_approve_enabled: bool = False,
         explicit_auto_approve_min_confidence: float = 0.95,
         explicit_auto_approve_allowed_categories: Sequence[str] | None = None,
+        auto_write_enabled: bool = False,
+        auto_write_min_chars: int = 8,
+        auto_write_allowed_categories: Sequence[str] | None = None,
+        store: "SuggestionStore | None" = None,
     ) -> None:
         self.memory_service = memory_service
         self.detector = detector or MemoryCandidateDetector()
@@ -89,6 +95,15 @@ class SuggestionService:
             else None
         )
         self._pending: list[MemorySuggestion] = []
+        # suggestion id -> "accepted" | "rejected" (v1 observability; pending
+        # suggestions themselves remain in-memory by design)
+        self._decisions: dict[str, str] = {}
+        # M3B.7: persistent suggestion store.  When attached, pending
+        # candidates survive restarts; "explicit" is never a valid store
+        # source (automatic candidates keep companion_auto/summary origins).
+        self.store = store
+        if self.store is not None:
+            self._flush_ram_pending_to_store()
 
         # P5A-3: explicit auto-approve config
         self.explicit_auto_approve_enabled = explicit_auto_approve_enabled
@@ -97,6 +112,14 @@ class SuggestionService:
             set(explicit_auto_approve_allowed_categories)
             if explicit_auto_approve_allowed_categories is not None
             else {MemoryCategory.PREFERENCE.value, MemoryCategory.PROJECT.value}
+        )
+        self.auto_write_enabled = auto_write_enabled
+        self.auto_write_min_chars = auto_write_min_chars
+        self.auto_write_allowed_categories: set[str] = set(
+            auto_write_allowed_categories
+            if auto_write_allowed_categories is not None
+            else [MemoryCategory.PROJECT.value, MemoryCategory.PREFERENCE.value,
+                  MemoryCategory.SHARED_EXPERIENCE.value, MemoryCategory.USER_FACT.value]
         )
 
     # ------------------------------------------------------------------ extract
@@ -158,8 +181,38 @@ class SuggestionService:
         # Enforce max_candidates_per_turn cap
         capped = deduped[: self.max_candidates_per_turn]
 
+        # Boundary repair: extracted candidates are CANDIDATES ONLY.  They
+        # enter the pending list for user confirmation (MemoryPanel
+        # 待确认 tab) and never write a MemoryRecord themselves — the
+        # previous direct-write branch (remember/asserted_explicit) is gone.
         if capped:
-            self._pending.extend(capped)
+            promoted, normal = [], []
+            for cand in capped:
+                tagged = replace(
+                    cand,
+                    source="companion_auto",
+                    status="pending",
+                    confidence=min(
+                        1.0, cand.confidence + (0.05 if self.auto_write_enabled else 0.0)
+                    ),
+                )
+                # companion gate still matters: gate-passing candidates are
+                # surfaced at the TOP of the pending list (continuity UX);
+                # promotion never writes.
+                (
+                    promoted if self._passes_companion_gate(tagged) else normal
+                ).append(tagged)
+            capped = promoted + normal
+
+        if capped:
+            if self.store is not None:
+                # M3B.7: candidates go to the persistent SuggestionStore
+                # (companion origin).  They never reach MemoryRepository
+                # directly - user confirmation via 待确认 tab is the only
+                # route into long-term memory.
+                self._persist_pending(capped)
+            else:
+                self._pending.extend(capped)
             logger.info(
                 "SuggestionService: created %d pending suggestions (from %d candidates, capped at %d)",
                 len(capped),
@@ -180,6 +233,29 @@ class SuggestionService:
         if not self.enabled:
             return []
         suggestions = self.detector.detect(user_message)
+        if self.store is not None and suggestions:
+            self._flush_ram_pending_to_store()
+            for suggestion in suggestions:
+                try:
+                    self.store.add(
+                        content=suggestion.content,
+                        source="user_created",
+                        confidence=suggestion.confidence,
+                        status="pending",
+                        metadata={
+                            "category": getattr(
+                                getattr(suggestion, "category", None),
+                                "value", "project"
+                            ),
+                            "reason": suggestion.reason,
+                            "evidence": list(suggestion.evidence),
+                        },
+                        created_at=suggestion.created_at,
+                        suggestion_id=suggestion.id,
+                    )
+                except Exception:  # noqa: BLE001 - duplicates skipped
+                    continue
+            return suggestions
         self._pending.extend(suggestions)
         return suggestions
 
@@ -253,25 +329,147 @@ class SuggestionService:
         return [suggestion]
 
     # ------------------------------------------------------------------ pending
+    def _flush_ram_pending_to_store(self) -> None:
+        """M3B.7 one-time migration: RAM pending -> SuggestionStore.
+
+        Runs only when the store is empty; a non-empty store wins (the RAM
+        list is stale by definition at construction time).
+        """
+        if self.store is None or not self._pending:
+            return
+        if self.store.count() > 0:
+            self._pending.clear()
+            return
+        for suggestion in self._pending:
+            try:
+                self.store.add(
+                    content=suggestion.content,
+                    source="user_created",
+                    confidence=suggestion.confidence,
+                    status="pending",
+                    metadata={
+                        "category": getattr(
+                            getattr(suggestion, "category", None), "value", "project"
+                        ),
+                        "reason": suggestion.reason,
+                        "evidence": list(suggestion.evidence),
+                    },
+                    created_at=suggestion.created_at,
+                    suggestion_id=suggestion.id,
+                )
+            except Exception:  # noqa: BLE001 - duplicate/invalid entries skipped
+                continue
+        self._pending.clear()
+
+    def _persist_pending(self, suggestions: list[MemorySuggestion]) -> None:
+        """Persist extracted candidates.  With a store attached they become
+        durable pending suggestions (never Memory); without one the service
+        falls back to the legacy in-RAM pending list."""
+        if self.store is None:
+            self._pending.extend(suggestions)
+            return
+        existing_pending = {
+            r["content"] for r in self.store.get_pending()
+        }
+        for suggestion in suggestions:
+            if suggestion.content in existing_pending:
+                continue  # 跨重启去重：相同 pending 内容不重复入库
+            confidence = suggestion.confidence
+            metadata = {
+                "category": getattr(
+                    getattr(suggestion, "category", None), "value", "project"
+                ),
+                "reason": suggestion.reason,
+                "evidence": list(suggestion.evidence),
+            }
+            if self.auto_write_enabled and self._passes_companion_gate(suggestion):
+                # Companion Mode 连续陪伴标记：过门候选置信度小幅提升、置前
+                confidence = min(1.0, confidence + 0.05)
+                metadata["companion_promoted"] = True
+            try:
+                self.store.add(
+                    content=suggestion.content,
+                    source="companion_auto",
+                    confidence=confidence,
+                    status="pending",
+                    metadata=metadata,
+                    created_at=suggestion.created_at,
+                    suggestion_id=suggestion.id,
+                )
+            except Exception:  # noqa: BLE001 - duplicate/invalid skipped
+                continue
+
+    def _store_pending_suggestions(self) -> list[MemorySuggestion]:
+        """Store-backed pending list, reconstructed as MemorySuggestion."""
+        from dataclasses import replace as _replace
+
+        out: list[MemorySuggestion] = []
+        for record in self.store.get_pending():
+            base = MemorySuggestion(
+                content=record["content"],
+                category=_category_or_project(record.get("metadata", {}).get("category")),
+                reason=str(record.get("metadata", {}).get("reason", "companion gate")),
+                evidence=tuple(
+                    record.get("metadata", {}).get("evidence", [])
+                ),
+                confidence=record["confidence"],
+                source=record["source"],
+                status=record["status"],
+                created_at=record["created_at"],
+                id=record["id"],
+            )
+            out.append(_replace(base, confidence=base.confidence))
+        return out
+
     def list_pending(self) -> list[MemorySuggestion]:
+        if self.store is not None:
+            return self._store_pending_suggestions()
         return list(self._pending)
 
     def accept(self, suggestion: MemorySuggestion) -> Any:
         """Write one suggestion via ``MemoryService.remember`` and drop it."""
         try:
-            record = self.memory_service.remember(
-                suggestion.content,
-                category=suggestion.category.value,
-                trigger=f"suggestion:{suggestion.reason}",
-                asserted_explicit=True,
-            )
+            if self.store is not None:
+                record = self.memory_service.remember(
+                    suggestion.content,
+                    category=suggestion.category.value,
+                    trigger="suggestion_confirmed",
+                    asserted_explicit=True,
+                )
+            else:
+                record = self.memory_service.remember(
+                    suggestion.content,
+                    category=suggestion.category.value,
+                    trigger=f"suggestion:{suggestion.reason}",
+                    asserted_explicit=True,
+                )
         except Exception:
             return None
+        self._decisions[suggestion.id] = "accepted"
+        if self.store is not None:
+            self.store.update_status(suggestion.id, "accepted")
         if record is not None and suggestion in self._pending:
             self._pending.remove(suggestion)
         return record
 
+    def _passes_companion_gate(self, suggestion: MemorySuggestion) -> bool:
+        """v1.1 筛选门: 只放行 长期项目/稳定偏好/重要经历/长期状态。
+
+        拒绝: 闲聊向类别 (relationship/emotion)、过短内容、疑问句。
+        """
+        if suggestion.category.value not in self.auto_write_allowed_categories:
+            return False
+        content = (suggestion.content or "").strip()
+        if len(content) < self.auto_write_min_chars:
+            return False
+        if content.endswith(("？", "?")):
+            return False
+        return True
+
     def reject(self, suggestion: MemorySuggestion) -> None:
+        self._decisions[suggestion.id] = "rejected"
+        if self.store is not None:
+            self.store.update_status(suggestion.id, "rejected")
         if suggestion in self._pending:
             self._pending.remove(suggestion)
 
@@ -533,3 +731,10 @@ class SuggestionService:
 
 
 __all__ = ["SuggestionService"]
+
+
+def _category_or_project(value) -> MemoryCategory:
+    try:
+        return MemoryCategory(str(value))
+    except (TypeError, ValueError):
+        return MemoryCategory.PROJECT

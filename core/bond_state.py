@@ -16,11 +16,11 @@ from core.bond_rules import (
     apply_bond_rule,
     phase_for,
 )
+from core.user_paths import get_user_data_paths
 
 
 STORE_VERSION = 1
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_BOND_STATE_PATH = PROJECT_DIR / "runtime" / "companion" / "bond_state.json"
+DEFAULT_BOND_STATE_PATH = get_user_data_paths().conversation / "bond_state.json"
 
 
 @dataclass(frozen=True, slots=True)

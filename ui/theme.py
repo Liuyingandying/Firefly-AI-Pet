@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtGui import QColor, QFontDatabase, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import QFrame, QGraphicsDropShadowEffect, QWidget
 
 
@@ -53,6 +54,141 @@ STATUS_COLORS = {
     "unavailable": UNAVAILABLE_STATUS,
 }
 
+
+# -- UI V2 companion console palette (Phase UI-4A) ---------------------------
+# Centralized semantic colors for the "流萤 AI Pet 控制台" surface only.
+# Deliberately namespaced (theme.V2.*) so the existing pet-overlay islands
+# keep their own palette untouched.
+#
+# Phase UI-4A direction (per reference README): Anthropic 简约工作台 + 星铁
+# 菜单式布局 + 流萤陪伴空间 —— 暖纸浅色系、大留白、高字号、低饱和、少量青紫
+# 点缀。禁止深色赛博 HUD / 霓虹发光 / 小字体信息墙。GLOW_* 降为低 alpha 的
+# 柔和点缀色（仅细边框/极浅投影），不再承担发光。
+
+class V2:
+    """Semantic palette for the companion console (warm paper light theme)."""
+
+    # 字体栈族名（科研级渲染，Phase UI-4 字体系统）：
+    #   STIX Two Math  数学/物理公式优先（应用级资源可加载）
+    #   Cambria Math   Windows 自带数学兜底
+    #   雅黑/Segoe     中文与西文正文
+    #   Noto CJK/DejaVu/Symbola  CJK、扩展符号、技术字母兜底
+    FONT_FAMILY_PRIMARY = "Microsoft YaHei UI"
+    FONT_FAMILY_MATH = "Cambria Math"
+    FONT_FAMILY_FALLBACK = "Noto Sans CJK SC"
+    FONT_STACK_FAMILIES = (
+        "STIX Two Math",
+        "Cambria Math",
+        "Microsoft YaHei UI",
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        "DejaVu Sans",
+        "Symbola",
+    )
+
+    # 背景与卡片：暖米纸面 + 暖白卡片
+    BACKGROUND = (242, 238, 230, 255)          # 暖米纸面
+    BACKGROUND_DEEP = (234, 228, 216, 255)     # 略深暖米（渐变边缘）
+    CARD_BG = (251, 249, 244, 245)             # 暖白卡片
+    CARD_BG_USER = (228, 238, 243, 240)        # 用户卡片 · 浅青蓝
+    CARD_BG_ASSISTANT = (241, 238, 247, 240)   # 流萤卡片 · 淡紫白
+
+    # 品牌点缀：低饱和青 / 紫
+    PRIMARY_BLUE = (90, 155, 181, 255)
+    ACCENT_PURPLE = (139, 127, 199, 255)
+
+    # 文字：Anthropic 深棕灰系（浅底高可读）
+    TEXT_MAIN = (61, 57, 41, 255)
+    TEXT_SECONDARY = (138, 133, 120, 255)
+
+    # 柔光：低 alpha 点缀（细边框/极浅投影），替代霓虹发光
+    GLOW_BLUE = (90, 155, 181, 40)
+    GLOW_PURPLE = (139, 127, 199, 45)
+    BORDER_SOFT = (224, 217, 204, 180)
+
+    # 背景渐变：暖米纸面（几乎单色，留白感）
+    GRADIENT_STOPS = ("#f6f2ea", "#f1ece2", "#ece5d8")
+
+    # 字体等级（Phase UI-4A 定义；组件消费在 Phase UI-4B）。
+    # "高字号"要求：说明不低于 9pt，正文 11pt，标题 16pt。
+    FONT_TITLE = 16
+    FONT_HEADING = 13
+    FONT_BODY = 11
+    FONT_CAPTION = 9
+
+
+# QSS font-family fallback stack for every V2 surface（科研级渲染，数学优先）：
+# STIX Two Math（公式）→ Cambria Math → 雅黑/Segoe（中西文）→ Noto CJK →
+# DejaVu Sans（技术符号）→ Symbola（罕用符号兜底）。
+V2_FONT_STACK = ", ".join(f'"{family}"' for family in V2.FONT_STACK_FAMILIES)
+
+
+def v2_font_css(size_pt: int) -> str:
+    """QSS 片段：字号 + 字体栈（测试与组件统一入口）。"""
+    return f"font-family: {V2_FONT_STACK}; font-size: {size_pt}pt;"
+
+
+# 应用级字体资源目录（assets/fonts/，Phase UI-4 字体系统）。
+FONTS_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
+_LOADED_APP_FONTS: list[str] = []
+_FONTS_LOADED = False
+
+
+def load_application_fonts(directory: Path | None = None) -> list[str]:
+    """Register every font file under ``assets/fonts/`` with QFontDatabase.
+
+    Idempotent (second call is a no-op) and fully optional: a missing or
+    empty directory silently skips loading — the font stack above still
+    resolves through system-installed families. Returns the family names
+    contributed by application fonts (for diagnostics/tests).
+
+    Intended to be called once after QApplication creation (theme-side, no
+    core dependencies).
+    """
+    global _FONTS_LOADED, _LOADED_APP_FONTS
+    if _FONTS_LOADED:
+        return list(_LOADED_APP_FONTS)
+    fonts_dir = Path(directory) if directory is not None else FONTS_DIR
+    families: list[str] = []
+    for pattern in ("*.ttf", "*.otf"):
+        for font_file in sorted(fonts_dir.glob(pattern)):
+            try:
+                font_id = QFontDatabase.addApplicationFont(str(font_file))
+            except Exception:  # malformed font file must never break startup
+                continue
+            if font_id == -1:
+                continue
+            for family in QFontDatabase.applicationFontFamilies(font_id):
+                if family not in families:
+                    families.append(family)
+    _LOADED_APP_FONTS = families
+    _FONTS_LOADED = True
+    return list(_LOADED_APP_FONTS)
+
+
+_BACKGROUND_ASSET = (
+    Path(__file__).resolve().parent.parent / "assets" / "ui" / "background" / "background.png"
+)
+
+
+def v2_background_style(asset_path: Path | None = None) -> str:
+    """Console background QSS: assets/ui/background image if present,
+    otherwise the code-drawn deep-space gradient (no absolute paths).
+
+    ``asset_path`` overrides the documented asset location (test seam).
+    """
+    asset = asset_path if asset_path is not None else _BACKGROUND_ASSET
+    if asset.is_file():
+        # Qt stylesheets accept forward-slash drive paths on Windows.
+        return "QMainWindow { border-image: url(" + asset.as_posix() + ") 0 0 0 0 stretch stretch; }"
+    stops = V2.GRADIENT_STOPS
+    return (
+        "QMainWindow {"
+        "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+        f"    stop:0 {stops[0]}, stop:0.55 {stops[1]}, stop:1 {stops[2]});"
+        "}"
+    )
+
 # Geometry
 RADIUS_PILL = 36
 RADIUS_TOOLBAR = 34
@@ -74,10 +210,32 @@ TOOLBAR_ANCHOR_GAP = 2
 BUBBLE_PET_OVERLAP = 62
 BUBBLE_VERTICAL_OVERLAP = 68
 
-DOCK_SIZE = QSize(462, 82)
-COMPACT_DOCK_SIZE = QSize(220, 82)
+# AgentDock — slim launcher pill tokens (Phase 8B compact).
+# The window keeps just enough shadow margin for the lighter drop shadow;
+# the visible pill (card) is ~36-42px tall, ~290-300px wide at 100% DPI.
+DOCK_SIZE = QSize(320, 58)
+COMPACT_DOCK_SIZE = QSize(220, 58)
+DOCK_CARD_RADIUS = 20
+DOCK_CARD_MARGIN = 4
+DOCK_ITEM_MARGIN = 2
+DOCK_ITEM_SPACING = 2
+DOCK_DIVIDER_HEIGHT = 20
+DOCK_SHADOW_BLUR = 22
+DOCK_SHADOW_OFFSET_Y = 5
+DOCK_SHADOW_MARGIN = 12
+DOCK_SHADOW_COLOR = (64, 100, 137, 16)
+DOCK_LETTER_FONT_PT = 9
+DOCK_NAME_FONT_PT = 6
+DOCK_STATUS_DOT_SIZE = 7
+DOCK_STATUS_DOT_GAP = 6
+DOCK_STATUS_GREEN = (64, 196, 138, 255)
+DOCK_STATUS_RED = ERROR_STATUS
+DOCK_STATUS_GRAY = (162, 178, 193, 215)
 FULL_DOCK_SCALE_THRESHOLD = 0.90
-TOOLBAR_SIZE = QSize(92, 246)
+# Four primary actions only.  The old 10-action toolbar was 583 px tall;
+# keeping this as an explicit shell token makes hidden actions unable to leave
+# empty layout slots behind.
+TOOLBAR_SIZE = QSize(92, 340)  # 5 items (companion/scratchpad/pagelens/workspace/settings)
 BUBBLE_SIZE = QSize(352, 138)
 PET_MAX_DIMENSION = 274
 PET_HORIZONTAL_PADDING = 36
@@ -99,6 +257,25 @@ PAGELENS_MIN_WIDTH = 400
 PAGELENS_MIN_HEIGHT = 420
 PAGELENS_ANCHOR_GAP = 12
 PAGELENS_HEADER_HEIGHT = 48
+# PageLens readability tiers: glass surface fill opacity (idle / hover / focused).
+# The surface becomes more transparent when idle to reduce occlusion while
+# reading the page behind, and clears up on hover / window focus.
+PAGELENS_OPACITY_IDLE = 0.70
+PAGELENS_OPACITY_HOVER = 0.82
+PAGELENS_OPACITY_FOCUSED = 0.92
+# Readable accent for PageLens text on light glass (English subtitle, footer
+# entry). CYAN_ACCENT stays reserved for borders / status labels / highlights —
+# it is far too light for body-adjacent text (contrast ~1.6:1 on glass).
+PAGELENS_TEXT_ACCENT = (23, 128, 140, 255)
+
+
+def scale_alpha(
+    rgba: tuple[int, int, int, int], opacity: float
+) -> tuple[int, int, int, int]:
+    """Scale an RGBA token's alpha by a tier opacity (clamped to 0-255)."""
+    red, green, blue, alpha = rgba
+    scaled = int(round(alpha * opacity))
+    return (red, green, blue, max(0, min(255, scaled)))
 
 
 # Runtime UI scale (Firefly's own logical scaling on top of Qt DPI). This is the
@@ -290,11 +467,17 @@ def bubble_html() -> str:
     )
 
 
-def apply_soft_shadow(widget: QWidget, *, blur: int = SHADOW_BLUR, y_offset: int = SHADOW_OFFSET_Y) -> None:
+def apply_soft_shadow(
+    widget: QWidget,
+    *,
+    blur: int = SHADOW_BLUR,
+    y_offset: int = SHADOW_OFFSET_Y,
+    color: tuple[int, int, int, int] = SHADOW_COLOR,
+) -> None:
     effect = QGraphicsDropShadowEffect(widget)
     effect.setBlurRadius(blur)
     effect.setOffset(0, y_offset)
-    effect.setColor(qcolor(SHADOW_COLOR))
+    effect.setColor(qcolor(color))
     widget.setGraphicsEffect(effect)
 
 
@@ -384,6 +567,14 @@ class VectorIcon(QWidget):
             self._draw_chatgpt(painter, radius)
         elif self._kind in {"pagelens"}:
             self._draw_pagelens(painter, radius)
+        elif self._kind in {"paper"}:
+            self._draw_paper(painter, radius)
+        elif self._kind in {"memory"}:
+            self._draw_memory(painter, radius)
+        elif self._kind in {"console"}:
+            self._draw_console(painter, radius)
+        elif self._kind in {"note", "scratchpad"}:
+            self._draw_note(painter, radius)
         else:
             painter.drawEllipse(QRectF(-radius, -radius, radius * 2, radius * 2))
 
@@ -462,6 +653,81 @@ class VectorIcon(QWidget):
         painter.drawRect(QRectF(-half, gap, w, w))
         # bottom-right
         painter.drawRect(QRectF(gap, gap, w, w))
+
+    @staticmethod
+    def _draw_paper(painter: QPainter, radius: float) -> None:
+        """A document glyph: page outline with a folded corner and two lines."""
+        painter.setPen(painter.pen().color())
+        painter.setBrush(Qt.NoBrush)
+        half_w = radius * 0.85
+        half_h = radius * 1.05
+        corner = radius * 0.32
+        path = QPainterPath()
+        path.moveTo(-half_w, -half_h)
+        path.lineTo(half_w - corner, -half_h)
+        path.lineTo(half_w, -half_h + corner)
+        path.lineTo(half_w, half_h)
+        path.lineTo(-half_w, half_h)
+        path.closeSubpath()
+        painter.drawPath(path)
+        # Fold triangle
+        painter.drawLine(half_w - corner, -half_h, half_w - corner, -half_h + corner)
+        painter.drawLine(half_w - corner, -half_h + corner, half_w, -half_h + corner)
+        # Text lines
+        painter.drawLine(-half_w + radius * 0.28, -radius * 0.18, half_w - radius * 0.28, -radius * 0.18)
+        painter.drawLine(-half_w + radius * 0.28, radius * 0.12, half_w - radius * 0.28, radius * 0.12)
+
+    @staticmethod
+    @staticmethod
+    def _draw_note(painter: QPainter, radius: float) -> None:
+        """A small notepad: rounded page with a folded corner and two lines."""
+        size = radius * 1.7
+        left, top = -size / 2, -size / 2
+        fold = size * 0.30
+        path = QPainterPath()
+        path.moveTo(left, top)
+        path.lineTo(left + size - fold, top)
+        path.lineTo(left + size, top + fold)
+        path.lineTo(left + size, top + size)
+        path.lineTo(left, top + size)
+        path.closeSubpath()
+        painter.drawPath(path)
+        painter.drawLine(QPointF(left + size - fold, top),
+                         QPointF(left + size - fold, top + fold))
+        painter.drawLine(QPointF(left + size - fold, top + fold),
+                         QPointF(left + size, top + fold))
+        line_y = top + size * 0.55
+        painter.drawLine(QPointF(left + size * 0.2, line_y),
+                         QPointF(left + size * 0.8, line_y))
+        painter.drawLine(QPointF(left + size * 0.2, line_y + size * 0.22),
+                         QPointF(left + size * 0.62, line_y + size * 0.22))
+
+    def _draw_memory(painter: QPainter, radius: float) -> None:
+        """A simple cylinder / database shape suggesting stored data."""
+        painter.setPen(painter.pen().color())
+        painter.setBrush(Qt.NoBrush)
+        # Top ellipse
+        painter.drawEllipse(QRectF(-radius * 0.7, -radius, radius * 1.4, radius * 0.5))
+        # Body lines
+        painter.drawLine(-radius * 0.7, -radius * 0.75, -radius * 0.7, radius * 0.5)
+        painter.drawLine(radius * 0.7, -radius * 0.75, radius * 0.7, radius * 0.5)
+        # Bottom ellipse
+        painter.drawEllipse(QRectF(-radius * 0.7, radius * 0.3, radius * 1.4, radius * 0.5))
+
+    @staticmethod
+    def _draw_console(painter: QPainter, radius: float) -> None:
+        """A terminal window: rounded frame, prompt line and cursor line."""
+        painter.setPen(painter.pen().color())
+        painter.setBrush(Qt.NoBrush)
+        # Window frame
+        painter.drawRoundedRect(
+            QRectF(-radius * 0.85, -radius * 0.7, radius * 1.7, radius * 1.4),
+            radius * 0.25, radius * 0.25,
+        )
+        # Prompt line
+        painter.drawLine(-radius * 0.55, -radius * 0.25, radius * 0.35, -radius * 0.25)
+        # Cursor line
+        painter.drawLine(-radius * 0.55, radius * 0.25, radius * 0.15, radius * 0.25)
 
 
 # -- PageLens mock data (Phase 9A static shell) ------------------------------

@@ -31,8 +31,9 @@ from core.screen_vision.provider_errors import (
 )
 from core.screen_vision.vision.base import DEFAULT_VISION_INSTRUCTION
 from core.screen_vision.vision.qwen_vision import extract_json, to_observation
+from core.providers.catalog import CATALOG
 
-DEFAULT_GLM_VISION_MODEL = "glm-4.6v-flash"
+DEFAULT_GLM_VISION_MODEL = CATALOG["glm-vision"].model
 FORBIDDEN_VISION_MODELS = {"glm-4.7-flash"}  # verified TEXT_ONLY
 
 

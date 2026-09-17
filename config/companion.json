@@ -1,0 +1,13 @@
+{
+  "memory": {
+    "write_policy": "explicit_only"
+  },
+  "suggestion": {
+    "enabled": true,
+    "auto_extract_enabled": true,
+    "max_candidates_per_turn": 3,
+    "auto_write_enabled": false,
+    "auto_write_min_chars": 8,
+    "auto_write_allowed_categories": ["project", "preference", "shared_experience", "user_fact"]
+  }
+}
