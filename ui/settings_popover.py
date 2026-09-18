@@ -121,6 +121,7 @@ class _ToggleRow(QFrame):
 class SettingsPopover(PopoverBase):
     reset_position_requested = Signal()
     memory_requested = Signal()
+    provider_manager_requested = Signal()
 
     def __init__(self, manager, parent=None, autostart=None):
         super().__init__(width=theme.POPOVER_WIDTH, parent=parent)
@@ -209,6 +210,16 @@ class SettingsPopover(PopoverBase):
             f"font-size: {theme.FONT_SIZE_SMALL}pt;"
         )
         self.content_layout.addWidget(self._ai_status_label)
+
+        # Provider Manager Phase 3B: entry to the AI model settings window.
+        self._provider_btn = QPushButton("AI 模型管理")
+        self._provider_btn.setObjectName("openProviderManager")
+        self._provider_btn.setCursor(Qt.PointingHandCursor)
+        self._provider_btn.setToolTip(
+            "添加或替换模型 API Key（保存在本机用户目录，自动热更新）"
+        )
+        self._provider_btn.clicked.connect(self.provider_manager_requested.emit)
+        self.content_layout.addWidget(self._provider_btn, 0, Qt.AlignLeft)
 
         self._manager.connect(self._on_settings_changed)
         self.refresh()
