@@ -26,6 +26,23 @@ DEFAULT_TIMEOUT_SECONDS = 20.0
 ChatCompletion = dict[str, Any]
 Transport = Callable[[str, dict[str, Any], dict[str, str], float], dict[str, Any]]
 
+# Provider Manager Phase 1: an optional per-machine credential source,
+# consulted between the process environment and the .env file.  The source is
+# a callable mapping a canonical setting name to its stored value (or None).
+# Unregistered (the default) keeps resolve_setting behavior byte-identical to
+# the previous implementation; the concrete store lives in
+# core.credential_store and is registered by the composition root, keeping
+# this module stdlib-only.
+CredentialSource = Callable[[str], "str | None"]
+_credential_source: CredentialSource | None = None
+
+
+def register_credential_source(source: CredentialSource | None) -> None:
+    """Register (or clear, with ``None``) the credential store used by
+    :func:`resolve_setting`.  Thread-safe by GIL-atomic reference swap."""
+    global _credential_source
+    _credential_source = source
+
 
 class ProviderError(Exception):
     """Base class for failures that may trigger provider fallback."""
@@ -89,10 +106,22 @@ def resolve_setting(
     *,
     env_file: Path | str | None = None,
 ) -> str:
-    """Resolve one setting, preferring the process environment over ``.env``."""
+    """Resolve one setting: process env > credential store > .env > default.
+
+    The credential store (Provider Manager Phase 1) is consulted only when a
+    source has been registered; store lookup failures degrade silently to the
+    .env layer so a damaged store can never break provider resolution.
+    """
     process_value = os.environ.get(name)
     if process_value is not None and process_value.strip():
         return process_value.strip()
+    if _credential_source is not None:
+        try:
+            stored_value = _credential_source(name)
+        except Exception:
+            stored_value = None
+        if stored_value is not None and stored_value.strip():
+            return stored_value.strip()
     return read_env_file(env_file).get(name, default).strip()
 
 

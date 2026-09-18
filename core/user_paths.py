@@ -79,6 +79,10 @@ class UserDataPaths:
         return self.root / "plugins"
 
     @property
+    def credentials(self) -> Path:
+        return self.root / "credentials"
+
+    @property
     def migration_report(self) -> Path:
         return self.root / "migration_report.json"
 

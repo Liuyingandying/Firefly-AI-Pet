@@ -52,7 +52,10 @@ from core.session_store import SessionStore
 from core.settings_manager import SettingsManager
 from core.pet_state_resolver import PetStateResolver
 from core.visual_state_filter import VisualStateFilter
-from core.runtime_bus import RuntimeBus, RuntimeState
+from core.runtime_bus import RuntimeBus, RuntimeEvent, RuntimeState
+from core.ai_router import ProvidersUpdated, reload_default_routers, set_updated_publisher
+from core.credential_store import default_store
+from providers.base import register_credential_source
 from core.runtime_state_aggregator import RuntimeStateAggregator
 from core.zcode_state_poller import ZCodeStatePoller
 from core.state_monitor import StateMonitor
@@ -622,6 +625,11 @@ class VisualShell(QObject):
         self.coordinator.scratchpad_requested.connect(self._ensure_scratchpad_window)
         self.pet.set_drop_handler(self._scratchpad_drop_controller())
         self.settings_popover.memory_requested.connect(self._open_memory_from_settings)
+        # Provider Manager Phase 3B: settings entry opens the AI model window.
+        self._provider_manager_window = None
+        self.settings_popover.provider_manager_requested.connect(
+            self._open_provider_manager
+        )
         # UI V2 CompanionConsole — toolbar "console" action opens the singleton.
         self.coordinator.console_requested.connect(self._ensure_companion_console)
 
@@ -825,6 +833,28 @@ class VisualShell(QObject):
         if self.settings_popover.isVisible():
             self.settings_popover.dismiss()
         self._ensure_memory_panel()
+
+    def _open_provider_manager(self) -> None:
+        """Open the AI model settings window (Provider Manager Phase 3B)."""
+        if self.settings_popover.isVisible():
+            self.settings_popover.dismiss()
+        from core.provider_manager import ProviderManager
+        from ui.provider_manager_window import ProviderManagerWindow
+
+        if self._provider_manager_window is None:
+            # NOTE: VisualShell is a QObject (not a QWidget) and cannot parent
+            # a QDialog; the window stays top-level and is kept alive by the
+            # reference below.
+            self._provider_manager_window = ProviderManagerWindow(
+                manager=ProviderManager(),
+                store=default_store(),
+                runtime_bus=getattr(self, "runtime_bus", None),
+                reload_fn=reload_default_routers,
+            )
+        self._provider_manager_window.refresh()
+        self._provider_manager_window.show()
+        self._provider_manager_window.raise_()
+        self._provider_manager_window.activateWindow()
 
     def _on_memory_panel_close(self) -> None:
         if self._memory_panel is not None:
@@ -2188,12 +2218,32 @@ def main() -> int:
     # after the process mutex also prevents two simultaneous starts racing.
     initialize_user_data(legacy_project_dir=PROJECT_DIR, paths=USER_PATHS)
 
+    # Provider Manager Phase 2: per-machine credential store feeds
+    # providers.base.resolve_setting with priority env > store > .env.
+    # Registration is safe before the shell: the store itself is lazy and
+    # creates its directory on first write only.
+    register_credential_source(default_store().get)
+
     server = QLocalServer()
     server.removeServer(SERVER_NAME)
     if not server.listen(SERVER_NAME):
         server = None
 
     shell = VisualShell(server, sessions_file=SESSIONS_FILE)
+
+    # Credential changes fan out to UI consumers through the runtime bus:
+    # reload_default_routers() → this publisher → "providers.updated" event.
+    def _publish_providers_updated() -> None:
+        shell.runtime_bus.publish_event(
+            RuntimeEvent(
+                kind="providers.updated",
+                source="provider_manager",
+                payload=ProvidersUpdated(),
+            )
+        )
+
+    set_updated_publisher(_publish_providers_updated)
+
     app.aboutToQuit.connect(shell.shutdown)
     shell.start()
     return app.exec()

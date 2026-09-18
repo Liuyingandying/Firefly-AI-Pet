@@ -14,8 +14,10 @@ import os
 import threading
 import time
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
+from weakref import WeakSet
 
 from providers.base import (
     DEFAULT_TIMEOUT_SECONDS,
@@ -42,6 +44,41 @@ DEFAULT_STATE = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class ProvidersUpdated:
+    """Payload for the ``providers.updated`` runtime event (Phase 2).
+
+    Emitted after at least one default-constructed router rebuilt its
+    provider instances (typically following a credential store change).
+    Carries no credential material.
+    """
+
+    reason: str = "credential_update"
+    reloaded_routers: int = 0
+
+
+# Live default-constructed routers; weak so nothing here extends lifetimes.
+_live_routers: WeakSet["ProviderRouter"] = WeakSet()
+_live_routers_lock = threading.Lock()
+_updated_publisher: Callable[[], None] | None = None
+
+
+def set_updated_publisher(publisher: Callable[[], None] | None) -> None:
+    """Register the callback invoked after default routers reload.
+
+    The composition root (app.py) wires this to the RuntimeBus
+    ``providers.updated`` event; ``core.ai_router`` itself stays Qt-free.
+    """
+    global _updated_publisher
+    _updated_publisher = publisher
+
+
+def _notify_updated() -> None:
+    publisher = _updated_publisher
+    if publisher is not None:
+        publisher()
+
+
 class AllProvidersFailedError(Exception):
     """Every configured provider failed for a chat request."""
 
@@ -63,11 +100,14 @@ class ProviderRouter:
         provider_timeout: float = DEFAULT_TIMEOUT_SECONDS,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        configured = list(providers) if providers is not None else [
-            TJUQwenProvider(),
-            ZhipuGLMProvider(),
-            DeepSeekProvider(),
-        ]
+        self._providers_injected = providers is not None
+        if providers is not None:
+            configured = list(providers)
+        else:
+            configured = list(self._build_default_providers())
+        if not self._providers_injected:
+            with _live_routers_lock:
+                _live_routers.add(self)
         names = [str(provider.name) for provider in configured]
         if len(names) != len(set(names)):
             raise ValueError("provider names must be unique")
@@ -144,6 +184,34 @@ class ProviderRouter:
 
         raise AllProvidersFailedError(failures)
 
+    def reload(self) -> bool:
+        """Rebuild the default provider instances under the state lock.
+
+        Provider Manager Phase 2: re-runs adapter construction so credentials
+        resolved through ``providers.base.resolve_setting`` (process env >
+        credential store > .env) are picked up without a restart.  Health
+        state (``current_provider`` / failure counts) is preserved, and
+        in-flight calls keep finishing on their existing adapter instances.
+
+        Returns ``True`` when this router owns the default provider set and
+        was rebuilt; ``False`` for routers constructed with an explicit
+        provider list (caller-owned, never rebuilt here).
+        """
+        with self._state_lock:
+            if self._providers_injected:
+                return False
+            self.providers = tuple(self._build_default_providers())
+        return True
+
+    @staticmethod
+    def _build_default_providers() -> tuple[BaseProvider, ...]:
+        """Fresh default adapter set; credentials resolve at construction."""
+        return (
+            TJUQwenProvider(),
+            ZhipuGLMProvider(),
+            DeepSeekProvider(),
+        )
+
     def _load_state(self) -> dict[str, Any]:
         try:
             raw = json.loads(self.state_path.read_text(encoding="utf-8"))
@@ -207,6 +275,26 @@ def _get_default_router() -> ProviderRouter:
             if _default_router is None:
                 _default_router = ProviderRouter()
     return _default_router
+
+
+def reload_default_routers() -> int:
+    """Reload every live default-constructed router (Phase 2 hot update).
+
+    Called after a credential store change so all default routers — the
+    module-level chat router and any ``ProviderRouter()`` instances created
+    by consumers such as companion runtime — pick up the new credentials
+    without a restart.  Health state is preserved per router; the registered
+    updated-publisher (wired to the RuntimeBus ``providers.updated`` event by
+    the composition root) fires once when at least one router was rebuilt.
+
+    Returns the number of routers actually rebuilt.
+    """
+    with _live_routers_lock:
+        routers = list(_live_routers)
+    reloaded = sum(1 for router in routers if router.reload())
+    if reloaded:
+        _notify_updated()
+    return reloaded
 
 
 def chat(
