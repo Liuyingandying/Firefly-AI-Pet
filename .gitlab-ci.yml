@@ -31,15 +31,18 @@ cache:
 
 test:
   stage: test
-  image: python:3.12-slim
+  image: python:3.12-slim-bookworm
   before_script:
-    - apt-get update
+    # Acquire::Retries 限制 apt 单源重试，避免 runner 网络下
+    # trixie 源索引反复重试刷爆 4MB 日志上限（pipeline #633 教训）
+    - apt-get update -o Acquire::Retries=3
     - apt-get install -y --no-install-recommends
       libegl1
       libgl1
       libxkbcommon0
       libdbus-1-3
       libfontconfig1
+    - rm -rf /var/lib/apt/lists/*
     - python -m pip install --upgrade pip
     - python -m pip install -r requirements.txt pytest
   script:
