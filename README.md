@@ -206,6 +206,22 @@ Firefly_AI_Pet/
 - ⏳ 跨平台（Linux/macOS）评估
 - ⏳ 学习模式课程库扩充
 
+## Plugin Ecosystem
+
+Firefly AI Pet supports modular capability extensions.
+
+Plugin repository:
+
+https://github.com/Liuyingandying/Firefly-AI-Pet-Plugins
+
+
+Included:
+
+- Video Extension
+- Vision Extension
+- Learning Assistant
+- Campus Information Bridge
+
 ## License
 
 本项目基于 [MIT License](LICENSE) 开源。
