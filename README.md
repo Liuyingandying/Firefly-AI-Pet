@@ -115,7 +115,8 @@ flowchart TB
 - **零 SDK 依赖的 Provider 直连**：stdlib `urllib` 直连 OpenAI 兼容接口，固定 60 秒预算、逐跳回退、健康状态持久化
 - **确定性记忆边界**：规则引擎（而非 LLM）决定"什么能被记住"，红线过滤器不可关闭
 - **原子写与故障隔离**：配置、记忆、会话全部原子替换写入；插件/桥/文档解析器故障相互隔离
-- **工程化交付**：PyInstaller onedir 便携打包、GitHub Actions 三版本矩阵 CI、SHA256 校验发布
+- **工程化交付**：PyInstaller onedir 便携打包、GitHub Actions 三版本矩阵 CI（稳定核心测试集）、SHA256 校验发布
+- **测试规模**：项目包含约 2600 项本地自动化测试；针对硬件、视觉等环境依赖模块，CI 采用稳定核心测试集持续验证；rc2 发布前完成 166 项关键回归验证
 
 ## Demo 展示
 
@@ -142,8 +143,8 @@ flowchart TB
 ### 方式二：源码运行（开发者）
 
 ```powershell
-git clone https://gitlab.tju.edu.cn/3024202194/agent2026-firefly-agent.git
-cd agent2026-firefly-agent
+git clone https://github.com/Liuyingandying/Firefly-AI-Pet.git
+cd Firefly-AI-Pet
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe app.py
