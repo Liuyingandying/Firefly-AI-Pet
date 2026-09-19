@@ -165,6 +165,22 @@ python -m venv .venv
 - 首次记忆写入需联网下载本地嵌入模型（约 30MB）；受限网络可设置 `HF_ENDPOINT=https://hf-mirror.com` 后重启
 - 退出请使用托盘图标右键 → 退出
 
+## 新用户安装验证
+
+`v1.0-rc2` 便携包经过一次"新用户视角"端到端实测：从 GitHub 下载 → SHA256 校验 → 解压 → 无 Key 首次启动 → 数据隔离核对 → 可选插件安装。
+
+| 验证项 | 结果 |
+|---|---|
+| 下载完整性（SHA256 与 `.sha256` asset 三方一致） | ✅ |
+| 解压结构与启动入口 | ✅ |
+| 无 Key 首启（无凭据写入、进程稳定、宠物正常渲染） | ✅ |
+| 用户数据目录自动创建（conversation/learning/memory/plugins/runtime 等） | ✅ |
+| 用户数据与既有数据零交叉写入（逐文件快照比对） | ✅ |
+| 用户数据不进入 Git 仓库与发行包 | ✅ |
+| 插件默认安装路径（`%LOCALAPPDATA%\FireflyAI\plugins`，宿主自动创建） | ✅ |
+
+完整方法、证据与未验证项见 [docs/New_User_Migration_Verification.md](docs/New_User_Migration_Verification.md)。
+
 ## 项目结构
 
 ```text
