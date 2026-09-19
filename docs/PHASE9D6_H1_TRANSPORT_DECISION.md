@@ -163,7 +163,7 @@ Claude Review per the current template).
 ## 5. Controlled Exec Smoke (ONE real online run)
 
 Tool: `tools/benchmark_codex_transport.py` (new; no production code touched).
-Workspace: disposable `C:\Users\FAJ\AppData\Local\Temp\firefly_codex_exec_pjsgmvop`
+Workspace: disposable `C:\Users\<用户名>\AppData\Local\Temp\firefly_codex_exec_pjsgmvop`
 (kept for inspection, fixture identical to 9D.6).
 
 Command (production-shaped: QProcess-style pipes → `powershell.exe -File run_cli.ps1` →

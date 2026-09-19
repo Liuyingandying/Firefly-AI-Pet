@@ -25,7 +25,7 @@ from core.screen_vision.provider_errors import (
 from core.screen_vision.safety import sanitize_error_text
 
 
-SCREEN_VISION_DIR = Path(r"E:\Firefly_AI_Pet\core\screen_vision")
+SCREEN_VISION_DIR = Path(__file__).resolve().parents[1] / "core" / "screen_vision"
 
 
 # ------------------------------------------------------------ G credentials

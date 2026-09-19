@@ -16,7 +16,7 @@ the on-disk store round-trips, and runtime/sources/claude.json is NOT rewritten
 by any internal ask. Codex online calls: 0.
 
 Usage:
-  python tools/smoke_phase8c4_session_persistence.py [--workspace E:\\Firefly_AI_Pet]
+  python tools/smoke_phase8c4_session_persistence.py [--workspace <仓库目录>]
   python tools/smoke_phase8c4_session_persistence.py --only-continuity
 """
 

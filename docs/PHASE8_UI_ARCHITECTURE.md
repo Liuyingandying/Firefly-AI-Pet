@@ -273,7 +273,7 @@ CLI 启动后仍需建立或恢复到 Agent 服务的通信。DNS/代理/TLS/本
 
 ### 5.3 Hooks 的冻结边界
 
-- UI 永远不读取、写入或修补 `C:\Users\FAJ\.claude\`、`C:\Users\FAJ\.codex\`。
+- UI 永远不读取、写入或修补 `C:\Users\<用户名>\.claude\`、`C:\Users\<用户名>\.codex\`。
 - 冻结 Hook 的产品契约：短时、silent、失败不阻断 Agent、绝对路径调用、只写对应 Agent source、原子写入、绝不改变权限/approval 决策。
 - 当前 Codex Hook 的 agent-specific 写入和 lifecycle-to-state 映射保持不动。
 - 当前 Claude Hook 实际不存在，不能把“没有配置”描述为已冻结的成功实现。恢复/重建 Claude Hook 必须是另一个明确授权的维护任务，且需要核对当前 Claude 官方事件支持；不属于 Phase 8A。
@@ -487,7 +487,7 @@ Signal payload 应为结构化对象/枚举；展示中文文案由 UI formatter
 
 - `state_broker.py` 的解析、优先级、TTL 和 schema。
 - `tools/simulate_event.py` 及 Hook 写入契约。
-- `C:\Users\FAJ\.claude\`、`C:\Users\FAJ\.codex\` 下任何 Hooks、permissions、approval、sandbox、trust 配置。
+- `C:\Users\<用户名>\.claude\`、`C:\Users\<用户名>\.codex\` 下任何 Hooks、permissions、approval、sandbox、trust 配置。
 - `assets/animations/` 中任何动画素材。
 - Quick Ask transport 与性能路径：`ui/process_launcher.py`、`ui/quick_chat_protocol.py`、`tools/run_cli.ps1`。
 - `start_pet.ps1`、`stop_pet.ps1`、`requirements.txt`，除非实现中出现独立、被证实且另行授权的必要性；不能顺手修改。

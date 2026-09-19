@@ -128,9 +128,9 @@
 | 能力 | 标注 | 依据 |
 |---|---|---|
 | Companion / Memory / Memory Manager / 会话历史 / Scratchpad / PageLens+扩展 / Screen Vision / Learning / Providers / 宠物壳 / voice_client（客户端代码） | **bundled** | 源码全部在本仓（A1–A4 入库后即完整） |
-| Quick Tools 壳 + 门机制 | **bundled**（壳）；4 个插件体 **optional external** | 插件本体在 `E:\Firefly_AI_Private_Plugins\`，不在本仓发行边界 |
+| Quick Tools 壳 + 门机制 | **bundled**（壳）；4 个插件体 **optional external** | 插件本体在 `<插件根目录>\`，不在本仓发行边界 |
 | Camera Vision / Video Analysis（B 站链）/ TJU Info Retrieval / learning-focus | **optional external** | 依赖仓库外插件与服务（BiliInsight、TJU_Info_Retrieval 工程） |
-| Voice Pipeline（TTS/RVC 服务） | **optional external** | 服务在 `E:\Firefly_PageLens\voice\voice_module`，默认 `voice.enabled=false` |
+| Voice Pipeline（TTS/RVC 服务） | **optional external** | 服务在 `<PageLens工程目录>\voice\voice_module`，默认 `voice.enabled=false` |
 | Hardware / ESP32（Prism + LED 桥） | **optional external** | 桥代码 bundled（tools/），设备与 `hardware_devices.json` 真值为本机私有 |
 | DASHSCOPE（`dashscope-qwen`）provider | **unsupported** | catalog 已 deprecated、无代码读取；从 `.env.example` 移除 |
 | RecentSessions MOCK_SESSIONS 回退 | **unsupported** | 假数据路径，v1.0 必须移除（Scope 审计 P0-6） |

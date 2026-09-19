@@ -12,7 +12,7 @@ end to end:
 Codex online calls: 0.
 
 Usage:
-  python tools/smoke_phase8c2_agent_events.py [--workspace E:\\Firefly_AI_Pet]
+  python tools/smoke_phase8c2_agent_events.py [--workspace <仓库目录>]
 """
 
 from __future__ import annotations

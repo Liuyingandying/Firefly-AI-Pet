@@ -13,7 +13,7 @@
 
 - 全程只读。未修改代码、未修改配置、未运行任何测试。
 - 审计过程中未读取 `.env` 的值（仅核对 `.env.example` 的变量名与 `.gitignore` 覆盖关系）；`config/` 下个人配置仅核对结构，未摘录个人数据。
-- 本文所有结论均给出文件级证据，路径相对 `E:\Firefly_AI_Pet\`。
+- 本文所有结论均给出文件级证据，路径相对 `<仓库目录>\`。
 
 ---
 
@@ -41,9 +41,9 @@
 | `core/` | 存在（80+ 模块） | — |
 | `ui/` | 存在（50+ 模块 + `ui/v2/` 控制台） | — |
 | `memory/` | 存在（16 模块 + `suggestion/`） | — |
-| `plugins/` | **顶层不存在** | 插件壳代码在 `core/plugin_loader.py` / `core/quick_tools.py` / `ui/quick_tools_popover.py`；4 个插件**本体在仓库外** `E:\Firefly_AI_Private_Plugins\`（`DEFAULT_PLUGIN_ROOT` 硬编码，`core/plugin_loader.py:30`） |
+| `plugins/` | **顶层不存在** | 插件壳代码在 `core/plugin_loader.py` / `core/quick_tools.py` / `ui/quick_tools_popover.py`；4 个插件**本体在仓库外** `<插件根目录>\`（`DEFAULT_PLUGIN_ROOT` 硬编码，`core/plugin_loader.py:30`） |
 | `learning/` | **顶层不存在** | `core/learning/`（完整子包：orchestrator/curriculum/teaching/decision/store 等） |
-| `voice/` | **顶层不存在** | `voice_client/`（仓库内 HTTP 客户端）+ 仓库外 TTS/RVC 服务 `E:\Firefly_PageLens\voice\voice_module`；配置 `config/voice_config.yaml` |
+| `voice/` | **顶层不存在** | `voice_client/`（仓库内 HTTP 客户端）+ 仓库外 TTS/RVC 服务 `<PageLens工程目录>\voice\voice_module`；配置 `config/voice_config.yaml` |
 | `assets/` | 存在 | `animations/`（7 个状态 gif）、`firefly.ico`、`paper_reader/pdfjs/`、`fonts/`（**仅 README，字体文件按许可策略不入库**）、`ui/`（README + background） |
 | `config/` | 存在 | `companion.json`、`pet_preferences.json`、`ui_settings.json`、`sessions.json`（后三者本地个人配置，已 gitignore）、`hardware_devices.json`（含设备序列号）、`voice_config.yaml` |
 
@@ -132,7 +132,7 @@
 
 - **名称**：Quick Tools（插件注册表 + 门机制 + 管理弹窗）
 - **状态**：partial（壳与门机制 ready；4 个插件本体全部在仓库外）
-- **运行依赖**：`core/plugin_loader.py`：默认插件根硬编码 `E:\Firefly_AI_Private_Plugins`（`FIREFLY_PLUGIN_PATH` env 可追加）；`MANAGED_PLUGIN_IDS` 白名单四插件（firefly-video / firefly-camera-vision / learning-focus / tju-info-retrieval）；启停唯一真源 `is_plugin_enabled`（持久化于 `config/pet_preferences.json` 的 `plugins.<id>.enabled`），无缓存、无旁路（有专项审计文档）。发现在本仓（AST 只读探测不 import），**执行体不在本仓**。
+- **运行依赖**：`core/plugin_loader.py`：默认插件根硬编码 `<插件根目录>`（`FIREFLY_PLUGIN_PATH` env 可追加）；`MANAGED_PLUGIN_IDS` 白名单四插件（firefly-video / firefly-camera-vision / learning-focus / tju-info-retrieval）；启停唯一真源 `is_plugin_enabled`（持久化于 `config/pet_preferences.json` 的 `plugins.<id>.enabled`），无缓存、无旁路（有专项审计文档）。发现在本仓（AST 只读探测不 import），**执行体不在本仓**。
 - **是否适合进入 v1.0**：壳与门机制 **是**；插件体 **否（Optional External）**。
 - **理由**：门机制有完整审计（`Quick_Tools_Capability_Gate_Audit.md`：firefly-video VERIFIED/FROZEN、camera PASS、learning-focus 语义清晰、tju 默认开启）；`core/quick_tools.py` 为纯内存注册表无持久化副作用。
 - **风险**：
@@ -157,7 +157,7 @@
 
 - **名称**：Camera Vision（显式触发的单帧摄像头理解）
 - **状态**：partial
-- **运行依赖**：宿主侧捕获在仓（`core/screen_vision/screen/camera.py`，QCamera 单帧 + 8s 看门狗，无后台/无落盘）；**插件本体在仓库外** `E:\Firefly_AI_Private_Plugins\firefly_camera_vision\`；摄像头硬件 + Qt Multimedia；分析复用 4.7 云视觉链。
+- **运行依赖**：宿主侧捕获在仓（`core/screen_vision/screen/camera.py`，QCamera 单帧 + 8s 看门狗，无后台/无落盘）；**插件本体在仓库外** `<插件根目录>\firefly_camera_vision\`；摄像头硬件 + Qt Multimedia；分析复用 4.7 云视觉链。
 - **是否适合进入 v1.0**：**条件性**——随包仅能承诺"宿主侧"，卡片随插件目录缺失而消失。
 - **理由**：门控链完整且 fail-closed（`app.py:265-267` 以 `is_plugin_enabled` 为唯一真源；独立开发入口 `lambda: False`；触发顺序保证"看看我的屏幕"永不误开摄像头，有测试锁定）；Vision-1A/1B/1C 三阶段报告齐备。
 - **风险**：摄像头帧出网（同 4.7 隐私面）；`camera.py` git untracked；真实硬件回归依赖本机摄像头（历史线程编组问题已修复，但无干净机器证据）；插件目录不在发行边界。
@@ -166,7 +166,7 @@
 
 - **名称**：Video Analysis（B 站视频陪学 + 本地视频分析）
 - **状态**：partial
-- **运行依赖**：**B 站链**：外部服务 `E:\Firefly_BiliInsight_Service`（子进程 JSONL 调用，自带 .venv 与 faster-whisper 本地 ASR，transcribe 超时 900s）→ 云 LLM 摘要/出题/判卷。**本地视频链**：firefly-video 插件（仓库外）+ ffmpeg/ffprobe + faster-whisper/PySceneDetect/RapidOCR（**均未进 requirements**）。门：`core/capabilities/video_gate.py` 实时读 `is_plugin_enabled("firefly-video")`，fail-closed，任何 ffprobe/ffmpeg 之前拒绝。
+- **运行依赖**：**B 站链**：外部服务 `<BiliInsight服务目录>`（子进程 JSONL 调用，自带 .venv 与 faster-whisper 本地 ASR，transcribe 超时 900s）→ 云 LLM 摘要/出题/判卷。**本地视频链**：firefly-video 插件（仓库外）+ ffmpeg/ffprobe + faster-whisper/PySceneDetect/RapidOCR（**均未进 requirements**）。门：`core/capabilities/video_gate.py` 实时读 `is_plugin_enabled("firefly-video")`，fail-closed，任何 ffprobe/ffmpeg 之前拒绝。
 - **是否适合进入 v1.0**：**条件性**——代码与门机制可随包，**能力承诺必须标注"需外部服务"**。
 - **理由**：B 站集成是真实的（真实下载 + 本地 ASR + 云摘要 + 会话内追问/时间点追问/陪学闭环）；gate 审计 VERIFIED/FROZEN。
 - **风险**：
@@ -180,7 +180,7 @@
 
 - **名称**：TJU Info Retrieval（科研信息检索插件）
 - **状态**：external dependency
-- **运行依赖**：双层外置——插件本体 `E:\Firefly_AI_Private_Plugins\tju_info_retrieval\` + 外部检索工程 `E:\AI_Workspace\TJU_Info_Retrieval`（每请求新建 subprocess，shell=False，health 20s / search 150s 超时）；校园登录态（过期进入 AUTH_REQUIRED，提供受控浏览器手动重登 UX，不碰凭据）。
+- **运行依赖**：双层外置——插件本体 `<插件根目录>\tju_info_retrieval\` + 外部检索工程 `<TJU信息检索工程目录>`（每请求新建 subprocess，shell=False，health 20s / search 150s 超时）；校园登录态（过期进入 AUTH_REQUIRED，提供受控浏览器手动重登 UX，不碰凭据）。
 - **是否适合进入 v1.0**：**否（建议作为本机可选件，不进安装承诺）**。
 - **理由**：功能完整（allowlist、保守触发——仅显式"用TJU信息检索查…"、三处 open_ui 入口共享同一 `plugin.open_ui()`、热开关、AUTH 恢复 UX，4 个专项测试）；工程缺席时**绝不阻断启动**（discover 对不存在目录静默跳过，聊天侧降级文案）。
 - **风险**：双外部工程 + 测试硬编码本机路径（clean 机器上 4 个 TJU 测试会失败）；AUTH 依赖受控 Edge 浏览器；默认 enabled=True（见 4.6）。
@@ -202,7 +202,7 @@
 
 - **名称**：Voice Pipeline（TTS 语音播报）
 - **状态**：external dependency（客户端部分 ready）
-- **运行依赖**：仓库内 `voice_client/`（HTTP 客户端 + 播放按钮 + 文本清洗，"永不抛异常"）→ **仓库外 GPU 服务** `E:\Firefly_PageLens\voice\voice_module`（Python 3.10 / torch 2.5.1 / edge-tts+RVC，独立 venv，主程序**不启动不监管**），`http://127.0.0.1:8300/voice/speak`。配置 `config/voice_config.yaml`：`voice.enabled` 总开关、`auto_play`（默认 false，仅显示播放按钮）、超长截断 1600 字符。
+- **运行依赖**：仓库内 `voice_client/`（HTTP 客户端 + 播放按钮 + 文本清洗，"永不抛异常"）→ **仓库外 GPU 服务** `<PageLens工程目录>\voice\voice_module`（Python 3.10 / torch 2.5.1 / edge-tts+RVC，独立 venv，主程序**不启动不监管**），`http://127.0.0.1:8300/voice/speak`。配置 `config/voice_config.yaml`：`voice.enabled` 总开关、`auto_play`（默认 false，仅显示播放按钮）、超长截断 1600 字符。
 - **是否适合进入 v1.0**：**是（以默认关闭的 Optional External 形态）**——客户端代码随包，服务不随包，文案不得宣称"语音随包可用"。
 - **理由**：客户端完整且有回归（test_voice_integration / expression / ux / v131 / v132）；失败仅日志、零影响文字聊天；v1.3.1 修复了停止失效与晚到结果翻转 UI。
 - **风险**：外部服务生命周期完全独立；外部环境 numpy<2 与本仓 venv numpy 2.x 冲突不可合并；`voice_client/` 与 `voice_config.yaml` 当前 git untracked；模板注释引用本机绝对路径需清理；已知小缺陷：`connect_timeout_s` 配置存在但 urllib 实际只用单一 timeout。
@@ -276,7 +276,7 @@
 
 | 能力 | 缺失外部环境时的表现 |
 |---|---|
-| Camera Vision | 插件体 `E:\Firefly_AI_Private_Plugins\firefly_camera_vision\` 缺失 → Quick Tools 无卡片 |
+| Camera Vision | 插件体 `<插件根目录>\firefly_camera_vision\` 缺失 → Quick Tools 无卡片 |
 | Video Analysis | BiliInsight 服务 / firefly-video 插件 / ffmpeg+ASR 缺失 → 门 fail-closed 拒绝并提示 |
 | TJU Info Retrieval | 双外部工程缺失 → 插件静默不加载，聊天降级文案 |
 | learning-focus 插件 | 插件体缺失 → 仅缺附加能力，核心 Learning System 不受影响 |
@@ -339,10 +339,10 @@
 
 | 外部依赖 | 硬编码位置 | 缺失表现 |
 |---|---|---|
-| `E:\Firefly_AI_Private_Plugins`（4 插件） | `core/plugin_loader.py:30` | Quick Tools 卡片消失 |
-| `E:\Firefly_BiliInsight_Service` | `core/bili_insight_client.py:28-61`（env 可覆盖） | B 站链不可用 |
-| `E:\AI_Workspace\TJU_Info_Retrieval` | 测试与 adapter 默认值 | 检索不可用 |
-| `E:\Firefly_PageLens\voice\voice_module` | voice_config 模板注释 | 语音不可用（默认已关） |
+| `<插件根目录>`（4 插件） | `core/plugin_loader.py:30` | Quick Tools 卡片消失 |
+| `<BiliInsight服务目录>` | `core/bili_insight_client.py:28-61`（env 可覆盖） | B 站链不可用 |
+| `<TJU信息检索工程目录>` | 测试与 adapter 默认值 | 检索不可用 |
+| `<PageLens工程目录>\voice\voice_module` | voice_config 模板注释 | 语音不可用（默认已关） |
 | TJU 校内 API 端点（ai.tju.edu.cn） | `core/providers/catalog.py` | 主力 LLM/视觉链不可用，回退商用 API |
 
 ### 6.5 测试与回归证据状态

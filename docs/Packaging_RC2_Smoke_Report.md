@@ -18,7 +18,7 @@
 
 ## 2. 冻结冒烟环境
 
-- 冒烟根：`D:\DevCache\FireflySmoke\v1_rc2\`（产物完整副本 + 独立 `userdata\`）
+- 冒烟根：`<冒烟测试根目录>\FireflySmoke\v1_rc2\`（产物完整副本 + 独立 `userdata\`）
 - 启动：`FIREFLY_USER_DATA_DIR` 指向冒烟 userdata；**单实例互斥**曾被两个来源阻塞（首轮：用户源码实例 13:18 启动持有互斥体 → rc2 按设计干净退出 exit 0；二轮：残留 debug 实例）——经用户同意后优雅关闭源码实例（stop_pet 双信号，含 ESP32 桥全部退出）再执行
 - 诊断工具：py-spy 0.4.2（运行时栈转储）+ UIA 自动化 + 控制台诊断构建（`firefly_dbg.spec`，临时产物）
 
@@ -61,7 +61,7 @@
 
 ## 5. 用户会话恢复
 
-冒烟结束后已执行 `start_pet.ps1` **恢复用户的源码实例**（supervisor + app + COM5/COM10 桥，4 个 pythonw 进程在线），冒烟数据隔离于 `D:\DevCache\FireflySmoke\v1_rc2\userdata\`（收尾核对：记忆恰 1 条合成记录；源码仓库 `runtime/companion` 冒烟时段 0 写入）。
+冒烟结束后已执行 `start_pet.ps1` **恢复用户的源码实例**（supervisor + app + COM5/COM10 桥，4 个 pythonw 进程在线），冒烟数据隔离于 `<冒烟测试根目录>\FireflySmoke\v1_rc2\userdata\`（收尾核对：记忆恰 1 条合成记录；源码仓库 `runtime/companion` 冒烟时段 0 写入）。
 
 ## 6. rc2 发布判断
 

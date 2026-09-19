@@ -10,7 +10,7 @@ Proves the workspace is unchanged (git status --porcelain before/after) and that
 Codex Short Talk reuses the shared ScrollFollowTextBrowser (full text + scroll).
 
 Usage:
-  python tools/smoke_codex_short_talk.py [--workspace E:\\Firefly_AI_Pet]
+  python tools/smoke_codex_short_talk.py [--workspace <仓库目录>]
 """
 
 from __future__ import annotations

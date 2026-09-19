@@ -68,7 +68,7 @@ Phase 8C.1 最小实施切片见第 17 节。**本阶段不做任何实现。**
   → QProcess.start()                           # powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -NonInteractive -File run_cli.ps1 <exe> <argv...>
   → run_cli.ps1                                (tools/run_cli.ps1)
        & $Executable @CliArgs                  # PowerShell 执行 .CMD 时隐含再派 cmd.exe
-  → claude.CMD / codex.CMD                     (E:\npm-global\node_modules\@anthropic-ai\claude-code\bin\claude.exe | node codex.js)
+  → claude.CMD / codex.CMD                     (<npm-global目录>\node_modules\@anthropic-ai\claude-code\bin\claude.exe | node codex.js)
   → 原生 CLI → 本地代理 127.0.0.1:15721 → DeepSeek V4 Flash
 ```
 
@@ -76,7 +76,7 @@ Phase 8C.1 最小实施切片见第 17 节。**本阶段不做任何实现。**
 
 1. **QuickAskRunner 在哪？** `ui/process_launcher.py:97`。当前 app.py 未接线（CompanionPanel 未导入）。
 2. **QProcess 如何启动？** `process_launcher.py:189-216`：`setProgram(powershell.exe)` + `setArguments(list)` + `setWorkingDirectory(workspace)` + `SeparateChannels`，`readyReadStandardOutput/Error` 接 `_read_stdout/_read_stderr`，异步 `start()`，不用 shell。
-3. **为什么经过 powershell.exe？** 因为 `find_executable("claude"/"codex")` 在 Windows 解析到 **`.CMD` shim**（实测 `shutil.which` → `E:\npm-global\claude.CMD` / `codex.CMD`）。QProcess/CreateProcess 不能直接跑批处理文件，必须经 cmd/powershell。wrapper 同时避免把 CLI 子命令/flag 误绑定为脚本参数。
+3. **为什么经过 powershell.exe？** 因为 `find_executable("claude"/"codex")` 在 Windows 解析到 **`.CMD` shim**（实测 `shutil.which` → `<npm-global目录>\claude.CMD` / `codex.CMD`）。QProcess/CreateProcess 不能直接跑批处理文件，必须经 cmd/powershell。wrapper 同时避免把 CLI 子命令/flag 误绑定为脚本参数。
 4. **run_cli.ps1 的职责？** `tools/run_cli.ps1`：读 `$args[0]` 为可执行文件，`$args[1..]` 原样 splat 到 `& $Executable @CliArgs`，`exit $LASTEXITCODE`。刻意不用 `param()`，保证 argv 透传不被参数绑定吞掉。
 5. **Claude CLI argv？** `quick_chat_protocol.py:102`：`-p --permission-mode plan --effort <low|medium|high> --output-format stream-json --verbose --include-partial-messages [--resume <sid>] [--no-session-persistence] <prompt>`。全部与 `claude --help` 一致（2.1.233）。
 6. **Codex CLI argv？** `quick_chat_protocol.py:68`：`exec --sandbox read-only --json -c model_reasoning_effort=<effort> [--skip-git-repo-check] [resume <thread_id> <prompt> | --ephemeral <prompt>]`。与 `codex exec --help` 一致。
@@ -144,7 +144,7 @@ CLI 自报指标（`result` 事件）交叉印证：
 
 ## 5. Claude Cold Benchmark
 
-方式：生产 wrapper 全链路（powershell → run_cli.ps1 → claude.CMD → cmd.exe → claude.exe），prompt `Reply exactly: OK`，effort low，`--permission-mode plan`，cwd=E:\Firefly_AI_Pet。2 次。
+方式：生产 wrapper 全链路（powershell → run_cli.ps1 → claude.CMD → cmd.exe → claude.exe），prompt `Reply exactly: OK`，effort low，`--permission-mode plan`，cwd=<仓库目录>。2 次。
 
 | run | first event | first text | total | exit | session 前缀 |
 |---|---|---|---|---|---|
@@ -492,7 +492,7 @@ Claude Code 2.1.233 在 `-p` 模式也会触发这些 hooks（Phase 8C Preflight
 
 - **Claude 在线调用：2 次**（smoke call 1 new session + call 2 resume，prompt 均为 `Reply exactly: OK`，effort low，经本地代理）。
 - **Codex 在线调用：0 次。**
-- 全部测试（含既有 regression + 新增 test_phase8c1）：**12/12 通过**（test_state_broker / 7a / 7b / 8a1 / state_monitor / 8a3 / 8b1 / 8b2 / 8b3 / single_instance / 8b4 / 8c1）。运行方式：`$env:PYTHONPATH="E:\Firefly_AI_Pet"; python tools\<test>.py`。
+- 全部测试（含既有 regression + 新增 test_phase8c1）：**12/12 通过**（test_state_broker / 7a / 7b / 8a1 / state_monitor / 8a3 / 8b1 / 8b2 / 8b3 / single_instance / 8b4 / 8c1）。运行方式：`$env:PYTHONPATH="<仓库目录>"; python tools\<test>.py`。
 
 ### 22.10 已知限制
 

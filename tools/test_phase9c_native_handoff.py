@@ -62,7 +62,7 @@ MALICIOUS_SAMPLES = [
     "x && y || z",
     "重构这个模块 中文测试",
     "emoji 🎉✨",
-    r"C:\Users\FAJ\Some Path\file.py",
+    r"C:\Users\<用户名>\Some Path\file.py",
 ]
 
 
@@ -403,7 +403,7 @@ def test_emoji_prompt_preserved() -> None:
 
 
 def test_windows_path_prompt_preserved() -> None:
-    prompt = r"C:\Users\FAJ\Some Path\file.py"
+    prompt = r"C:\Users\<用户名>\Some Path\file.py"
     assert _handoff_argv(prompt)[-1] == prompt
 
 

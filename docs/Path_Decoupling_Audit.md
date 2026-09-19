@@ -45,7 +45,7 @@ URL、`file://` 协议示例和 loopback 地址单独审阅，不把 `https://`�
 #### Managed plugins
 
 - 当前正式默认根已经是 `%LOCALAPPDATA%\FireflyAI\plugins`。
-- 仍附加硬编码 `E:\Firefly_AI_Private_Plugins` 作为 legacy discovery root。
+- 仍附加硬编码 `<插件根目录>` 作为 legacy discovery root。
 - 已存在 `FIREFLY_PLUGIN_PATH`，但它是追加搜索路径，不是明确的主根配置。
 - 修复要求：新增 `FIREFLY_PLUGIN_ROOT` 主根；用户配置其次；默认使用用户数据插件目录。旧开发目录不再隐式发现。
 - 缺目录语义：返回空插件集合；Firefly 核心继续启动。

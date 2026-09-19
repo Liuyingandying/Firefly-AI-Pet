@@ -9,7 +9,7 @@ and that runtime/sources/claude.json is NOT rewritten by either internal ask
 (external lifecycle preserved). Codex: 0 online calls.
 
 Usage:
-  python tools/smoke_phase8c1_short_ask.py [--workspace E:\\Firefly_AI_Pet]
+  python tools/smoke_phase8c1_short_ask.py [--workspace <仓库目录>]
 """
 
 from __future__ import annotations
