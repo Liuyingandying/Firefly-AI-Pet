@@ -19,6 +19,23 @@ FireflyExtension v2 契约：Python 包（`__init__.py`）+ `plugin.py::create_p
 将插件目录放入 Firefly 的插件根目录即可（默认 `%LOCALAPPDATA%/FireflyAI/plugins`；
 可用 `FIREFLY_PLUGIN_ROOT` 环境变量或 `config/path_config.yaml` 的 `paths.plugin_root` 指定）。
 
+### 安装流程（普通用户）
+
+1. **下载插件包**：本仓库页面 → `Releases`（v1.0.0 起，含介绍 PDF）或
+   `Code → Download ZIP`；建议使用 tag 归档（如
+   `archive/refs/tags/v1.0.0.zip`），与发布状态零偏差。
+2. **复制插件目录**：解压后将 `firefly_video_extension/`、`firefly_camera_vision/`、
+   `learning_focus/` 三个目录复制到插件根目录
+   `%LOCALAPPDATA%\FireflyAI\plugins\`——该目录不存在时宿主会在首次启动时自动创建
+   （已在 v1.0-rc2 新用户安装验证中实测）。
+3. **重启宿主**：托盘右键退出 Firefly AI Pet 后重新启动，插件在启动时被自动发现加载。
+4. **确认加载**：在宠物快捷工具 / 设置面板中查看对应插件入口。
+5. **tju_info_retrieval**：为接口契约文档分发，需按 `tju_info_retrieval/INTERFACE.md`
+   配合外部工程使用，普通用户可跳过。
+
+> 卸载：删除插件根目录下对应的插件目录并重启宿主即可；宿主对插件故障相互隔离，
+> 移除单个插件不影响其余功能。
+
 ## 依赖概览
 
 - 宿主模块（由 Firefly 主仓库提供）：`core.extension_api`、`core.quick_tools`、
