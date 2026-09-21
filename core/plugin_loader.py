@@ -42,6 +42,7 @@ MANAGED_PLUGIN_IDS: tuple[str, ...] = (
     "firefly-camera-vision",
     "learning-focus",
     "tju-info-retrieval",
+    "firefly-voice",
 )
 
 # Top-level packages extensions may not import. ``app`` is the shell singleton

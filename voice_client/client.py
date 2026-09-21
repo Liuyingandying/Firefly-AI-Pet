@@ -18,7 +18,21 @@ class FireflyVoiceClient:
     """speak(text, emotion, priority) → Voice Module /voice/speak (play=true, 边转边播)。"""
 
     def __init__(self, config: VoiceConfig | None = None):
-        self.config = config or load_voice_config()
+        self._explicit_config = config
+        if config is None:
+            # 预热：触发管理链解析与一次性迁移；后续经 mtime 缓存命中
+            load_voice_config()
+
+    @property
+    def config(self) -> VoiceConfig:
+        """显式注入时返回注入值；否则每次重解析（mtime 缓存）。
+
+        这让 firefly_voice 插件的开关/自动播放设置**无需重启**即可生效，
+        同时保持显式构造（测试/高级用法）的原有语义。
+        """
+        if self._explicit_config is not None:
+            return self._explicit_config
+        return load_voice_config()
 
     # ------------------------------------------------------------------
 

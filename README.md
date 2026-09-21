@@ -238,8 +238,9 @@ Included:
 - Vision Extension
 - Learning Assistant
 - Campus Information Bridge
+- Voice Capability
 
-**In-repo extensions（`plugins-integration` 分支）**：全部插件经 git subtree 合并至
+**In-repo extensions（`plugins-integration` 分支）**：全部 5 个插件经 git subtree 合并至
 [`extensions/`](extensions/)，与 PageLens 浏览器扩展（`extensions/pagelens_bridge`）同目录共存；
 架构、契约、装载机制与比赛展示说明见 [docs/plugin_ecosystem.md](docs/plugin_ecosystem.md)。
 

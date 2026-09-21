@@ -6,7 +6,7 @@ Firefly AI Pet 采用**扩展化架构**：核心运行时保持稳定，能力�
 
 | 类型 | 定位 | 形态 |
 |---|---|---|
-| **Agent Capability Plugins** | 为 Agent 增加可调用能力（视觉、视频分析、学习专注、校园信息检索） | Python 包，符合 FireflyExtension v2 契约，宿主运行时装载 |
+| **Agent Capability Plugins** | 为 Agent 增加可调用能力（视觉、视频分析、学习专注、校园信息检索、语音） | Python 包，符合 FireflyExtension v2 契约，宿主运行时装载 |
 | **Browser Intelligence Extensions** | 为浏览器侧提供上下文智能（网页概念发现 → AI 解释 → 追问探索） | 浏览器扩展（PageLens），与宿主经桥接通信 |
 
 两类扩展共享同一设计原则：**能力可插拔、故障可隔离、核心不可撼动**——任何扩展缺失或故障，Core 全功能不受影响。
@@ -21,6 +21,7 @@ extensions/
 ├── firefly_video_extension/   # Agent Capability：本地视频分析（时长/场景/关键帧/字幕）
 ├── learning_focus/            # Agent Capability：学习专注（知识图谱×画像记忆×作答证据）
 ├── tju_info_retrieval/        # Agent Capability：校园信息检索（接口契约分发）
+├── firefly_voice/             # Agent Capability：语音能力管理（TTS+RVC 服务状态/开关/显式启停）
 ├── pagelens_bridge/           # Browser Intelligence：PageLens 浏览器扩展桥
 ├── INTERFACE.md               # 桥接类插件通用契约说明
 ├── README.md / LICENSE / docs/# 插件仓根文件（subtree 同步）
@@ -63,3 +64,4 @@ extensions/
 - **信息检索**：`tju_info_retrieval` 契约接入校园学术检索代理（独立仓 `tju-info-retrieval-agent`，多源 CNKI/IEEE/万方）
 - **Memory**：显式写入边界 + 红线过滤 + 本地语义索引，插件与记忆互不越界
 - **Browser Intelligence**：PageLens 浏览器扩展提供网页上下文，与文档分析管线共同构成 Agent 的"眼睛"
+- **Voice Capability**：`firefly_voice` 插件管理 TTS+RVC 语音链路（服务状态 / 开关 / 显式启停 / Voice Settings 面板）
