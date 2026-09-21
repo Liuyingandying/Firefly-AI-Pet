@@ -21,6 +21,8 @@ variables:
   # PySide6 在 headless Linux 上必须使用离屏显示后端
   QT_QPA_PLATFORM: "offscreen"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  # Runner 直连 PyPI 仅 ~40kB/s，1h 超时内装不完（pipeline #635 根因），改走清华镜像
+  PIP_INDEX_URL: "https://pypi.tuna.tsinghua.edu.cn/simple"
 
 cache:
   key:
