@@ -49,4 +49,4 @@ test:
     - python -m pip install --upgrade pip
     - python -m pip install -r requirements.txt pytest
   script:
-    - pytest tests/test_provider_router.py tests/test_pagelens_ai_bridge.py tests/test_provider_manager.py -q
+    - python -m pytest tests/test_provider_router.py tests/test_pagelens_ai_bridge.py tests/test_provider_manager.py -q
