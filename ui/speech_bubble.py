@@ -8,6 +8,7 @@ from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtGui import QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QWidget
 
+from character import CharacterDisplayNames
 from . import theme
 
 
@@ -30,10 +31,16 @@ class BubbleTail(QWidget):
 
 
 class SpeechBubble(QWidget):
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        display_names: CharacterDisplayNames | None = None,
+    ):
         flags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.WindowTransparentForInput
         super().__init__(parent, flags)
-        self.setWindowTitle("Firefly Greeting")
+        self._display_names = display_names or CharacterDisplayNames()
+        self.setWindowTitle(f"{self._display_names.brand_name} Greeting")
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet(theme.transparent_window_style())
         self.setFixedSize(theme.BUBBLE_SIZE)
@@ -51,7 +58,7 @@ class SpeechBubble(QWidget):
 
         self._text = QLabel(self._card)
         self._text.setTextFormat(Qt.RichText)
-        self._text.setText(theme.bubble_html())
+        self._text.setText(theme.bubble_html(self._display_names))
         self._text.setAttribute(Qt.WA_TransparentForMouseEvents)
         self._text.setStyleSheet(theme.transparent_window_style())
         layout.addWidget(self._text, 1, Qt.AlignVCenter)
@@ -68,7 +75,7 @@ class SpeechBubble(QWidget):
         self._auto_hide.stop()
         self._star.set_color(theme.CYAN_ACCENT)
         self._content = ("greeting", None)
-        self._text.setText(theme.bubble_html())
+        self._text.setText(theme.bubble_html(self._display_names))
 
     def show_blank(self) -> None:
         """Show the bubble shell with no greeting copy (greeting-on-startup off)."""
@@ -120,9 +127,16 @@ class SpeechBubble(QWidget):
         elif self._content[0] == "blank":
             self._text.setText("")
         else:
-            self._text.setText(theme.bubble_html())
+            self._text.setText(theme.bubble_html(self._display_names))
 
     @staticmethod
+    def set_display_names(self, display_names) -> None:
+        """Refresh character labels (live switch)."""
+        from character import CharacterDisplayNames
+
+        self._display_names = display_names or CharacterDisplayNames()
+        self.setWindowTitle(f"{self._display_names.brand_name} Greeting")
+
     def _message_html(title: str, message: str, accent) -> str:
         secondary = theme.css_color(theme.TEXT_SECONDARY)
         if accent is not None:

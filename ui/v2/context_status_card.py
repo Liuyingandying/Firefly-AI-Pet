@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from character import CharacterDisplayNames
 from ui import theme
 
 # LearningAction -> user-readable "下一步" copy. Presentation ONLY — this
@@ -72,8 +73,14 @@ class ContextStatusView:
 class ContextStatusCard(QFrame):
     """Dynamic-section status card; rebuilds visible sections per update."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        display_names: CharacterDisplayNames | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._display_names = display_names or CharacterDisplayNames()
         self.setObjectName("contextStatusCard")
         self.setStyleSheet(
             f"#contextStatusCard {{"
@@ -119,7 +126,9 @@ class ContextStatusCard(QFrame):
                 # 只读结构事实——不是 AI 推荐，绝不写成「推荐下一步」。
                 self._stack.addWidget(self._section("课程顺序下一项", view.next_in_order))
         else:
-            self._stack.addWidget(self._section("正在进行", "与流萤聊天"))
+            self._stack.addWidget(self._section(
+                "正在进行", f"与{self._display_names.assistant_name}聊天"
+            ))
             if view.conversation_title:
                 self._stack.addWidget(self._section("当前会话", view.conversation_title))
         self._add_optional(view)

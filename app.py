@@ -59,6 +59,15 @@ from providers.base import register_credential_source
 from core.runtime_state_aggregator import RuntimeStateAggregator
 from core.zcode_state_poller import ZCodeStatePoller
 from core.state_monitor import StateMonitor
+from core.conversation_runtime import ConversationRuntime
+from core.conversation_store import ConversationStore
+from character import (
+    CharacterLoader,
+    list_characters,
+    load_current_character,
+    save_current_character,
+)
+from character.character_loader import resolve_animations_dir
 from voice_client import VoiceAnnouncer  # Voice-1.2: 回复语音播报 (失败不影响聊天)
 from core.screen_vision.screen.capture import ScreenCaptureService
 from core.pdf_visual_region import (
@@ -162,7 +171,19 @@ class _HotkeyManager(QObject):
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-ASSETS_DIR = PROJECT_DIR / "assets" / "animations"
+def _resolve_active_character() -> str:
+    """Start with the persisted selection; invalid/missing -> firefly default."""
+    known = {meta.character_id for meta in list_characters()}
+    current = load_current_character()
+    return current if current in known else "firefly"
+
+
+ACTIVE_CHARACTER_ID = _resolve_active_character()
+ASSETS_DIR = (
+    resolve_animations_dir(ACTIVE_CHARACTER_ID)
+    or PROJECT_DIR / "assets" / "animations"
+)
+CHARACTER_DIR = PROJECT_DIR / "character" / ACTIVE_CHARACTER_ID
 ICON_FILE = PROJECT_DIR / "assets" / "firefly.ico"
 USER_PATHS = get_user_data_paths()
 RUNTIME_DIR = USER_PATHS.runtime
@@ -224,11 +245,25 @@ class VisualShell(QObject):
         self._server = server
         self._shutting_down = False
         self._exiting = False
+        self._character_id = ACTIVE_CHARACTER_ID
 
-        self.pet = PetOverlay(ASSETS_DIR, STATE_GIF, max_dimension=theme.PET_MAX_DIMENSION)
-        self.dock = AgentDock()
-        self.bubble = SpeechBubble()
-        self.toolbar = VerticalToolbar()
+        self.character_loader = CharacterLoader(
+            CHARACTER_DIR,
+            character_id=ACTIVE_CHARACTER_ID,
+        )
+        self.character_profile = self.character_loader.load()
+
+        self.pet = PetOverlay(
+            ASSETS_DIR,
+            STATE_GIF,
+            max_dimension=theme.PET_MAX_DIMENSION,
+            display_names=self.character_profile.display_names,
+        )
+        self.dock = AgentDock(display_names=self.character_profile.display_names)
+        self.bubble = SpeechBubble(display_names=self.character_profile.display_names)
+        self.toolbar = VerticalToolbar(
+            display_names=self.character_profile.display_names,
+        )
         self.workspace_manager = (
             WorkspaceManager(store=WorkspaceStore(workspace_settings_file))
             if workspace_settings_file is not None
@@ -245,8 +280,12 @@ class VisualShell(QObject):
         self.system_tray = FireflySystemTray(
             controller=self,
             icon_path=str(ICON_FILE),
+            display_names=self.character_profile.display_names,
         )
         self.system_tray.show()
+        self.system_tray.set_characters(
+            list_characters(), ACTIVE_CHARACTER_ID, on_switch=self.switch_character
+        )
         self.quick_tools_registry = QuickToolsRegistry()
         self.plugin_loader = PluginLoader(
             self.quick_tools_registry, parent=self, persistence=self.settings
@@ -262,9 +301,15 @@ class VisualShell(QObject):
         )
         self.permission_card = PermissionCard()
         self.settings_popover = SettingsPopover(self.settings)
-        self.ask_pill = AskPill()
-        self.short_ask = ShortAskPanel()
+        self.ask_pill = AskPill(display_names=self.character_profile.display_names)
+        self.short_ask = ShortAskPanel(
+            display_names=self.character_profile.display_names
+        )
         self.character_conversation = CharacterConversationRunner(
+            runtime=ConversationRuntime(
+                character_loader=self.character_loader,
+                conversation_store=ConversationStore(),
+            ),
             parent=self,
             screen_vision_settings=self.settings,
             camera_vision_enabled=lambda: self.plugin_loader.is_plugin_enabled(
@@ -301,7 +346,9 @@ class VisualShell(QObject):
             self.workflow_coordinator, self.artifact_store, parent=self
         )
         self.workflow_card = WorkflowCard(coordinator=self.workflow_coordinator)
-        self.pagelens = PageLensPanel()
+        self.pagelens = PageLensPanel(
+            display_names=self.character_profile.display_names,
+        )
         # P0.3: retain ExplainBox as the proven consent/worker controller,
         # but forbid its top-level window in the production reading flow.
         self.explain_box = ExplainBox()
@@ -685,6 +732,87 @@ class VisualShell(QObject):
     def show_firefly(self) -> None:
         """Show the Firefly pet body only."""
         self.pet.show()
+
+    def open_character_manager(self) -> None:
+        """打开角色管理窗口（列表/详情/导出）。"""
+        from character.character_manager import open_character_manager
+
+        open_character_manager()
+
+    def import_character_card(self) -> dict:
+        """Import a character card (.character folder or zip) via GUI.
+
+        On success the tray character list refreshes so the new character
+        appears in the existing switch menu — no second management system.
+        """
+        from character.character_card import pick_and_import_character_card
+
+        result = pick_and_import_character_card()
+        if result.get("ok"):
+            self.system_tray.set_characters(
+                list_characters(), self._character_id
+            )
+        return result
+
+    def switch_character(self, character_id: str) -> dict:
+        """Switch the active character: persist, reload persona, swap pet
+        animation source, refresh display names on every surfaced widget.
+
+        Conversation persona takes effect from the next turn (existing
+        history keeps its original messages); everything else is live.
+        """
+        known = {meta.character_id for meta in list_characters()}
+        if character_id not in known:
+            return {"ok": False, "reason": "unknown_character", "character_id": character_id}
+        if character_id == self._character_id:
+            return {"ok": True, "unchanged": True, "character_id": character_id}
+
+        save_current_character(character_id)
+        self._character_id = character_id
+        self.character_loader.character_dir = (
+            PROJECT_DIR / "character" / character_id
+        )
+        self.character_loader.character_id = character_id
+        self.character_profile = self.character_loader.load()
+        names = self.character_profile.display_names
+
+        # 视觉：宠物动画源（skins/<id>/animations 或回退 assets/animations）
+        assets_dir = (
+            resolve_animations_dir(character_id)
+            or PROJECT_DIR / "assets" / "animations"
+        )
+        self.pet.set_assets_dir(assets_dir)
+        self.pet.set_display_names(names)
+
+        # 显示名面：托盘/坞/气泡/工具栏/速问/PageLens/聊天窗
+        self.system_tray.set_display_names(names)
+        self.system_tray.set_characters(list_characters(), character_id)
+        for widget in (
+            self.dock,
+            self.bubble,
+            self.toolbar,
+            self.ask_pill,
+            self.short_ask,
+            self.pagelens,
+        ):
+            setter = getattr(widget, "set_display_names", None)
+            if callable(setter):
+                setter(names)
+        try:
+            from ui.companion_chat_window import CompanionChatWindow
+
+            chat_window = CompanionChatWindow.get_singleton()
+            if chat_window is not None:
+                chat_window.set_display_names(names)
+        except Exception:  # noqa: BLE001 - 聊天窗更新失败不影响切换
+            pass
+
+        # 人格：会话运行时热更新（下一轮对话生效）
+        updater = getattr(self.character_conversation.runtime, "update_character", None)
+        if callable(updater):
+            updater(self.character_profile)
+
+        return {"ok": True, "character_id": character_id, "display_name": names.display_name}
 
     def hide_firefly(self) -> None:
         """Hide the Firefly pet body only. Never quits, never shuts down."""
@@ -2082,7 +2210,9 @@ class VisualShell(QObject):
         self._last_short_ask_prompt = prompt
         self.short_ask.set_running("Thinking…")
         if not self.character_conversation.ask(prompt):
-            self.short_ask.reset_with_note("Firefly is already responding.")
+            self.short_ask.reset_with_note(
+                f"{self.character_profile.assistant_name} is already responding."
+            )
 
     def _do_short_ask(self, agent: str, prompt: str) -> None:
         workspace = self.workspace_manager.current()
@@ -2203,7 +2333,11 @@ def _acquire_single_instance() -> bool:
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("Firefly AI Companion")
+    app.setApplicationName(
+        CharacterLoader(CHARACTER_DIR, character_id=ACTIVE_CHARACTER_ID)
+        .load()
+        .brand_name
+    )
     app.setQuitOnLastWindowClosed(False)
     # 科研级字体系统：注册 assets/fonts/ 应用级字体（STIX/Noto/DejaVu…），
     # 早于 setFont 与任何窗口创建；缺失时静默跳过。

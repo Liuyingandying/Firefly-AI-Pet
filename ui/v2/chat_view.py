@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from character import CharacterDisplayNames
 from ui import theme
 from ui.chat_markup import markdown_to_html
 
@@ -193,6 +194,7 @@ class _MessageCard(QFrame):
         role: str,  # "user" | "assistant"
         time_text: str,
         voice_text: str | None = None,
+        assistant_name: str = CharacterDisplayNames().assistant_name,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -219,9 +221,11 @@ class _MessageCard(QFrame):
                 "你", theme.V2.PRIMARY_BLUE, theme.V2.TEXT_MAIN))
         else:
             header.addWidget(_Avatar(
-                "萤", theme.V2.ACCENT_PURPLE, theme.V2.TEXT_MAIN,
+                assistant_name[:1], theme.V2.ACCENT_PURPLE, theme.V2.TEXT_MAIN,
                 image_path=ASSISTANT_AVATAR_PATH))
-            header.addWidget(_caption(theme.V2.ACCENT_PURPLE, "流萤", bold=True))
+            header.addWidget(_caption(
+                theme.V2.ACCENT_PURPLE, assistant_name, bold=True
+            ))
             header.addWidget(_caption(theme.V2.TEXT_SECONDARY, f"· {time_text}"))
             header.addStretch(1)
 
@@ -247,8 +251,14 @@ class _MessageCard(QFrame):
 class ChatView(QWidget):
     """Scrollable "角色交流空间" with warm paper cards and inline widgets."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        display_names: CharacterDisplayNames | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._display_names = display_names or CharacterDisplayNames()
 
         self._status_chip = QLabel("")
         self._status_chip.setStyleSheet(
@@ -296,6 +306,7 @@ class ChatView(QWidget):
             markdown_to_html(text or ""), role=role,
             time_text=datetime.now().strftime("%H:%M"),
             voice_text=voice_text,
+            assistant_name=self._display_names.assistant_name,
         )
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)

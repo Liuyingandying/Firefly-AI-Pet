@@ -454,14 +454,17 @@ def link_button_style(object_name: str) -> str:
     """
 
 
-def bubble_html() -> str:
+def bubble_html(display_names=None) -> str:
+    from character import CharacterDisplayNames
+
+    names = display_names or CharacterDisplayNames()
     primary = css_color(TEXT_PRIMARY)
     secondary = css_color(TEXT_SECONDARY)
     accent = css_color(CYAN_ACCENT)
     return (
         f"<div style=\"font-family:'{FONT_FAMILY}'; font-size:{scaled_font_px(10.5)}pt; line-height:145%;\">"
         f"<span style=\"color:{primary}; font-weight:600;\">I'm </span>"
-        f"<span style=\"color:{accent}; font-weight:600;\">Firefly!</span><br>"
+        f"<span style=\"color:{accent}; font-weight:600;\">{names.display_name}!</span><br>"
         f"<span style=\"color:{secondary};\">How can I help you today?</span>"
         "</div>"
     )

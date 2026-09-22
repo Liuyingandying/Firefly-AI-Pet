@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from character import CharacterDisplayNames
 from core.agent_events import AgentEventType
 from core.document_attachment import DocumentParseError, EncryptedPdfError, parse_document_bytes
 from ui import theme
@@ -259,10 +260,32 @@ class CompanionChatWindow(QWidget):
 
     _instance: "CompanionChatWindow | None" = None
 
+    @classmethod
+    def get_singleton(cls) -> "CompanionChatWindow | None":
+        return cls._instance
+
     attachment_parsed = Signal(object, str)  # (DocumentAttachment, state)
 
     @classmethod
-    def open_singleton(cls, runner: CharacterConversationRunner | None = None) -> "CompanionChatWindow":
+    def set_display_names(self, display_names) -> None:
+        """Refresh the character identity on the console (live switch)."""
+        from character import CharacterDisplayNames
+
+        self._display_names = display_names or CharacterDisplayNames.from_character(
+            getattr(getattr(self.runner, "runtime", None), "character", None)
+        )
+        self.setWindowTitle(f"{self._display_names.brand_name} Companion")
+        if getattr(self, "input", None) is not None:
+            self.input.setPlaceholderText(
+                f"和{self._display_names.assistant_name}说点什么…"
+            )
+
+    def open_singleton(
+        cls,
+        runner: CharacterConversationRunner | None = None,
+        *,
+        display_names: CharacterDisplayNames | None = None,
+    ) -> "CompanionChatWindow":
         """Open the existing chat window, or bring it to the front.
 
         This is the single entry point for the floating bubble's ``Ask…``
@@ -279,7 +302,7 @@ class CompanionChatWindow(QWidget):
         foreground_tracker.remember_current_external_window()
         window = cls._instance
         if window is None:
-            window = cls(runner=runner)
+            window = cls(runner=runner, display_names=display_names)
             cls._instance = window
         window.show()
         foreground_tracker.remember_firefly_window(int(window.winId()))
@@ -305,13 +328,23 @@ class CompanionChatWindow(QWidget):
             pass  # window already destroyed
         super().closeEvent(event)
 
-    def __init__(self, runner: CharacterConversationRunner | None = None) -> None:
+    def __init__(
+        self,
+        runner: CharacterConversationRunner | None = None,
+        *,
+        display_names: CharacterDisplayNames | None = None,
+    ) -> None:
         super().__init__()
-        self.setWindowTitle("Firefly Companion")
+        self.runner = runner or CharacterConversationRunner(parent=self)
+        runtime = getattr(self.runner, "runtime", None)
+        character = getattr(runtime, "character", None)
+        self._display_names = display_names or CharacterDisplayNames.from_character(
+            character
+        )
+        self.setWindowTitle(f"{self._display_names.brand_name} Companion")
         self.resize(480, 640)
         self.setAcceptDrops(True)
 
-        self.runner = runner or CharacterConversationRunner(parent=self)
         self.runner.agent_event.connect(self._on_event)
         if hasattr(self.runner, "ocr_progress"):
             self.runner.ocr_progress.connect(self._on_ocr_progress)
@@ -322,7 +355,11 @@ class CompanionChatWindow(QWidget):
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         for message in self.runner.history:
-            label = "你" if message["role"] == "user" else "流萤"
+            label = (
+                "你"
+                if message["role"] == "user"
+                else self._display_names.assistant_name
+            )
             self.log.append(f"{label}: {markdown_to_html(message['content'])}")
 
         # Attachment v1: at most one in-memory image OR document per turn.
@@ -345,7 +382,9 @@ class CompanionChatWindow(QWidget):
         self.hint_label.setVisible(False)
 
         self.input = _AttachmentLineEdit()
-        self.input.setPlaceholderText("和流萤说点什么…")
+        self.input.setPlaceholderText(
+            f"和{self._display_names.assistant_name}说点什么…"
+        )
         self.input.image_pasted.connect(self._on_image_pasted)
 
         self.pick_button = QPushButton("＋")
@@ -589,7 +628,10 @@ class CompanionChatWindow(QWidget):
     def _on_event(self, event) -> None:
         if event.type is AgentEventType.FINAL:
             self._last_assistant_text = event.text or ""
-            self.log.append(f"流萤: {markdown_to_html(event.text)}")
+            self.log.append(
+                f"{self._display_names.assistant_name}: "
+                f"{markdown_to_html(event.text)}"
+            )
             self._set_busy(False)
             if self._turn_has_image:
                 self._clear_attachment()  # images: consumed on success

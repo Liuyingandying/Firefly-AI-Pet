@@ -59,6 +59,12 @@ class ConversationRuntime:
     def last_turn_errors(self):
         return self._runtime.last_turn_errors
 
+    def update_character(self, profile) -> None:
+        """Passthrough: swap the wrapped runtime's character persona."""
+        update = getattr(self._runtime, "update_character", None)
+        if callable(update):
+            update(profile)
+
     def build_messages(
         self,
         user_message: str,

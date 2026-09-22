@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from character import CharacterDisplayNames
 from core.agent_events import AgentEventType
 from core.learning.orchestrator import LoopStatus
 from ui import theme
@@ -96,21 +97,29 @@ class CompanionConsole(QMainWindow):
         *,
         on_video_card: Callable[[VideoCardInfo], None] | None = None,
         runtime_bus: Any = None,
+        display_names: CharacterDisplayNames | None = None,
     ) -> None:
         super().__init__(parent)
         self.runner = runner
+        runtime = getattr(runner, "runtime", None)
+        character = getattr(runtime, "character", None)
+        self._display_names = display_names or CharacterDisplayNames.from_character(
+            character
+        )
         self._on_video_card = on_video_card
         self._last_card_bvid: str | None = None
         self._runtime_unsubscribe: Callable[[], None] | None = None
 
-        self.setWindowTitle("流萤 · AI Pet 控制台")
+        self.setWindowTitle(f"{self._display_names.brand_name} 控制台")
         self.resize(1280, 800)
         # Phase UI-2-C: deep-space background from the centralized theme
         # (assets/ui/background image overrides the code gradient).
         self.setStyleSheet(theme.v2_background_style())
 
-        self.header = CharacterHeader(parent=self)
-        self.chat = ChatView(self)
+        self.header = CharacterHeader(
+            name=self._display_names.display_name, parent=self
+        )
+        self.chat = ChatView(self, display_names=self._display_names)
         self.ability = AbilityPanel(self)
 
         # Phase 1B: learning-mode controller. The console owns the shell
@@ -129,7 +138,10 @@ class CompanionConsole(QMainWindow):
         # Phase UI-2-B: AI Terminal composer (drop-in for the old QLineEdit —
         # text()/setText()/clear()/setPlaceholderText()/setFocus() delegates).
         self.input = InputArea(self)
-        self.input.setPlaceholderText("和流萤聊天…（B站链接=视频阅读；考考我=学习模式）")
+        self.input.setPlaceholderText(
+            f"和{self._display_names.assistant_name}聊天…"
+            "（B站链接=视频阅读；考考我=学习模式）"
+        )
         self.send_button = self.input.send_button  # keep the attribute surface
         # Phase 8B-2: review reminder shows once per learning-mode session;
         # the textbook import remembers the file path for the resource viewer.
@@ -154,7 +166,11 @@ class CompanionConsole(QMainWindow):
             recent_provider=self._recent_provider,
             parent=self,
         )
-        self.companion = CompanionPanel(parent=self, runner=self.runner)
+        self.companion = CompanionPanel(
+            parent=self,
+            runner=self.runner,
+            display_names=self._display_names,
+        )
         # Phase 8B-2: [查看材料] executes the viewer request (Part A).
         self.companion.view_materials_requested.connect(self._on_view_materials)
 
@@ -1032,7 +1048,10 @@ class CompanionConsole(QMainWindow):
         if action_id == "settings":
             self._on_ability("settings")
         elif action_id == "about":
-            self._hint("流萤 · Firefly AI Pet 控制台\n陪伴、阅读、学习、科研，与你同行。")
+            self._hint(
+                f"{self._display_names.brand_name} 控制台\n"
+                "陪伴、阅读、学习、科研，与你同行。"
+            )
         elif action_id == "new_chat":
             self._new_chat_session()
 
@@ -1235,7 +1254,8 @@ class CompanionConsole(QMainWindow):
         dialog.setWindowTitle("删除会话")
         dialog.setIcon(QMessageBox.Warning)
         dialog.setText(
-            "删除这个会话？\n该操作会删除本会话的聊天记录，无法从 Firefly 中恢复。"
+            "删除这个会话？\n"
+            f"该操作会删除本会话的聊天记录，无法从{self._display_names.brand_name}中恢复。"
         )
         delete_button = dialog.addButton("删除", QMessageBox.DestructiveRole)
         dialog.addButton("取消", QMessageBox.RejectRole)
@@ -1425,7 +1445,12 @@ class CompanionConsole(QMainWindow):
 _console_instance: CompanionConsole | None = None
 
 
-def open_singleton(runner: Any, runtime_bus: Any = None) -> "CompanionConsole":
+def open_singleton(
+    runner: Any,
+    runtime_bus: Any = None,
+    *,
+    display_names: CharacterDisplayNames | None = None,
+) -> "CompanionConsole":
     """Open (or focus) one console window for the shared character runner.
 
     The instance is held at module level (like the legacy
@@ -1445,7 +1470,11 @@ def open_singleton(runner: Any, runtime_bus: Any = None) -> "CompanionConsole":
         window.activateWindow()
         window.input.setFocus()
         return window
-    console = CompanionConsole(runner, runtime_bus=runtime_bus)
+    console = CompanionConsole(
+        runner,
+        runtime_bus=runtime_bus,
+        display_names=display_names,
+    )
     _console_instance = console
     console.show()
     console.raise_()

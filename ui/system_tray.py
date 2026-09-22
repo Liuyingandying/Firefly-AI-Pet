@@ -20,7 +20,10 @@ from typing import Any
 
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QIcon
+from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+
+from character import CharacterDisplayNames
 
 _EMPTY_PLUGINS_ITEM = "（暂无已安装插件）"
 
@@ -40,16 +43,24 @@ class FireflySystemTray(QSystemTrayIcon):
         icon_path: str,
         registry: Any | None = None,
         parent: QObject | None = None,
+        *,
+        display_names: CharacterDisplayNames | None = None,
     ) -> None:
         super().__init__(parent)
         self._controller = controller
         self._registry = registry
+        self._display_names = display_names or CharacterDisplayNames()
 
         self.setIcon(QIcon(icon_path))
-        self.setToolTip("Firefly AI Pet")
+        self.setToolTip(self._display_names.brand_name)
 
         self._plugins_menu = QMenu("常用插件")
         self._menu = QMenu()
+
+        self._characters: list = []
+        self._current_character_id: str = ""
+        self._on_switch = None
+
         self._build_menu()
         self.setContextMenu(self._menu)
 
@@ -59,17 +70,89 @@ class FireflySystemTray(QSystemTrayIcon):
     # ------------------------------------------------------------ menu
 
     def _build_menu(self) -> None:
-        toggle_action = self._menu.addAction("显示/隐藏流萤")
+        toggle_action = self._menu.addAction(
+            f"显示/隐藏{self._display_names.display_name}"
+        )
         toggle_action.triggered.connect(lambda: self._controller.toggle_firefly())
 
         settings_action = self._menu.addAction("设置")
         settings_action.triggered.connect(lambda: self._controller.show_settings())
 
         self._menu.addMenu(self._plugins_menu)
+        import_action = self._menu.addAction("导入角色卡")
+        import_action.triggered.connect(
+            lambda: self._controller.import_character_card()
+        )
+        manage_action = self._menu.addAction("角色管理")
+        manage_action.triggered.connect(
+            lambda: self._controller.open_character_manager()
+        )
+
+        if self._characters:
+            self._character_menu = self._menu.addMenu("切换角色")
+            self._populate_character_menu()
         self._menu.addSeparator()
 
         quit_action = self._menu.addAction("退出")
         quit_action.triggered.connect(lambda: self._controller.exit_application())
+
+    # -------------------------------------------------------- character
+
+    def set_characters(self, characters, current_character_id="", on_switch=None) -> None:
+        """Supply the character picker.
+
+        Updates the submenu in place when it already exists (safe inside a
+        menu action handler); otherwise rebuilds the whole menu (startup).
+        """
+        self._characters = list(characters)
+        self._current_character_id = str(current_character_id or "")
+        if on_switch is not None:
+            self._on_switch = on_switch
+        if getattr(self, "_character_menu", None) is not None:
+            self._populate_character_menu()
+        else:
+            self._rebuild_menu()
+
+    def set_display_names(self, display_names) -> None:
+        """Refresh character labels (tooltip + toggle item text)."""
+        from character import CharacterDisplayNames
+
+        self._display_names = display_names or CharacterDisplayNames()
+        self.setToolTip(self._display_names.brand_name)
+        for action in self._menu.actions():
+            if str(action.text()).startswith("显示/隐藏"):
+                action.setText(f"显示/隐藏{self._display_names.display_name}")
+                break
+
+    def _rebuild_menu(self) -> None:
+        for action in list(self._menu.actions()):
+            self._menu.removeAction(action)
+        self._character_menu = None
+        self._build_menu()
+
+    def _populate_character_menu(self) -> None:
+        menu = getattr(self, "_character_menu", None)
+        if menu is None or not self._characters:
+            return
+        for action in list(menu.actions()):
+            menu.removeAction(action)
+        group = QActionGroup(menu)
+        for meta in self._characters:
+            label = (
+                str(meta.display_name).strip()
+                if str(getattr(meta, "display_name", "")).strip()
+                else meta.character_id
+            )
+            action = QAction(f"{label}（{meta.character_id}）", menu, checkable=True)
+            action.setChecked(meta.character_id == self._current_character_id)
+            group.addAction(action)
+            menu.addAction(action)
+            if self._on_switch is not None:
+                action.triggered.connect(
+                    lambda _checked=False, cid=meta.character_id: self._on_switch(cid)
+                )
+
+    # ------------------------------------------------------------ plugins
 
     def _refresh_plugins_menu(self) -> None:
         """Rebuild 常用插件 from the existing registry (never hardcoded).

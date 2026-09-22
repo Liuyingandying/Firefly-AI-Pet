@@ -225,9 +225,17 @@ class PageLensPanel(QWidget):
     visual_region_requested = Signal()
     consent_requested = Signal()
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        display_names=None,
+    ):
+        from character import CharacterDisplayNames
+
         super().__init__(parent, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setWindowTitle("Firefly PageLens")
+        self._display_names = display_names or CharacterDisplayNames()
+        self.setWindowTitle(f"{self._display_names.brand_name} PageLens")
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet(theme.transparent_window_style())
 
@@ -590,7 +598,7 @@ class PageLensPanel(QWidget):
         layout.setSpacing(_pl_scaled_px(14))
 
         # Title
-        title = QLabel("Firefly PageLens", header)
+        title = QLabel(f"{self._display_names.brand_name} PageLens", header)
         title.setStyleSheet(
             f"color: {theme.css_color(theme.TEXT_PRIMARY)}; "
             f"font-family: '{theme.FONT_FAMILY}'; "
@@ -1209,7 +1217,9 @@ class PageLensPanel(QWidget):
             else PageLensState.EXPLAIN
         )
         self._content.show_loading(title)
-        self._content._summary_label.setText("流萤正在看看这里……")
+        self._content._summary_label.setText(
+            f"{self._display_names.assistant_name}正在看看这里……"
+        )
         self._explore_btn.setVisible(False)
         self._consent_btn.setVisible(False)
         self._scroll.setVisible(True)
@@ -2410,6 +2420,13 @@ class _CloseButton(QFrame):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def set_display_names(self, display_names) -> None:
+        """Refresh character labels (live switch)."""
+        from character import CharacterDisplayNames
+
+        self._display_names = display_names or CharacterDisplayNames()
+        self.setWindowTitle(f"{self._display_names.brand_name} PageLens")
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)

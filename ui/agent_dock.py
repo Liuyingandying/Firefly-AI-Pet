@@ -21,6 +21,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from character import CharacterDisplayNames
 from . import theme
 from .agent_launcher import (
     launch_claude,
@@ -153,9 +154,15 @@ class AgentDock(QWidget):
     launch_message = Signal(str)
     launch_agent = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        display_names: CharacterDisplayNames | None = None,
+    ):
         super().__init__(parent, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setWindowTitle("Firefly Launchers")
+        names = display_names or CharacterDisplayNames()
+        self.setWindowTitle(f"{names.brand_name} Launchers")
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet(theme.transparent_window_style())
         self.setFixedSize(theme.DOCK_SIZE)
@@ -233,6 +240,13 @@ class AgentDock(QWidget):
     def closeEvent(self, event) -> None:
         self._tju_health.stop()
         super().closeEvent(event)
+
+    def set_display_names(self, display_names) -> None:
+        """Refresh character labels (live switch)."""
+        from character import CharacterDisplayNames
+
+        self._display_names = display_names or CharacterDisplayNames()
+        self.setWindowTitle(f"{self._display_names.brand_name} Launchers")
 
     def apply_scale(self) -> None:
         if hasattr(theme, "apply_dock_scale"):

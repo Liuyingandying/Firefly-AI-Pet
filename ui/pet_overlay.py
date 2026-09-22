@@ -8,6 +8,7 @@ from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QImageReader, QMovie, QPen, QPainter, QRadialGradient
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
+from character import CharacterDisplayNames
 from . import theme
 
 
@@ -30,8 +31,10 @@ class PetOverlay(QWidget):
         state_gif: dict[str, str],
         *,
         max_dimension: int = theme.PET_MAX_DIMENSION,
+        display_names: CharacterDisplayNames | None = None,
     ):
         super().__init__(None)
+        self._display_names = display_names or CharacterDisplayNames()
         self._assets_dir = Path(assets_dir)
         self._state_gif = dict(state_gif)
         self._base_max_dimension = max_dimension
@@ -63,7 +66,7 @@ class PetOverlay(QWidget):
         self._right_click_timer.setInterval(QApplication.doubleClickInterval())
         self._right_click_timer.timeout.connect(self.scale_mode_toggled.emit)
 
-        self.setWindowTitle("Firefly")
+        self.setWindowTitle(self._display_names.brand_name)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_NoSystemBackground)
@@ -82,6 +85,19 @@ class PetOverlay(QWidget):
         self.apply_state("idle")
 
     # ------------------------------------------------------- Scratchpad v1
+
+    def set_assets_dir(self, assets_dir: Path) -> None:
+        """Swap the animation source directory and reload the current state."""
+        self._assets_dir = Path(assets_dir)
+        if self._current_state is not None:
+            self._load_movie(self._current_state)
+
+    def set_display_names(self, display_names) -> None:
+        """Refresh the character brand shown in the pet window title."""
+        from character import CharacterDisplayNames
+
+        self._display_names = display_names or CharacterDisplayNames()
+        self.setWindowTitle(self._display_names.brand_name)
 
     def set_drop_handler(self, handler) -> None:
         """Install the Scratchpad drop controller (duck-typed protocol):
