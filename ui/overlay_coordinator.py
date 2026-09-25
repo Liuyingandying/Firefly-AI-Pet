@@ -101,7 +101,9 @@ class OverlayCoordinator(QObject):
         self.pet.drag_started.connect(self._on_drag_started)
         self.toolbar.action_requested.connect(self._toolbar_action)
         theme.on_scale_changed(self.apply_ui_scale)
-        self.chrome = HoverChromeController(pet, toolbar, dock, self)
+        self.chrome = HoverChromeController(
+            pet, toolbar, dock, self, bubble=bubble, ask_pill=ask_pill
+        )
 
         if self.workspace_popover is not None:
             self.workspace_popover.sessions_requested.connect(self._show_sessions)

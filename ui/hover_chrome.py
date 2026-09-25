@@ -109,7 +109,17 @@ class OpenUiPill(ChromePill):
 class HoverChromeController(QObject):
     """Owns the hover-revealed chrome and the collapse grace timer."""
 
-    def __init__(self, pet, toolbar, dock, coordinator, parent=None):
+    def __init__(
+        self,
+        pet,
+        toolbar,
+        dock,
+        coordinator,
+        parent=None,
+        *,
+        bubble=None,
+        ask_pill=None,
+    ):
         super().__init__(parent)
         self.pet = pet
         self.toolbar = toolbar
@@ -122,7 +132,12 @@ class HoverChromeController(QObject):
         self.open_ui_entry = OpenUiPill()
         self.open_ui_entry.clicked.connect(coordinator.console_requested.emit)
 
+        # The bubble + Ask pill overlap the character, so they are part of
+        # the hover region: moving onto them must not start the collapse.
         self._tracked = {pet, toolbar, dock, self.exit_button, self.open_ui_entry}
+        for extra in (bubble, ask_pill):
+            if extra is not None:
+                self._tracked.add(extra)
         self._shown = False
         self._armed = False
         self._anims: dict[QWidget, QPropertyAnimation] = {}
@@ -160,6 +175,11 @@ class HoverChromeController(QObject):
             return
         et = event.type()
         if et == QEvent.Enter:
+            if not watched.isVisible():
+                # Stale synthetic Enter queued while the widget was visible
+                # and delivered after the collapse hid it — ignore, or the
+                # chrome would resurrect itself forever.
+                return
             if self._cursor_inside(watched):
                 self.entered()
         elif et == QEvent.Leave:
@@ -279,8 +299,9 @@ class HoverChromeController(QObject):
     # -- geometry ------------------------------------------------------------
 
     def reposition_chrome(self) -> None:
-        """Anchor the exit pill to the cluster top-right and the entry above
-        the pet, clamped so both stay visible and clickable near edges."""
+        """Anchor the exit pill just above the character's top-right corner
+        and the entry above the pet, clamped so both stay visible and
+        clickable near screen edges."""
         clamp = self.coordinator._clamp_point
         screen = (
             QGuiApplication.screenAt(self.pet.frameGeometry().center())
@@ -290,13 +311,14 @@ class HoverChromeController(QObject):
             return
         available = screen.availableGeometry()
         pet_geo = self.pet.frameGeometry()
-        toolbar_geo = self.toolbar.frameGeometry()
 
+        # "×" hovers off the character's top-right shoulder (user-marked
+        # spot), half stepping outside the body outline.
         exit_point = QPoint(
-            toolbar_geo.right() - self.exit_button.width() + _scaled(2),
-            toolbar_geo.top() - self.exit_button.height() + _scaled(6),
+            pet_geo.right() - self.exit_button.width() // 2,
+            pet_geo.top() - self.exit_button.height() - _scaled(4),
         )
-        self.exit_button.move(clamp(exit_point, self.exit_button, available))
+        exit_point = clamp(exit_point, self.exit_button, available)
 
         entry_point = QPoint(
             pet_geo.center().x() - self.open_ui_entry.width() // 2,
