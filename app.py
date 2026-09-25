@@ -1287,6 +1287,13 @@ class VisualShell(QObject):
             return  # CAPTURING/OCR already running — ignore
         if self.paper_context.pdf is None:
             log.info("[App] pdf overlay: no PDF context, ignored")
+            # 静默忽略会让用户以为划词坏了——给出可见指引。
+            self.bubble.show_message(
+                "划词需要先打开 PDF",
+                "在浏览器中打开 PDF 后再点划词（需 PageLens 扩展连接）",
+                duration_ms=5_000,
+                accent=theme.ERROR_STATUS,
+            )
             return
         self._register_pdf_overlay_esc()
         overlay.set_mode(OverlayMode.TEXT)
