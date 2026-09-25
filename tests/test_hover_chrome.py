@@ -146,6 +146,36 @@ def test_reenter_cancels_collapse(cluster, qapp):
     assert _chrome_visible(cluster)
 
 
+# -- bubble must not pin the chrome ------------------------------------------
+
+
+def test_greeting_bubble_hides_with_collapse(cluster, qapp):
+    """Regression: a greeting bubble never auto-hides and used to pin the
+    bars/entry forever (anchored_panel_open counted it as a panel)."""
+    cluster.bubble.show_greeting()
+    cluster.bubble.show()
+    _send_hover(cluster, cluster.pet, enter=True)
+    qapp.processEvents()
+    cluster.on_pet_clicked()  # 打开 UI entry shown
+    qapp.processEvents()
+    _send_hover(cluster, cluster.pet, enter=False)
+    QTest.qWait(450)
+    assert not _chrome_visible(cluster)
+    assert not cluster.chrome.open_ui_entry.isVisible()
+    assert not cluster.bubble.isVisible()  # greeting dismissed with the chrome
+
+
+def test_transient_message_survives_collapse(cluster, qapp):
+    """A notification bubble keeps its own auto-hide; collapse leaves it."""
+    cluster.bubble.show_message("t", "m", duration_ms=6_000)
+    _send_hover(cluster, cluster.pet, enter=True)
+    qapp.processEvents()
+    _send_hover(cluster, cluster.pet, enter=False)
+    QTest.qWait(450)
+    assert not _chrome_visible(cluster)
+    assert cluster.bubble.isVisible()  # still expiring on its own timer
+
+
 # -- click toggles the "打开 UI" entry ---------------------------------------
 
 

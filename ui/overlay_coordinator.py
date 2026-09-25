@@ -318,7 +318,12 @@ class OverlayCoordinator(QObject):
 
     def anchored_panel_open(self) -> bool:
         """True while any panel anchored to the cluster is up — the hover
-        collapse is suppressed so dropdowns never lose their anchor."""
+        collapse is suppressed so dropdowns never lose their anchor.
+
+        The speech bubble is deliberately NOT counted: a greeting bubble
+        never auto-hides and would pin the bars forever. It is dismissed
+        with the chrome instead (on_chrome_collapsed).
+        """
         if self._visible_popover() is not None:
             return True
         if self.permission_card is not None and self.permission_card.isVisible():
@@ -333,9 +338,14 @@ class OverlayCoordinator(QObject):
             return True
         if self.explain_box is not None and self.explain_box.isVisible():
             return True
-        if self.reader_panel is not None and self.reader_panel.isVisible():
-            return True
-        return self.bubble.isVisible()
+        return self.reader_panel is not None and self.reader_panel.isVisible()
+
+    def on_chrome_collapsed(self) -> None:
+        """Collapse callback: a lingering greeting bubble belongs to the
+        chrome — dismiss it (with its Ask pill) when the region collapses.
+        Transient notification bubbles keep their own auto-hide timer."""
+        if self.bubble.isVisible() and self.bubble.is_greeting():
+            self._hide_bubble()
 
     def _apply_pet_only(self) -> None:
         self.toolbar.hide()

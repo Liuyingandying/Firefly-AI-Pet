@@ -221,6 +221,9 @@ class HoverChromeController(QObject):
         self._armed = False
         for widget in (self.toolbar, self.dock, self.exit_button, self.open_ui_entry):
             self._fade_out(widget)
+        # A greeting bubble is part of the chrome — it never auto-hides on
+        # its own, so it would pin the bars forever without this callback.
+        self.coordinator.on_chrome_collapsed()
 
     # -- fade primitives ----------------------------------------------------
 

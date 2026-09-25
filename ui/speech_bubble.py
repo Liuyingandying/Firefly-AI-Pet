@@ -70,6 +70,10 @@ class SpeechBubble(QWidget):
         self._content = ("greeting", None)
         self._text.setText(theme.bubble_html())
 
+    def is_greeting(self) -> bool:
+        """True while the bubble holds the greeting copy (never auto-hides)."""
+        return self._content[0] == "greeting"
+
     def show_blank(self) -> None:
         """Show the bubble shell with no greeting copy (greeting-on-startup off)."""
         self._auto_hide.stop()
