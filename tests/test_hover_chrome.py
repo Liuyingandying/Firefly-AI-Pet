@@ -123,6 +123,9 @@ def test_stale_synthetic_enter_is_inert(cluster, qapp):
 
 
 def test_bubble_and_ask_pill_hold_chrome(cluster, qapp):
+    """When the chrome is up, hovering the bubble / Ask pill (they overlap
+    the character) must hold it; leaving everything collapses it and
+    dismisses the greeting."""
     cluster.bubble.show_greeting()
     cluster.bubble.show()
     ask_pill = QWidget()
@@ -131,10 +134,17 @@ def test_bubble_and_ask_pill_hold_chrome(cluster, qapp):
     ask_pill.show()
     cluster.chrome._region.append(ask_pill)
 
-    # Hover the bubble (not the pet): the chrome reveals and holds.
-    _hover_at(cluster, cluster.bubble.frameGeometry().center(), qapp)
+    # Reveal via the pet first (a hidden chrome is not revived by the
+    # bubble alone — that would undo the × hide).
+    _hover_at(cluster, _pet_center(cluster), qapp)
     assert _chrome_visible(cluster)
     cluster.on_pet_clicked()
+    assert cluster.chrome.open_ui_entry.isVisible()
+
+    # Hover the bubble: still held.
+    _hover_at(cluster, cluster.bubble.frameGeometry().center(), qapp)
+    QTest.qWait(450)
+    assert _chrome_visible(cluster)
     assert cluster.chrome.open_ui_entry.isVisible()
 
     # Hover the Ask pill: still held.
@@ -195,6 +205,31 @@ def test_collapse_resets_entry(cluster, qapp):
     _hover_at(cluster, _pet_center(cluster), qapp)
     assert _chrome_visible(cluster)
     assert not cluster.chrome.open_ui_entry.isVisible()  # needs a fresh click
+
+
+def test_hide_x_hint_bubble_does_not_revive_chrome(cluster, qapp):
+    """Regression: after × hides everything, the recovery hint bubble is
+    visible and the cursor sits near it — the poll must NOT count the
+    hint bubble as a hover region member, or the bars pop back in and
+    fade out again (淡出→弹出→再淡出 flicker)."""
+    cluster.bubble.show_greeting()
+    cluster.bubble.show()
+    _hover_at(cluster, _pet_center(cluster), qapp)
+    # Click ×: pet + chrome hidden, recovery bubble shows near the pet.
+    QTest.mouseClick(
+        cluster.chrome.exit_button,
+        Qt.LeftButton,
+        pos=cluster.chrome.exit_button.rect().center(),
+    )
+    qapp.processEvents()
+    assert cluster.chrome._shown is False
+    assert cluster.bubble.isVisible()  # recovery hint is up
+
+    # Cursor parked over the hint bubble for several poll ticks.
+    cluster.chrome._cursor_pos = lambda: cluster.bubble.frameGeometry().center()
+    QTest.qWait(600)
+    assert cluster.chrome._shown is False  # must stay hidden
+    assert not cluster.dock.isVisible()
 
 
 # -- signal routing ---------------------------------------------------------

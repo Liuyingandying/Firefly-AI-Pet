@@ -227,6 +227,7 @@ class HoverChromeController(QObject):
         for extra in (bubble, ask_pill):
             if extra is not None:
                 self._region.append(extra)
+        self._bubble = bubble
         # The chrome widgets fade; the pet/bubble/ask keep their own lifecycle.
         self._fading = (toolbar, dock, self.exit_button, self.open_ui_entry)
 
@@ -253,10 +254,16 @@ class HoverChromeController(QObject):
 
     def on_tick(self) -> None:
         cursor = self._cursor_pos()
-        inside = any(
-            widget.isVisible() and widget.frameGeometry().contains(cursor)
-            for widget in self._region
-        )
+        inside = False
+        for widget in self._region:
+            if not widget.isVisible() or not widget.frameGeometry().contains(cursor):
+                continue
+            if widget is self._bubble and not self._shown:
+                # 隐藏态下的提示气泡（"点托盘找回"）不算悬停区域：
+                # 否则它会自己把信息栏再拉起来（淡出→弹出→再淡出）。
+                continue
+            inside = True
+            break
         if inside:
             self._collapse_timer.stop()
             if not self._shown:
