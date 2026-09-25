@@ -42,9 +42,9 @@ POLL_MS = 150
 COLLAPSE_DELAY_MS = 300
 FADE_MS = 180
 
-_EXIT_SIZE = 30
+_EXIT_SIZE = 36
 # Exit pill anchor: hugging the character's right edge at head height.
-_EXIT_ANCHOR_INSET_X = 6
+_EXIT_ANCHOR_INSET_X = 14
 _EXIT_ANCHOR_OFFSET_Y = 6
 _ENTRY_SIZE = (88, 32)
 
