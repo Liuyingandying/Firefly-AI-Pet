@@ -43,9 +43,54 @@ LAUNCHER_DISPLAY = {
     "zcode": "Z Code",
 }
 
+CLI_INSTALL_HINTS = {
+    "claude": "npm install -g @anthropic-ai/claude-code",
+    "codex": "npm install -g @openai/codex",
+    "qwen": "npm install -g @qwen-code/qwen-code@latest",
+}
+
+
+def _extra_candidate_dirs() -> list[Path]:
+    """Well-known per-user CLI install dirs beyond the process PATH.
+
+    A GUI-launched process can run with a PATH that predates a CLI install
+    (npm prefix not refreshed, nvm shim, MSIX app-execution alias), so PATH
+    alone misses CLIs that are actually installed. Every dir here is a
+    standard Windows location — nothing machine-specific.
+    """
+    dirs: list[Path] = []
+    prefix = (
+        os.environ.get("NPM_CONFIG_PREFIX") or os.environ.get("npm_config_prefix")
+    )
+    if prefix:
+        dirs.append(Path(prefix))
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        dirs.append(Path(appdata) / "npm")
+    nvm_symlink = os.environ.get("NVM_SYMLINK")
+    if nvm_symlink:
+        dirs.append(Path(nvm_symlink))
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        dirs.append(Path(local) / "Microsoft" / "WindowsApps")
+    dirs.append(Path.home() / ".local" / "bin")
+    return dirs
+
 
 def _find_executable(name: str) -> str | None:
-    return shutil.which(name)
+    """PATH first, then the standard per-user install dirs."""
+    found = shutil.which(name)
+    if found:
+        return found
+    seen: set[Path] = set()
+    for d in _extra_candidate_dirs():
+        if d in seen or not d.is_dir():
+            continue
+        seen.add(d)
+        found = shutil.which(name, path=str(d))
+        if found:
+            return found
+    return None
 
 
 def _spawn_cli(argv: list[str], workspace: Path) -> tuple[bool, str]:
@@ -93,7 +138,7 @@ def launch_claude(workspace: Path) -> tuple[bool, str]:
         return False, msg
     exe = _find_executable("claude")
     if not exe:
-        return False, "Claude CLI not found"
+        return False, f"Claude CLI not found (install: {CLI_INSTALL_HINTS['claude']})"
     return _spawn_cli(_wrapped_cmd_argv(exe, list(CLAUDE_FLAGS)), workspace)
 
 
@@ -103,7 +148,7 @@ def launch_codex(workspace: Path) -> tuple[bool, str]:
         return False, msg
     exe = _find_executable("codex")
     if not exe:
-        return False, "Codex CLI not found"
+        return False, f"Codex CLI not found (install: {CLI_INSTALL_HINTS['codex']})"
     # Default config only: no --yolo / dangerous / full-auto flags.
     return _spawn_cli(_wrapped_cmd_argv(exe, []), workspace)
 
@@ -138,7 +183,7 @@ def launch_qwen_yolo(workspace: Path) -> tuple[bool, str]:
         return False, msg
     exe = _find_executable("qwen")
     if not exe:
-        return False, "Qwen CLI not found"
+        return False, f"Qwen CLI not found (install: {CLI_INSTALL_HINTS['qwen']})"
 
     profile_file = _qwen_profile_settings_file()
     user_home = _user_qwen_home()
@@ -185,12 +230,78 @@ def launch_qwen_yolo(workspace: Path) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _uninstall_registry_zcode_exes() -> list[Path]:
+    """Candidate ZCode.exe paths from Add/Remove-Programs metadata.
+
+    Desktop apps register an Uninstall entry even when never put on PATH.
+    ``InstallLocation`` is the install dir when present; ``DisplayIcon``
+    usually points into it too (``<dir>\\app.ico`` or ``<dir>\\app.exe,0``).
+    Scanning the registry keeps discovery machine-agnostic — no guesses.
+    """
+    import winreg
+
+    exe_candidates: list[Path] = []
+    uninstall_key = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            root = winreg.OpenKey(hive, uninstall_key)
+        except OSError:
+            continue
+        with root:
+            index = 0
+            while True:
+                try:
+                    subkey_name = winreg.EnumKey(root, index)
+                except OSError:
+                    break
+                index += 1
+                display = None
+                raw_values: list[str] = []
+                try:
+                    with winreg.OpenKey(root, subkey_name) as subkey:
+                        display = str(winreg.QueryValueEx(subkey, "DisplayName")[0])
+                        # All value reads must happen INSIDE this block —
+                        # the handle is closed when the with exits.
+                        for value_name in ("InstallLocation", "DisplayIcon"):
+                            try:
+                                raw_values.append(
+                                    str(winreg.QueryValueEx(subkey, value_name)[0])
+                                )
+                            except OSError:
+                                continue
+                except OSError:
+                    continue
+                if not display or "zcode" not in display.lower():
+                    continue
+                for raw in raw_values:
+                    raw = raw.split(",")[0].strip()
+                    if not raw:
+                        continue
+                    p = Path(raw)
+                    if p.suffix.lower() == ".exe":
+                        exe_candidates.append(p)
+                    else:
+                        # An icon path (or a bare dir): the install dir is
+                        # the file's parent / the path itself.
+                        base = p.parent if p.suffix else p
+                        exe_candidates.append(base / "ZCode.exe")
+    return exe_candidates
+
+
 def _discover_zcode() -> Path | None:
     for candidate in _ZCODE_EXE_CANDIDATES:
         if candidate.is_file():
             return candidate
     found = shutil.which("ZCode.exe") or shutil.which("zcode")
-    return Path(found) if found else None
+    if found:
+        return Path(found)
+    for exe in _uninstall_registry_zcode_exes():
+        try:
+            if exe.is_file():
+                return exe
+        except OSError:
+            continue
+    return None
 
 
 def launch_zcode(workspace: Path) -> tuple[bool, str]:
