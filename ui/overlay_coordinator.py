@@ -318,6 +318,21 @@ class OverlayCoordinator(QObject):
         legacy state cycle and never the console itself."""
         self.chrome.toggle_entry()
 
+    def hide_firefly(self) -> None:
+        """× 点击路径的隐藏：收起全部浮层 + 隐藏人物本体（不退出）。
+
+        托盘图标左键/菜单可找回；真正的退出仍走托盘菜单的
+        exit_application。
+        """
+        self.chrome.reset_hidden()
+        self.pet.hide()
+        if not self._shutting_down:
+            self.bubble.show_message(
+                "流萤已隐藏",
+                "点任务栏托盘图标即可找回我",
+                duration_ms=5_000,
+            )
+
     def anchored_panel_open(self) -> bool:
         """True while any panel anchored to the cluster is up — the hover
         collapse is suppressed so dropdowns never lose their anchor.
