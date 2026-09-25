@@ -12,6 +12,7 @@ import ctypes
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -689,6 +690,17 @@ class VisualShell(QObject):
     def hide_firefly(self) -> None:
         """Hide the Firefly pet body only. Never quits, never shuts down."""
         self.pet.hide()
+        # The body hiding while the toolbar/dock/bubble stay alive reads as
+        # "the character vanished" (double-right-click hide is easy to hit by
+        # accident). Always tell the user how to get it back.
+        if not self._shutting_down:
+            bubble = getattr(self.coordinator, "bubble", None)
+            if bubble is not None:
+                bubble.show_message(
+                    "流萤已隐藏",
+                    "点任务栏托盘图标即可找回我",
+                    duration_ms=5_000,
+                )
 
     def toggle_firefly(self) -> None:
         """Toggle the Firefly pet body visibility (single source of truth)."""
@@ -707,10 +719,22 @@ class VisualShell(QObject):
 
         All cleanup continues through aboutToQuit -> shutdown(); nothing is
         duplicated here. Guarded so a second exit request is a no-op.
+
+        A daemon deadman timer backs the quit: in rare states a nested
+        native event loop parks the main thread and aboutToQuit never
+        fires, leaving a live process with a ghost tray icon.  The timer
+        is cancelled when shutdown() completes normally.
         """
+        global _exit_deadman
         if self._shutting_down:
             return
         self._exiting = True
+        if _exit_deadman is None:
+            _exit_deadman = threading.Timer(
+                EXIT_DEADMAN_SECONDS, _force_exit_deadman
+            )
+            _exit_deadman.daemon = True
+            _exit_deadman.start()
         QApplication.quit()
 
     def shutdown(self) -> None:
@@ -768,6 +792,11 @@ class VisualShell(QObject):
         # Close MemoryPanel on shutdown.
         if self._memory_panel is not None:
             self._memory_panel.close()
+        # Graceful path finished — stand down the quit deadman.
+        global _exit_deadman
+        if _exit_deadman is not None:
+            _exit_deadman.cancel()
+            _exit_deadman = None
 
     def _scratchpad_drop_controller(self):
         if self._scratchpad_service is None:
@@ -2183,6 +2212,22 @@ class VisualShell(QObject):
 
 
 _mutex_handle = None
+
+# Quit deadman: very rarely, QApplication.quit() fails to end the event loop
+# (a nested native loop keeps the main thread parked and aboutToQuit never
+# fires).  The graceful path stays first; this daemon timer only guarantees
+# the process cannot linger forever with a ghost tray icon.  Generous enough
+# for the slowest bounded cleanup (PageLens bridge stop ≈ up to 7s).
+EXIT_DEADMAN_SECONDS = 12.0
+_exit_deadman: threading.Timer | None = None
+
+
+def _force_exit_deadman() -> None:
+    log.warning(
+        "quit deadman fired after %.0fs: forcing process exit "
+        "(event loop never delivered aboutToQuit)", EXIT_DEADMAN_SECONDS,
+    )
+    os._exit(0)
 
 
 def _acquire_single_instance() -> bool:
