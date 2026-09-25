@@ -44,6 +44,11 @@ class PetOverlay(QWidget):
         self._press_global: QPoint | None = None
         self._dragging = False
         self._shutting_down = False
+        # Opaque-pixel bounding box of the character (window coords),
+        # cached per animation state — see visible_body_rect().
+        from PySide6.QtCore import QRect
+
+        self._body_rect: QRect | None = None
 
         # Scratchpad v1: optional drop handler (set via set_drop_handler).
         # System drag-drop (QDrag) is a separate event family from the
@@ -144,7 +149,52 @@ class PetOverlay(QWidget):
         if state == self._current_state:
             return
         self._current_state = state
+        self._body_rect = None  # new animation -> new visible bounding box
         self._load_movie(state)
+
+    def visible_body_rect(self):
+        """Bounding box of the character's visible pixels, in window coords.
+
+        The window is a padded square around the GIF and the GIF itself
+        carries transparent margins, so chrome anchored to the window edge
+        floats far from the visible character.  Computed from the current
+        frame's alpha channel and cached per state; None until a frame has
+        decoded.
+        """
+        from PySide6.QtCore import QRect
+
+        if self._body_rect is not None:
+            return self._body_rect
+        pixmap = self._movie.currentPixmap()
+        if pixmap is None or pixmap.isNull():
+            return None
+        image = pixmap.toImage()
+        width, height = image.width(), image.height()
+        if width <= 0 or height <= 0:
+            return None
+        min_x = min_y = 10 ** 9
+        max_x = max_y = -1
+        for y in range(0, height, 2):
+            for x in range(0, width, 2):
+                if image.pixelColor(x, y).alpha() > 16:
+                    if x < min_x:
+                        min_x = x
+                    if x > max_x:
+                        max_x = x
+                    if y < min_y:
+                        min_y = y
+                    if y > max_y:
+                        max_y = y
+        if max_x < min_x:
+            return None
+        label_geo = self._label.geometry()
+        self._body_rect = QRect(
+            label_geo.x() + min_x,
+            label_geo.y() + min_y,
+            max_x - min_x + 2,
+            max_y - min_y + 2,
+        )
+        return self._body_rect
 
     def _load_movie(self, state: str) -> None:
         gif_name = self._state_gif.get(state, "idle.gif")

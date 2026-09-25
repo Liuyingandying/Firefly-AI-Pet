@@ -73,7 +73,12 @@ def _scaled(value: int | float) -> int:
 
 
 class ChromePill(QWidget):
-    """Small rounded top-level pill (exit button / open-UI entry)."""
+    """Small rounded top-level pill (exit button / open-UI entry).
+
+    The pill is painted in paintEvent() — stylesheet backgrounds silently
+    fail on WA_TranslucentBackground top-level windows, which is exactly
+    what made the exit control invisible on light documents.
+    """
 
     clicked = Signal()
 
@@ -93,28 +98,63 @@ class ChromePill(QWidget):
         font_px: int = 13,
     ):
         super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.setObjectName("chromePill")
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFixedSize(_scaled(width), _scaled(height))
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip(tooltip)
-        radius = _scaled(12) if width > 30 else _scaled(height) // 2
-        self.setStyleSheet(
-            _PILL_STYLE.format(
-                radius=radius,
-                bg=bg,
-                border=border,
-                hover_bg=hover_bg,
-                hover_border=hover_border,
-                label_color=label_color,
-                font_px=_scaled(font_px),
-            )
-        )
+
+        self._bg = bg
+        self._border = border
+        self._hover_bg = hover_bg
+        self._hover_border = hover_border
+        self._label_color = label_color
+        self._accent = accent
+        self._font_px = _scaled(font_px)
+        self._radius = min(_scaled(height) // 2, _scaled(14))
+        self._hovered = False
 
         self._label = QLabel(text, self)
         self._label.setAlignment(Qt.AlignCenter)
         self._label.setGeometry(0, 0, self.width(), self.height())
+        font = self._label.font()
+        font.setPixelSize(self._font_px)
+        font.setBold(True)
+        self._label.setFont(font)
+        self._label.setStyleSheet(f"color: {label_color}; background: transparent;")
+
+    def paintEvent(self, event) -> None:
+        from PySide6.QtGui import QColor, QPainter, QPen
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        hovered = self._hovered
+        painter.setBrush(
+            QColor(self._hover_bg) if hovered else QColor(self._bg)
+        )
+        painter.setPen(
+            QPen(
+                QColor(self._hover_border) if hovered else QColor(self._border),
+                1,
+            )
+        )
+        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), self._radius, self._radius)
+        painter.end()
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        self._label.setStyleSheet(
+            f"color: {self._accent}; background: transparent;"
+        )
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        self._label.setStyleSheet(
+            f"color: {self._label_color}; background: transparent;"
+        )
+        self.update()
+        super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
@@ -137,7 +177,7 @@ class ExitPill(ChromePill):
             hover_bg="#6936E8",
             hover_border="#6936E8",
             label_color="#FFFFFF",
-            font_px=18,
+            font_px=20,
         )
 
 
@@ -310,8 +350,8 @@ class HoverChromeController(QObject):
     # -- geometry ------------------------------------------------------------
 
     def reposition_chrome(self) -> None:
-        """Anchor the exit pill just above the character's top-right corner
-        and the entry above the pet, clamped so both stay visible and
+        """Anchor the exit pill just off the character's top-right shoulder
+        and the entry above the character, clamped so both stay visible and
         clickable near screen edges."""
         clamp = self.coordinator._clamp_point
         screen = (
@@ -323,25 +363,40 @@ class HoverChromeController(QObject):
         available = screen.availableGeometry()
         pet_geo = self.pet.frameGeometry()
 
+        # Anchor to the character's visible outline, not the padded window:
+        # the GIF carries transparent margins, so window-edge anchoring left
+        # the exit pill floating far from the body.
+        body = self.pet.visible_body_rect()
+        if body is not None:
+            anchor_top = body.top()
+            anchor_right = body.right()
+            anchor_bottom = body.bottom()
+            anchor_center_x = body.center().x()
+        else:
+            anchor_top = pet_geo.top()
+            anchor_right = pet_geo.right()
+            anchor_bottom = pet_geo.bottom()
+            anchor_center_x = pet_geo.center().x()
+
         # "×" hugs the character's right edge at head height (user-marked
         # spot), slightly inside the body outline.
         exit_point = QPoint(
-            pet_geo.right()
+            anchor_right
             - self.exit_button.width()
             + _scaled(_EXIT_ANCHOR_INSET_X),
-            pet_geo.top() + _scaled(_EXIT_ANCHOR_OFFSET_Y),
+            anchor_top + _scaled(_EXIT_ANCHOR_OFFSET_Y),
         )
         self.exit_button.move(clamp(exit_point, self.exit_button, available))
 
         entry_point = QPoint(
-            pet_geo.center().x() - self.open_ui_entry.width() // 2,
-            pet_geo.top() - self.open_ui_entry.height() - _scaled(6),
+            anchor_center_x - self.open_ui_entry.width() // 2,
+            anchor_top - self.open_ui_entry.height() - _scaled(6),
         )
         entry_point = clamp(entry_point, self.open_ui_entry, available)
-        if entry_point.y() >= pet_geo.top():
+        if entry_point.y() >= anchor_top:
             # Not enough headroom (pet near the screen top): drop the entry
             # below the character instead of covering it.
-            entry_point.setY(pet_geo.bottom() + _scaled(6))
+            entry_point.setY(anchor_bottom + _scaled(6))
             entry_point = clamp(entry_point, self.open_ui_entry, available)
         self.open_ui_entry.move(entry_point)
 
