@@ -1,9 +1,13 @@
-"""Hover-chrome interaction tests (2026-09 hover spec).
+"""Hover-chrome interaction tests (2026-09 hover spec, cursor-poll model).
 
-Covers: default-hidden chrome, hover reveal, 300 ms delayed collapse with
-re-enter cancel, single-click "打开 UI" entry toggle, auto-collapse re-arm,
-popover collapse suppression, exit/console signal routing, drag never
-toggling the entry, and screen-edge clamping of the chrome pills.
+Covers: default-hidden chrome, hover reveal (pet/bars/bubble/Ask pill all
+hold the chrome), 300 ms delayed collapse with re-enter cancel, single-click
+"打开 UI" entry toggle with auto-collapse re-arm, panel collapse
+suppression, exit/console signal routing, drag never toggling the entry,
+stale synthetic events being inert, and screen-edge clamping.
+
+The physical cursor is injected via ``chrome._cursor_pos`` so tests never
+depend on the real desktop cursor position.
 """
 
 from __future__ import annotations
@@ -40,6 +44,8 @@ STATE_GIF = {
     "sleeping": "idle.gif",
 }
 
+OFFSCREEN = QPoint(-30000, -30000)
+
 
 @pytest.fixture(scope="module")
 def qapp():
@@ -56,10 +62,9 @@ def cluster(qapp):
     coordinator.chrome.fade_ms = 0  # deterministic show/hide in tests
     coordinator.show_shell_pet_only()
     # Park the pet far off-screen and neutralize the screen clamp: the
-    # physical cursor may sit anywhere on the real desktop, and Qt
-    # synthesizes Enter events when windows hide/show under it — that
-    # would legitimately re-reveal the chrome and break assertions.
-    coordinator.pet.move(QPoint(-30000, -30000))
+    # physical cursor may sit anywhere on the real desktop, and its Enter
+    # events would legitimately re-reveal the chrome and break assertions.
+    coordinator.pet.move(OFFSCREEN)
     coordinator._clamp_point = lambda point, widget, available: point
     # Pin the "character alone" baseline (offscreen synthesizes Enter on
     # every window show).
@@ -69,17 +74,22 @@ def cluster(qapp):
     pet.shutdown()
 
 
-def _send_hover(cluster, widget, enter: bool) -> None:
-    """Drive the hover path directly (the cursor check is bypassed because
-    the offscreen cursor never sits over the cluster)."""
-    cluster.chrome.entered() if enter else cluster.chrome.left()
+def _hover_at(cluster, pos, qapp):
+    """Move the injected cursor to pos and run one poll tick."""
+    cluster.chrome._cursor_pos = lambda: pos
+    cluster.chrome.on_tick()
+    qapp.processEvents()
 
 
-def _chrome_visible(coordinator: OverlayCoordinator) -> bool:
+def _pet_center(cluster):
+    return cluster.pet.frameGeometry().center()
+
+
+def _chrome_visible(cluster) -> bool:
     return (
-        coordinator.dock.isVisible()
-        and coordinator.toolbar.isVisible()
-        and coordinator.chrome.exit_button.isVisible()
+        cluster.dock.isVisible()
+        and cluster.toolbar.isVisible()
+        and cluster.chrome.exit_button.isVisible()
     )
 
 
@@ -94,172 +104,117 @@ def test_default_hides_all_chrome(cluster):
     assert not cluster.chrome.open_ui_entry.isVisible()
 
 
-def test_hover_reveals_bars_and_exit(cluster, qapp):
-    _send_hover(cluster, cluster.pet, enter=True)
-    qapp.processEvents()
+def test_hover_pet_reveals_bars_and_exit(cluster, qapp):
+    _hover_at(cluster, _pet_center(cluster), qapp)
     assert _chrome_visible(cluster)
     assert not cluster.chrome.open_ui_entry.isVisible()  # entry needs a click
 
 
-def test_filter_ignores_synthetic_enter(cluster, qapp):
-    """A stale synthetic Enter for an already-hidden chrome widget must not
-    resurrect the chrome."""
-    cluster.chrome.reset_hidden()
-    qapp.processEvents()
+def test_stale_synthetic_enter_is_inert(cluster, qapp):
+    """Enter/Leave events no longer drive the chrome at all — a stale
+    synthetic Enter delivered to a hidden widget must do nothing."""
     QApplication.sendEvent(cluster.toolbar, QEvent(QEvent.Enter))
     qapp.processEvents()
     assert not _chrome_visible(cluster)
     assert cluster.chrome._shown is False
 
 
-def test_hover_entry_only_with_bars(cluster, qapp):
-    _send_hover(cluster, cluster.pet, enter=True)
-    qapp.processEvents()
+# -- the whole cluster holds the chrome --------------------------------------
+
+
+def test_bubble_and_ask_pill_hold_chrome(cluster, qapp):
+    cluster.bubble.show_greeting()
+    cluster.bubble.show()
+    ask_pill = QWidget()
+    ask_pill.resize(80, 30)
+    ask_pill.move(cluster.bubble.frameGeometry().topRight())
+    ask_pill.show()
+    cluster.chrome._region.append(ask_pill)
+
+    # Hover the bubble (not the pet): the chrome reveals and holds.
+    _hover_at(cluster, cluster.bubble.frameGeometry().center(), qapp)
+    assert _chrome_visible(cluster)
     cluster.on_pet_clicked()
-    qapp.processEvents()
     assert cluster.chrome.open_ui_entry.isVisible()
 
+    # Hover the Ask pill: still held.
+    _hover_at(cluster, ask_pill.frameGeometry().center(), qapp)
+    QTest.qWait(450)
+    assert _chrome_visible(cluster)
+    assert cluster.chrome.open_ui_entry.isVisible()
 
-# -- collapse ---------------------------------------------------------------
+    # Leave the whole region: everything collapses, entry re-arms.
+    _hover_at(cluster, QPoint(-25000, -25000), qapp)
+    QTest.qWait(450)
+    assert cluster.chrome._shown is False
+    assert not cluster.chrome.open_ui_entry.isVisible()
+    assert not cluster.bubble.isVisible()  # greeting dismissed with the chrome
+
+
+# -- collapse ----------------------------------------------------------------
 
 
 def test_leave_collapses_after_grace(cluster, qapp):
-    _send_hover(cluster, cluster.pet, enter=True)
-    qapp.processEvents()
-    _send_hover(cluster, cluster.pet, enter=False)
-    qapp.processEvents()
+    _hover_at(cluster, _pet_center(cluster), qapp)
+    assert _chrome_visible(cluster)  # inside the region
+    _hover_at(cluster, QPoint(-25000, -25000), qapp)  # cursor leaves
     assert _chrome_visible(cluster)  # inside the 300 ms grace window
     QTest.qWait(450)
     assert cluster.chrome._shown is False  # logical collapse happened
 
 
 def test_reenter_cancels_collapse(cluster, qapp):
-    _send_hover(cluster, cluster.pet, enter=True)
-    qapp.processEvents()
-    _send_hover(cluster, cluster.pet, enter=False)
+    _hover_at(cluster, _pet_center(cluster), qapp)
+    _hover_at(cluster, QPoint(-25000, -25000), qapp)
     QTest.qWait(120)
-    _send_hover(cluster, cluster.pet, enter=True)  # back inside before the grace ends
-    qapp.processEvents()
+    _hover_at(cluster, _pet_center(cluster), qapp)  # back before grace ends
     QTest.qWait(450)
     assert _chrome_visible(cluster)
-
-
-# -- bubble must not pin the chrome ------------------------------------------
-
-
-def test_bubble_and_ask_pill_hold_chrome(cluster, qapp):
-    """Regression: the greeting bubble + Ask pill overlap the character but
-    were not part of the hover region — moving onto Ask collapsed the bars
-    mid-interaction. Entering them must hold/cancel the collapse."""
-    cluster.bubble.show_greeting()
-    cluster.bubble.show()
-    ask_pill = QWidget()
-    cluster.chrome._tracked.add(ask_pill)
-
-    _send_hover(cluster, cluster.pet, enter=True)
-    qapp.processEvents()
-    cluster.on_pet_clicked()  # 打开 UI entry shown
-    qapp.processEvents()
-
-    # Mouse moves off the pet ONTO the bubble: pet Leave fires, but the
-    # bubble Enter arrives and cancels the collapse.
-    _send_hover(cluster, cluster.pet, enter=False)
-    _send_hover(cluster, cluster.bubble, enter=True)
-    qapp.processEvents()
-    QTest.qWait(450)
-    assert _chrome_visible(cluster)
-    assert cluster.chrome.open_ui_entry.isVisible()
-
-    # Same for the Ask pill.
-    _send_hover(cluster, cluster.bubble, enter=False)
-    _send_hover(cluster, ask_pill, enter=True)
-    qapp.processEvents()
-    QTest.qWait(450)
-    assert _chrome_visible(cluster)
-
-    # Leaving the whole region (bubble Leave, no re-entry) still collapses.
-    _send_hover(cluster, ask_pill, enter=False)
-    QTest.qWait(450)
-    assert cluster.chrome._shown is False  # collapsed
-    assert not cluster.chrome.open_ui_entry.isVisible()
-
-
-def test_greeting_bubble_hides_with_collapse(cluster, qapp):
-    """Regression: a greeting bubble never auto-hides and used to pin the
-    bars/entry forever (anchored_panel_open counted it as a panel)."""
-    cluster.bubble.show_greeting()
-    cluster.bubble.show()
-    _send_hover(cluster, cluster.pet, enter=True)
-    qapp.processEvents()
-    cluster.on_pet_clicked()  # 打开 UI entry shown
-    qapp.processEvents()
-    _send_hover(cluster, cluster.pet, enter=False)
-    QTest.qWait(450)
-    assert cluster.chrome._shown is False  # collapsed despite the bubble
-    assert not cluster.chrome.open_ui_entry.isVisible()
-    assert not cluster.bubble.isVisible()  # greeting dismissed with the chrome
-
-
-def test_transient_message_survives_collapse(cluster, qapp):
-    """A notification bubble keeps its own auto-hide; collapse leaves it."""
-    cluster.bubble.show_message("t", "m", duration_ms=6_000)
-    _send_hover(cluster, cluster.pet, enter=True)
-    qapp.processEvents()
-    _send_hover(cluster, cluster.pet, enter=False)
-    QTest.qWait(450)
-    assert cluster.chrome._shown is False  # collapsed
-    assert not cluster.chrome.open_ui_entry.isVisible()
-    assert cluster.bubble.isVisible()  # still expiring on its own timer
 
 
 # -- click toggles the "打开 UI" entry ---------------------------------------
 
 
 def test_click_toggles_entry(cluster, qapp):
-    _send_hover(cluster, cluster.pet, enter=True)
-    qapp.processEvents()
+    _hover_at(cluster, _pet_center(cluster), qapp)
     cluster.on_pet_clicked()
-    qapp.processEvents()
     assert cluster.chrome.open_ui_entry.isVisible()
     cluster.on_pet_clicked()
-    qapp.processEvents()
     assert not cluster.chrome.open_ui_entry.isVisible()
-    assert _chrome_visible(cluster)  # bars stay while the mouse is inside
+    assert _chrome_visible(cluster)  # bars stay while the cursor is inside
 
 
 def test_collapse_resets_entry(cluster, qapp):
-    _send_hover(cluster, cluster.pet, enter=True)
-    qapp.processEvents()
+    _hover_at(cluster, _pet_center(cluster), qapp)
     cluster.on_pet_clicked()
-    qapp.processEvents()
     assert cluster.chrome.open_ui_entry.isVisible()
-    _send_hover(cluster, cluster.pet, enter=False)
+    _hover_at(cluster, QPoint(-25000, -25000), qapp)
     QTest.qWait(450)
-    assert not cluster.chrome.open_ui_entry.isVisible()
-    _send_hover(cluster, cluster.pet, enter=True)
-    qapp.processEvents()
+    assert cluster.chrome._shown is False  # collapsed despite the bubble
+    assert cluster.chrome._armed is False  # entry re-armed
+    _hover_at(cluster, _pet_center(cluster), qapp)
     assert _chrome_visible(cluster)
-    assert not cluster.chrome.open_ui_entry.isVisible()  # re-armed
+    assert not cluster.chrome.open_ui_entry.isVisible()  # needs a fresh click
 
 
 # -- signal routing ---------------------------------------------------------
 
 
 def test_exit_button_routes_exit_signal(cluster, qapp):
-    _send_hover(cluster, cluster.pet, enter=True)
-    qapp.processEvents()
+    _hover_at(cluster, _pet_center(cluster), qapp)
     seen = []
     cluster.exit_requested.connect(lambda: seen.append(1))
     QTest.mouseClick(
-        cluster.chrome.exit_button, Qt.LeftButton, pos=cluster.chrome.exit_button.rect().center()
+        cluster.chrome.exit_button,
+        Qt.LeftButton,
+        pos=cluster.chrome.exit_button.rect().center(),
     )
     qapp.processEvents()
     assert seen == [1]
 
 
 def test_entry_button_routes_console_signal(cluster, qapp):
-    _send_hover(cluster, cluster.pet, enter=True)
-    qapp.processEvents()
+    _hover_at(cluster, _pet_center(cluster), qapp)
     seen = []
     cluster.console_requested.connect(lambda: seen.append(1))
     QTest.mouseClick(
@@ -284,18 +239,44 @@ def test_open_panel_blocks_collapse(cluster, qapp):
 
     cluster.workspace_popover = _FakePopover()
     try:
-        _send_hover(cluster, cluster.pet, enter=True)
-        qapp.processEvents()
-        _send_hover(cluster, cluster.pet, enter=False)
+        _hover_at(cluster, _pet_center(cluster), qapp)
+        _hover_at(cluster, QPoint(-25000, -25000), qapp)
         QTest.qWait(450)
         assert _chrome_visible(cluster)  # anchor panel holds the chrome up
     finally:
         cluster.workspace_popover = None
 
 
+def test_greeting_bubble_hides_with_collapse(cluster, qapp):
+    """Regression: a greeting bubble never auto-hides and used to pin the
+    bars/entry forever (anchored_panel_open counted it as a panel)."""
+    cluster.bubble.show_greeting()
+    cluster.bubble.show()
+    _hover_at(cluster, _pet_center(cluster), qapp)
+    cluster.on_pet_clicked()  # 打开 UI entry shown
+    _hover_at(cluster, QPoint(-25000, -25000), qapp)
+    QTest.qWait(450)
+    assert cluster.chrome._shown is False  # collapsed despite the bubble
+    assert not cluster.chrome.open_ui_entry.isVisible()
+    assert not cluster.bubble.isVisible()  # greeting dismissed with the chrome
+
+
+def test_transient_message_survives_collapse(cluster, qapp):
+    """A notification bubble keeps its own auto-hide; collapse leaves it."""
+    cluster.bubble.show_message("t", "m", duration_ms=6_000)
+    _hover_at(cluster, _pet_center(cluster), qapp)
+    _hover_at(cluster, QPoint(-25000, -25000), qapp)
+    QTest.qWait(450)
+    assert cluster.chrome._shown is False  # collapsed
+    assert not cluster.chrome.open_ui_entry.isVisible()
+    assert cluster.bubble.isVisible()  # still expiring on its own timer
+
+
+# -- drag + clamping ---------------------------------------------------------
+
+
 def test_drag_never_toggles_entry(cluster, qapp):
-    _send_hover(cluster, cluster.pet, enter=True)
-    qapp.processEvents()
+    _hover_at(cluster, _pet_center(cluster), qapp)
     start = cluster.pet.rect().center()
     finish = start + QPoint(-60, -40)
     QTest.mousePress(cluster.pet, Qt.LeftButton, pos=start)

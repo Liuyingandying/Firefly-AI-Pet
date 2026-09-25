@@ -5,26 +5,27 @@ Interaction model (2026-09 hover spec):
 - Default shows the character alone. The two bars (top platform dock +
   side function toolbar), the top-right "×" exit pill and the "打开 UI"
   entry are hidden and never intercept clicks while hidden.
-- Hovering the character (or any chrome widget) reveals the bars and the
-  exit pill. Leaving the whole interaction region starts a 300 ms grace
-  timer; re-entering cancels it. Overlapping windows (negative anchor
-  gaps) therefore never flicker.
+- Hovering ANY part of the cluster — the character, the two bars, the
+  greeting bubble, the Ask pill, the exit pill or the open-UI entry —
+  reveals the bars and the exit pill. Leaving the whole region starts a
+  300 ms grace collapse; re-entering cancels it.
 - A single left-click on the character toggles the "打开 UI" entry (it
-  never opens the console directly). Auto-collapse re-arms the entry, so
-  the next hover shows only the bars. PetOverlay reports clicks only for
-  genuine clicks — drags never reach the toggle.
+  never opens the console directly). Auto-collapse re-arms the entry.
+  PetOverlay reports clicks only for genuine clicks — drags never reach
+  the toggle.
 - While an anchored panel (popovers, permission card, Short Ask,
   PageLens, ...) is open the collapse is suppressed, so working a
   dropdown never yanks the bars away.
 
-Everything here is desktop chrome for the character cluster only: no
-provider, plugin or state services are touched.
+Detection is a lightweight cursor poll (150 ms) against the union of the
+tracked geometries instead of per-window Enter/Leave events: overlapping
+always-on-top windows re-target Enter/Leave unpredictably (z-order,
+show/hide synthesis), which made the event-based approach flaky.
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import (
-    QEvent,
     QObject,
     QPoint,
     QPropertyAnimation,
@@ -32,11 +33,12 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 from . import theme
 
+POLL_MS = 150
 COLLAPSE_DELAY_MS = 300
 FADE_MS = 180
 
@@ -51,7 +53,10 @@ _PILL_STYLE = """
     }}
     QWidget#chromePill:hover {{
         background-color: #EAF6F6;
-        border: 1px solid #35B8B8;
+        border: 1px solid #7C4DFF;
+    }}
+    QWidget#chromePill:hover QLabel {{
+        color: #7C4DFF;
     }}
     QLabel {{
         background: transparent;
@@ -71,10 +76,16 @@ class ChromePill(QWidget):
 
     clicked = Signal()
 
-    def __init__(self, text: str, tooltip: str, width: int, height: int):
-        super().__init__(
-            None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-        )
+    def __init__(
+        self,
+        text: str,
+        tooltip: str,
+        width: int,
+        height: int,
+        accent: str,
+        label_color: str = "#33414B",
+    ):
+        super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setObjectName("chromePill")
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -82,7 +93,11 @@ class ChromePill(QWidget):
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip(tooltip)
         radius = _scaled(12) if width > 30 else _scaled(height) // 2
-        self.setStyleSheet(_PILL_STYLE.format(radius=radius))
+        self.setStyleSheet(
+            _PILL_STYLE.format(radius=radius, accent=accent).replace(
+                "color: #33414B", f"color: {label_color}"
+            )
+        )
 
         self._label = QLabel(text, self)
         self._label.setAlignment(Qt.AlignCenter)
@@ -98,12 +113,19 @@ class ChromePill(QWidget):
 
 class ExitPill(ChromePill):
     def __init__(self):
-        super().__init__("×", "退出程序", _EXIT_SIZE, _EXIT_SIZE)
+        super().__init__(
+            "×",
+            "退出程序",
+            _EXIT_SIZE,
+            _EXIT_SIZE,
+            accent="#7C4DFF",
+            label_color="#7C4DFF",
+        )
 
 
 class OpenUiPill(ChromePill):
     def __init__(self):
-        super().__init__("打开 UI", "打开主界面", *_ENTRY_SIZE)
+        super().__init__("打开 UI", "打开主界面", *_ENTRY_SIZE, accent="#35B8B8")
 
 
 class HoverChromeController(QObject):
@@ -132,12 +154,15 @@ class HoverChromeController(QObject):
         self.open_ui_entry = OpenUiPill()
         self.open_ui_entry.clicked.connect(coordinator.console_requested.emit)
 
-        # The bubble + Ask pill overlap the character, so they are part of
-        # the hover region: moving onto them must not start the collapse.
-        self._tracked = {pet, toolbar, dock, self.exit_button, self.open_ui_entry}
+        # Region members: cursor inside any VISIBLE one holds the chrome up.
+        # The bubble/Ask pill overlap the character, so they count too.
+        self._region = [pet, toolbar, dock, self.exit_button, self.open_ui_entry]
         for extra in (bubble, ask_pill):
             if extra is not None:
-                self._tracked.add(extra)
+                self._region.append(extra)
+        # The chrome widgets fade; the pet/bubble/ask keep their own lifecycle.
+        self._fading = (toolbar, dock, self.exit_button, self.open_ui_entry)
+
         self._shown = False
         self._armed = False
         self._anims: dict[QWidget, QPropertyAnimation] = {}
@@ -147,73 +172,41 @@ class HoverChromeController(QObject):
         self._collapse_timer.setInterval(COLLAPSE_DELAY_MS)
         self._collapse_timer.timeout.connect(self._collapse)
 
-        app = QApplication.instance()
-        if app is not None:
-            app.installEventFilter(self)
-            self._app = app
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(POLL_MS)
+        self._poll_timer.timeout.connect(self.on_tick)
+        self._poll_timer.start()
 
-    # -- event routing ----------------------------------------------------
+    # -- cursor injection for tests ---------------------------------------
 
-    @staticmethod
-    def _cursor_inside(widget: QWidget) -> bool:
-        """True when the real cursor sits inside the widget's global rect.
+    def _cursor_pos(self) -> QPoint:
+        return QCursor.pos()
 
-        Window platforms synthesize an Enter whenever a top-level shows
-        under (or without) the cursor — e.g. at startup or after a fade.
-        Only an Enter with the cursor genuinely inside counts as a hover.
-        """
-        try:
-            from PySide6.QtGui import QCursor
+    # -- poll tick ---------------------------------------------------------
 
-            return widget.frameGeometry().contains(QCursor.pos())
-        except Exception:  # pragma: no cover - headless oddities
-            return True
-
-    def on_app_event(self, watched, event) -> None:
-        """Called from the coordinator's app-level event filter."""
-        if watched not in self._tracked:
+    def on_tick(self) -> None:
+        cursor = self._cursor_pos()
+        inside = any(
+            widget.isVisible() and widget.frameGeometry().contains(cursor)
+            for widget in self._region
+        )
+        if inside:
+            self._collapse_timer.stop()
+            if not self._shown:
+                self._shown = True
+                self.coordinator.reposition()
+                for widget in (self.toolbar, self.dock, self.exit_button):
+                    self._fade_in(widget)
+                if self._armed:
+                    self._fade_in(self.open_ui_entry)
+                self.pet.raise_()
             return
-        et = event.type()
-        if et == QEvent.Enter:
-            if not watched.isVisible():
-                # Stale synthetic Enter queued while the widget was visible
-                # and delivered after the collapse hid it — ignore, or the
-                # chrome would resurrect itself forever.
-                return
-            if self._cursor_inside(watched):
-                self.entered()
-        elif et == QEvent.Leave:
-            self.left()
-
-    def entered(self) -> None:
-        self._collapse_timer.stop()
         if not self._shown:
-            self._shown = True
-            self.coordinator.reposition()
-            for widget in (self.toolbar, self.dock, self.exit_button):
-                self._fade_in(widget)
-            if self._armed:
-                self._fade_in(self.open_ui_entry)
-        self.pet.raise_()
-
-    def left(self) -> None:
-        if self.coordinator.anchored_panel_open():
             return
-        self._collapse_timer.start()
-
-    def reset_hidden(self) -> None:
-        """Force the deterministic hidden baseline (no chrome visible).
-
-        Window platforms may synthesize an Enter event when a top-level
-        shows under the cursor, which would legitimately reveal the chrome.
-        Startup code and tests call this to pin the "character alone"
-        baseline regardless of that synthesis.
-        """
-        self._shown = False
-        self._armed = False
-        self._collapse_timer.stop()
-        for widget in (self.toolbar, self.dock, self.exit_button, self.open_ui_entry):
-            self._fade_out(widget)
+        if self.coordinator.anchored_panel_open():
+            return  # hold; a dropdown/panel keeps the chrome anchored
+        if not self._collapse_timer.isActive():
+            self._collapse_timer.start()
 
     def toggle_entry(self) -> None:
         """Pet left-click: show the entry if hidden, hide it if shown."""
@@ -239,7 +232,7 @@ class HoverChromeController(QObject):
             return
         self._shown = False
         self._armed = False
-        for widget in (self.toolbar, self.dock, self.exit_button, self.open_ui_entry):
+        for widget in self._fading:
             self._fade_out(widget)
         # A greeting bubble is part of the chrome — it never auto-hides on
         # its own, so it would pin the bars forever without this callback.
@@ -318,7 +311,7 @@ class HoverChromeController(QObject):
             pet_geo.right() - self.exit_button.width() // 2,
             pet_geo.top() - self.exit_button.height() - _scaled(4),
         )
-        exit_point = clamp(exit_point, self.exit_button, available)
+        self.exit_button.move(clamp(exit_point, self.exit_button, available))
 
         entry_point = QPoint(
             pet_geo.center().x() - self.open_ui_entry.width() // 2,
@@ -339,9 +332,23 @@ class HoverChromeController(QObject):
         )
         self.reposition_chrome()
 
-    def close(self) -> None:
+    def reset_hidden(self) -> None:
+        """Force the deterministic hidden baseline (no chrome visible).
+
+        Window platforms may synthesize an Enter event when a top-level
+        shows under the cursor, which would legitimately reveal the chrome.
+        Startup code and tests call this to pin the "character alone"
+        baseline regardless of that synthesis.
+        """
+        self._shown = False
+        self._armed = False
         self._collapse_timer.stop()
-        self._app.removeEventFilter(self)
+        for widget in self._fading:
+            self._fade_out(widget)
+
+    def close(self) -> None:
+        self._poll_timer.stop()
+        self._collapse_timer.stop()
         for widget in (self.exit_button, self.open_ui_entry):
             self._stop_anim(widget)
             widget.close()

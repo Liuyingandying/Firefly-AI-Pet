@@ -1120,9 +1120,6 @@ class OverlayCoordinator(QObject):
         return None
 
     def eventFilter(self, watched, event) -> bool:
-        # Hover chrome first: Enter/Leave on the character or any chrome
-        # widget drives the show/collapse timing.
-        self.chrome.on_app_event(watched, event)
         visible = self._visible_popover()
         if visible is not None:
             if event.type() == QEvent.MouseButtonPress:
