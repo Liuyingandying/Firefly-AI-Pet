@@ -17,10 +17,14 @@ anywhere else on the Qwen item still launches the CLI.
 
 from __future__ import annotations
 
+import threading
+import time
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from . import agent_launcher
 from . import theme
 from .agent_launcher import (
     launch_claude,
@@ -101,6 +105,40 @@ class _StatusDot(QWidget):
         event.accept()
 
 
+class _PresenceDot(QWidget):
+    """绿色就绪点：对应启动目标在本机被发现（可启动）时显示。
+
+    Codex → CLI / 商店版应用可发现；Z Code → 桌面应用可发现。
+    未发现时整个隐藏（不占位、不拦截点击）。
+    """
+
+    def __init__(self, name: str, parent=None):
+        super().__init__(parent)
+        self._name = name
+        self.setFixedSize(theme.DOCK_STATUS_DOT_SIZE, theme.DOCK_STATUS_DOT_SIZE)
+        self.setToolTip(f"{name} 已就绪")
+        self.setAccessibleName(f"{name} availability")
+        self.hide()
+
+    def set_present(self, present: bool) -> None:
+        # 无条件 show/hide：isVisible() 依赖祖先可见性，父级隐藏时恒为
+        # False，会让"设为隐藏"的分支被误跳过。
+        self.setVisible(bool(present))
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(*theme.DOCK_STATUS_GREEN))
+        painter.drawEllipse(self.rect())
+
+    def mousePressEvent(self, event) -> None:
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:
+        event.accept()
+
+
 class _LauncherItem(QFrame):
     activated = Signal(str)
 
@@ -152,6 +190,10 @@ class _LauncherItem(QFrame):
 class AgentDock(QWidget):
     launch_message = Signal(str)
     launch_agent = Signal(str)
+    # 后台线程发现结果（launcher_id → 可启动），队列投递回主线程。
+    presence_changed = Signal(dict)
+
+    PRESENCE_RECHECK_S = 30.0
 
     def __init__(self, parent=None):
         super().__init__(parent, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -192,6 +234,7 @@ class AgentDock(QWidget):
         self._items: dict[str, _LauncherItem] = {}
         self._separators: list[QFrame] = []
         self._tju_dot: _StatusDot | None = None
+        self._presence_dots: dict[str, _PresenceDot] = {}
         for index, (launcher_id, name, letter, color, tooltip) in enumerate(LAUNCHERS):
             if index:
                 separator = QFrame(card)
@@ -203,6 +246,9 @@ class AgentDock(QWidget):
             if launcher_id == "qwen":
                 status_dot = _StatusDot(card)
                 self._tju_dot = status_dot
+            elif launcher_id in ("codex", "zcode"):
+                status_dot = _PresenceDot(name, card)
+                self._presence_dots[launcher_id] = status_dot
             item = _LauncherItem(
                 launcher_id, name, letter, color, tooltip,
                 status_dot=status_dot, parent=card,
@@ -215,6 +261,47 @@ class AgentDock(QWidget):
         self._tju_health = TjuLlmHealthChecker(parent=self)
         self._tju_health.status_changed.connect(self._on_tju_status)
         self.destroyed.connect(self._stop_tju_health)
+
+        # Codex / Z Code presence dots — discovery runs on a daemon thread
+        # (filesystem + Appx query), results land on the main thread via a
+        # queued signal.
+        self._presence_thread: threading.Thread | None = None
+        self._last_presence_check = 0.0
+        self.presence_changed.connect(self._on_presence_changed)
+        self.refresh_presence()
+
+    def refresh_presence(self) -> None:
+        """Re-scan Codex / Z Code availability off the UI thread (throttled)."""
+        if self._presence_thread is not None and self._presence_thread.is_alive():
+            return
+        if time.monotonic() - self._last_presence_check < self.PRESENCE_RECHECK_S:
+            return
+        self._last_presence_check = time.monotonic()
+
+        def _work() -> None:
+            result = {
+                "codex": agent_launcher.codex_available(),
+                "zcode": agent_launcher.zcode_available(),
+            }
+            self.presence_changed.emit(result)
+
+        self._presence_thread = threading.Thread(
+            target=_work, daemon=True, name="firefly-presence"
+        )
+        self._presence_thread.start()
+
+    def presence_scan_sync(self) -> dict:
+        """同步扫描（测试/调试用）：绕过后台线程直接应用结果。"""
+        result = {
+            "codex": agent_launcher.codex_available(),
+            "zcode": agent_launcher.zcode_available(),
+        }
+        self._on_presence_changed(result)
+        return result
+
+    def _on_presence_changed(self, result: dict) -> None:
+        for launcher_id, dot in self._presence_dots.items():
+            dot.set_present(bool(result.get(launcher_id)))
 
     def _on_item_activated(self, launcher_id: str) -> None:
         self.launch_agent.emit(launcher_id)
@@ -229,6 +316,7 @@ class AgentDock(QWidget):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._tju_health.start()
+        self.refresh_presence()
 
     def closeEvent(self, event) -> None:
         self._tju_health.stop()

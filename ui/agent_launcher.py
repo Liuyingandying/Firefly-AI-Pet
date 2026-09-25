@@ -289,6 +289,19 @@ def launch_qwen_yolo(workspace: Path) -> tuple[bool, str]:
     return True, "ok"
 
 
+def codex_available() -> bool:
+    """Codex 可启动：CLI（PATH/标准目录/商店版副本）或商店版应用存在。"""
+    return (
+        _find_executable("codex") is not None
+        or _codex_store_cli() is not None
+        or _codex_app_aumid() is not None
+    )
+
+
+def zcode_available() -> bool:
+    return _discover_zcode() is not None
+
+
 def _uninstall_registry_zcode_exes() -> list[Path]:
     """Candidate ZCode.exe paths from Add/Remove-Programs metadata.
 
