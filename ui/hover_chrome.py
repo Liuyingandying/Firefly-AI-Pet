@@ -172,9 +172,10 @@ class ChromePill(QWidget):
 class ExitPill(ChromePill):
     def __init__(self):
         # Bare pink-purple × on a fully transparent background (user spec).
+        # 点击 = 隐藏流萤（不退出），托盘图标找回。
         super().__init__(
             "×",
-            "退出程序",
+            "隐藏流萤（托盘图标找回）",
             _EXIT_SIZE,
             _EXIT_SIZE,
             bg="transparent",
@@ -215,7 +216,8 @@ class HoverChromeController(QObject):
         self.fade_ms = FADE_MS
 
         self.exit_button = ExitPill()
-        self.exit_button.clicked.connect(coordinator.exit_requested.emit)
+        # × = 隐藏流萤（人物+全部浮层），不是退出；真正退出走托盘菜单。
+        self.exit_button.clicked.connect(self._hide_pet)
         self.open_ui_entry = OpenUiPill()
         self.open_ui_entry.clicked.connect(coordinator.console_requested.emit)
 
@@ -287,6 +289,11 @@ class HoverChromeController(QObject):
         for widget in (self.toolbar, self.dock, self.exit_button):
             self._fade_in(widget)
         self.pet.raise_()
+
+    def _hide_pet(self) -> None:
+        """× 点击：隐藏人物与全部浮层（不退出应用，托盘图标找回）。"""
+        self.reset_hidden()
+        self.coordinator.hide_firefly()
 
     # -- collapse ----------------------------------------------------------
 

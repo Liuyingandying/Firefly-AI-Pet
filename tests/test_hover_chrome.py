@@ -200,8 +200,10 @@ def test_collapse_resets_entry(cluster, qapp):
 # -- signal routing ---------------------------------------------------------
 
 
-def test_exit_button_routes_exit_signal(cluster, qapp):
+def test_exit_button_hides_pet(cluster, qapp):
+    """× = 隐藏流萤（人物+浮层），不是退出；托盘仍是真正的退出入口。"""
     _hover_at(cluster, _pet_center(cluster), qapp)
+    cluster.on_pet_clicked()  # entry shown
     seen = []
     cluster.exit_requested.connect(lambda: seen.append(1))
     QTest.mouseClick(
@@ -210,7 +212,10 @@ def test_exit_button_routes_exit_signal(cluster, qapp):
         pos=cluster.chrome.exit_button.rect().center(),
     )
     qapp.processEvents()
-    assert seen == [1]
+    assert seen == []  # 不退出
+    assert not cluster.pet.isVisible()  # 人物隐藏
+    assert cluster.chrome._shown is False  # 浮层收起
+    assert not cluster.chrome.open_ui_entry.isVisible()
 
 
 def test_entry_button_routes_console_signal(cluster, qapp):
