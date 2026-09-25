@@ -280,6 +280,9 @@ def test_workspace_missing_graceful(monkeypatch, tmp_path):
 def test_cli_missing_graceful(monkeypatch, fake_workspace):
     fake_workspace.mkdir()
     monkeypatch.setattr(agent_launcher, "_find_executable", lambda n: None)
+    # A machine may hold the Codex Store-app copy; this test requires the
+    # not-found path, so the store lookup is stubbed away too.
+    monkeypatch.setattr(agent_launcher, "_codex_store_cli", lambda: None)
     for launch in (launch_claude, launch_codex, launch_qwen_yolo):
         ok, msg = launch(fake_workspace)
         assert not ok
@@ -313,6 +316,55 @@ def test_zcode_missing_graceful():
         assert not ok and "Z Code executable not found" in msg
     finally:
         monkey.undo()
+
+
+# ================================================== Codex Store-app CLI
+
+
+def test_codex_store_cli_picks_newest_build(monkeypatch, tmp_path):
+    """The Store app unpacks the CLI under bin/<build>/; newest build wins."""
+    import os
+
+    old = tmp_path / "OpenAI" / "Codex" / "bin" / "aaa" / "codex.exe"
+    new = tmp_path / "OpenAI" / "Codex" / "bin" / "zzz" / "codex.exe"
+    old.parent.mkdir(parents=True)
+    new.parent.mkdir(parents=True)
+    old.write_text("", encoding="utf-8")
+    new.write_text("", encoding="utf-8")
+    os.utime(old, (1, 1))
+    os.utime(new, (2, 2))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    found = agent_launcher._codex_store_cli()
+    assert found == new
+
+
+def test_codex_store_cli_absent_returns_none(monkeypatch, tmp_path):
+    import os
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert agent_launcher._codex_store_cli() is None
+
+
+def test_codex_launch_uses_store_cli(monkeypatch, fake_workspace, tmp_path):
+    """When PATH has no codex, the Store-app copy is launched directly."""
+    import os
+
+    fake_workspace.mkdir()
+    store_exe = tmp_path / "OpenAI" / "Codex" / "bin" / "b1" / "codex.exe"
+    store_exe.parent.mkdir(parents=True)
+    store_exe.write_text("", encoding="utf-8")
+    monkeypatch.setattr(agent_launcher, "_find_executable", lambda n: None)
+    monkeypatch.setattr(
+        agent_launcher, "_codex_store_cli", lambda: store_exe
+    )
+    argv = []
+    monkeypatch.setattr(
+        agent_launcher.subprocess, "Popen",
+        lambda a, **k: argv.append(a) or True,
+    )
+    ok, _ = launch_codex(fake_workspace)
+    assert ok
+    assert argv[0][0] == str(store_exe)
 
 
 # ================================================== Q no side effects

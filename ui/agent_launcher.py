@@ -148,7 +148,14 @@ def launch_codex(workspace: Path) -> tuple[bool, str]:
         return False, msg
     exe = _find_executable("codex")
     if not exe:
-        return False, f"Codex CLI not found (install: {CLI_INSTALL_HINTS['codex']})"
+        store_cli = _codex_store_cli()
+        exe = str(store_cli) if store_cli else None
+    if not exe:
+        return False, (
+            "Codex CLI not found (install: "
+            f"{CLI_INSTALL_HINTS['codex']}, or run the Codex Microsoft "
+            "Store app once)"
+        )
     # Default config only: no --yolo / dangerous / full-auto flags.
     return _spawn_cli(_wrapped_cmd_argv(exe, []), workspace)
 
@@ -286,6 +293,37 @@ def _uninstall_registry_zcode_exes() -> list[Path]:
                         base = p.parent if p.suffix else p
                         exe_candidates.append(base / "ZCode.exe")
     return exe_candidates
+
+
+def _codex_store_cli() -> Path | None:
+    """CLI copy materialized by the Codex Microsoft Store app.
+
+    The Store build registers no ``codex`` execution alias and the binary
+    inside ``C:\\Program Files\\WindowsApps`` is ACL-protected, but the app
+    unpacks a user-accessible copy to
+    ``%LOCALAPPDATA%\\OpenAI\\Codex\\bin\\<build>\\codex.exe`` on first run
+    (the same file its own tooling invokes).  The <build> segment is a
+    version hash, so glob and keep the newest.
+    """
+    local = os.environ.get("LOCALAPPDATA")
+    if not local:
+        return None
+    bin_root = Path(local) / "OpenAI" / "Codex" / "bin"
+    best: Path | None = None
+    best_mtime = -1.0
+    try:
+        for candidate in bin_root.glob("*/codex.exe"):
+            if not candidate.is_file():
+                continue
+            try:
+                mtime = candidate.stat().st_mtime
+            except OSError:
+                continue
+            if mtime > best_mtime:
+                best, best_mtime = candidate, mtime
+    except OSError:
+        return None
+    return best
 
 
 def _discover_zcode() -> Path | None:
