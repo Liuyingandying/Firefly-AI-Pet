@@ -43,9 +43,6 @@ COLLAPSE_DELAY_MS = 300
 FADE_MS = 180
 
 _EXIT_SIZE = 36
-# Exit pill anchor: hugging the character's right edge at head height.
-_EXIT_ANCHOR_INSET_X = 14
-_EXIT_ANCHOR_OFFSET_Y = 6
 _ENTRY_SIZE = (88, 32)
 
 _PILL_STYLE = """
@@ -378,13 +375,11 @@ class HoverChromeController(QObject):
             anchor_bottom = pet_geo.bottom()
             anchor_center_x = pet_geo.center().x()
 
-        # "×" hugs the character's right edge at head height (user-marked
-        # spot), slightly inside the body outline.
+        # "×" floats just off the character's top-right shoulder — right of
+        # the hair, level with the head top (user-marked spot).
         exit_point = QPoint(
-            anchor_right
-            - self.exit_button.width()
-            + _scaled(_EXIT_ANCHOR_INSET_X),
-            anchor_top + _scaled(_EXIT_ANCHOR_OFFSET_Y),
+            anchor_right + _scaled(4),
+            anchor_top - self.exit_button.height() - _scaled(2),
         )
         self.exit_button.move(clamp(exit_point, self.exit_button, available))
 
