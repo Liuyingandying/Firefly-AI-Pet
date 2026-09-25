@@ -232,10 +232,19 @@ def test_g_shell_shutdown_removes_tray(monkeypatch, tmp_path) -> None:
     shell.quick_ask = SimpleNamespace(shutdown=lambda: None)
     shell.character_conversation = SimpleNamespace(stop=lambda: None)
     shell.settings = SimpleNamespace(set_ui_scale=lambda x: None)
+    # Producers/state layers touched by shutdown() before the tray teardown.
+    shell._global_hotkeys = None
+    shell.zcode_poller = SimpleNamespace(close=lambda: None)
+    shell.runtime_state_aggregator = SimpleNamespace(close=lambda: None)
+    shell.plugin_loader = SimpleNamespace(
+        stop_all=lambda: None, shutdown=lambda: None
+    )
+    shell.runtime_bus = SimpleNamespace(close=lambda: None)
+    shell._activity_controller = SimpleNamespace(close=lambda: None)
+    shell.ambient_status = None
     shell.plan_executor = SimpleNamespace(running=False, stop=lambda: None)
     shell.review_executor = SimpleNamespace(running=False, stop=lambda: None)
     shell.implement_executor = SimpleNamespace(running=False, stop=lambda: None, reset=lambda: None)
-    shell.plugin_loader = SimpleNamespace(shutdown=lambda: None)
     shell.coordinator = SimpleNamespace(close_overlays=lambda: None)
     shell.pagelens_bridge = SimpleNamespace(stop=lambda: None)
     shell.hotkey_manager = SimpleNamespace(unregister=lambda: None)
