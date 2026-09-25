@@ -42,7 +42,10 @@ POLL_MS = 150
 COLLAPSE_DELAY_MS = 300
 FADE_MS = 180
 
-_EXIT_SIZE = 36
+_EXIT_SIZE = 28
+# Exit pill center, relative to the character outline's top-right corner.
+_EXIT_ANCHOR_RIGHT = 18
+_EXIT_ANCHOR_ABOVE = 18
 _ENTRY_SIZE = (88, 32)
 
 _PILL_STYLE = """
@@ -163,18 +166,19 @@ class ChromePill(QWidget):
 
 class ExitPill(ChromePill):
     def __init__(self):
-        # Solid purple disc with a white ×: unmistakable on any background.
+        # Solid light-purple disc with a white ×: unmistakable on any
+        # background.
         super().__init__(
             "×",
             "退出程序",
             _EXIT_SIZE,
             _EXIT_SIZE,
-            bg="#7C4DFF",
-            border="#7C4DFF",
-            hover_bg="#6936E8",
-            hover_border="#6936E8",
+            bg="#9B6DFF",
+            border="#9B6DFF",
+            hover_bg="#8A5CFF",
+            hover_border="#8A5CFF",
             label_color="#FFFFFF",
-            font_px=20,
+            font_px=15,
         )
 
 
@@ -381,10 +385,14 @@ class HoverChromeController(QObject):
             anchor_center_x = pet_geo.center().x()
 
         # "×" floats just off the character's top-right shoulder — right of
-        # the hair, level with the head top (user-marked spot).
+        # the hair, level above the head top (user-tuned offset/size).
         exit_point = QPoint(
-            anchor_right + _scaled(4),
-            anchor_top - self.exit_button.height() - _scaled(2),
+            anchor_right
+            + _scaled(_EXIT_ANCHOR_RIGHT)
+            - self.exit_button.width() // 2,
+            anchor_top
+            - _scaled(_EXIT_ANCHOR_ABOVE)
+            - self.exit_button.height() // 2,
         )
         self.exit_button.move(clamp(exit_point, self.exit_button, available))
 
