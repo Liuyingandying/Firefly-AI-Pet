@@ -1,45 +1,79 @@
-# Firefly PageLens Bridge 扩展（最小实验件）
+# Firefly PageLens Bridge
 
-把浏览器中的文本选区（含论文 PDF 页面）通过 WebSocket 发送到
-Firefly 桌面桥（`ws://127.0.0.1:17321`）。桌面侧收到 `selection` 消息后
-弹出解释入口并走既有 `PdfQa.explain_selection()` 链路。
+Chrome / Edge 浏览器扩展——将浏览器中的文本选区与打开的 PDF 事件通过
+WebSocket 实时发送到 [Firefly AI Pet](https://github.com/Liuyingandying/Firefly-AI-Pet)
+桌面端，实现"选中文本 → AI 解释"和"打开论文 → 自动感知"的阅读辅助闭环。
 
-## 加载方式（Edge 或 Chrome）
+## 功能
+
+| 功能 | 说明 |
+|---|---|
+| 文本选区捕获 | HTML 页面拖选文本（250 ms 静默去抖），自动发送到 Firefly 桌面端 |
+| PDF 打开感知 | 检测任意标签页打开的 PDF（URL + 标题），桌面端弹出论文上下文面板 |
+| 右键解释 | 选中文字后右键 →「用 Firefly 解释选区」→ 桌面端弹出解释入口 |
+| 页面上下文 | 滚动/选择时自动上报当前标题 + 可见文本切片（节流 5 s，上限 1500 字符） |
+| 自动重连 | WebSocket 断开后指数退避重连（1 s → 5 s），附带 20 s keepalive |
+
+## 安装（Edge 或 Chrome）
 
 1. 打开 `edge://extensions`（Chrome 用 `chrome://extensions`）。
-2. 打开「开发人员模式」。
-3. 「加载解压缩的扩展」→ 选择本目录 `extensions/pagelens_bridge`。
-4. 确保 Firefly 已运行（桥监听 127.0.0.1:17321）。
+2. 开启「开发人员模式」。
+3. 点击「加载解压缩的扩展」→ 选择本目录 `extensions/pagelens_bridge`。
+4. 确保 Firefly AI Pet 已运行（桌面桥监听 `127.0.0.1:17321`）。
 
-## 行为
+## 与 Firefly AI Pet 的关系
 
-- **普通网页 / HTML 论文（arxiv、Google Scholar 等）**：content script 在
-  鼠标拖选结束时读取 `window.getSelection()`，发送
-  `{type:"selection", payload:{text, url, page:-1}}`。
-- **内置 PDF Viewer（Edge/Chrome 原生阅读器）**：content script 无法注入
-  viewer 扩展页（平台限制，见下表）；扩展另注册了「用 Firefly 解释选区」
-  右键菜单（`contextMenus` selection 上下文）作为尽力而为的兜底——若平台
-  允许在 viewer 选区上显示扩展右键菜单，`info.selectionText` 即可送达桌面；
-  否则该路径不可用。
-- 撤销选中后 250ms 静默期再发送，避免拖拽抖动重复上报；单条文本上限
-  2000 字符（与 `PdfQa.explain_selection` 一致）。
+本扩展是 **客户端**（浏览器侧），Firefly 桌面端运行 **服务端**
+（`core/pagelens_bridge.py`，asyncio WebSocket server，仅监听 127.0.0.1:17321）。
 
-## 已知限制（真实浏览器侧，需现场验证）
-
-| 问题 | 状态 |
-|---|---|
-| 内置 PDF Viewer 的 DOM 选区对第三方 content script 不可达 | 已知平台约束；右键菜单兜底待真机验证 |
-| 页码无法从内置 Viewer 读取 | 发送 `page:-1`；桌面侧带页码解释需要扩展可读页号（HTML/PDF.js 站点可扩展获得） |
-| `bridge_hello`/keepalive 心跳 | 已实现，与 `core/pagelens_bridge.py` 协议一致 |
-
-## 协议（与 `core/pagelens_bridge.py` 保持一致）
-
-```json
-// 连接即发
-{ "type": "bridge_hello", "payload": {} }
-// 选区上报（桌面侧日志：收到 selection event: text=... page=... url=...）
-{ "type": "selection",
-  "payload": { "text": "Scaled Dot-Product Attention",
-               "url": "file:///.../attention.pdf",
-               "page": 3 } }
 ```
+浏览器扩展 (content.js + background.js)
+    │  WebSocket (ws://127.0.0.1:17321)
+    ▼
+Firefly 桌面 (core/pagelens_bridge.py)
+    │  Qt Signal
+    ▼
+Firefly AI Pet (PageLens 面板 / PdfQa 解释链路)
+```
+
+两者必须同时运行才能工作。扩展单独加载后如果 Firefly 未运行，会自动重连等待。
+
+## 协议
+
+JSON 消息，类型白名单（与桌面端 `core/pagelens_bridge.py` 保持一致）：
+
+| 消息类型 | 方向 | 说明 |
+|---|---|---|
+| `bridge_hello` | 扩展 → 桌面 | WebSocket 连接建立后即发 |
+| `bridge_ping` | 双向 | keepalive（20 s 间隔） |
+| `selection` | 扩展 → 桌面 | 用户选中文本（text / url / page / source） |
+| `pdf_opened` | 扩展 → 桌面 | 用户打开了 PDF 文件（url / title） |
+| `page_context` | 扩展 → 桌面 | 当前页面标题 + 可见文本切片（heading / text） |
+
+`selection.payload.source` 字段区分来源：
+- `"ambient"`：content script 检测到鼠标拖选（桌面仅更新上下文）
+- `"user_action"`：右键菜单显式请求（桌面弹出解释面板）
+
+## 隐私与安全
+
+- 仅监听 / 连接 `127.0.0.1`（回环地址），数据不出本机
+- 严格 JSON 协议 + 类型白名单，无 eval/exec/shell
+- 不注入内置 PDF Viewer（浏览器安全限制）；右键菜单作为兜底
+- 无 API 密钥、无遥测、无外部请求
+
+## 已知限制
+
+| 限制 | 原因 |
+|---|---|
+| 内置 PDF Viewer 的 DOM 选区不可达 | 浏览器平台安全约束（viewer 是扩展页） |
+| 页码无法从内置 Viewer 读取 | 同上；发送 `page: -1` |
+| HTML 论文（arxiv 等）的选区可用 | content script 正常注入 |
+
+## 开源注意事项
+
+- 本扩展属于 [Firefly AI Pet](https://github.com/Liuyingandying/Firefly-AI-Pet)
+  的 `extensions/` 子目录，随主仓库一起开源（MIT License）
+- 无独立仓库名称——与桌面端 `core/pagelens_bridge.py` 构成客户端-服务端对，
+  独立发布会导致桌面侧无人消费
+- 无敏感配置需删除（无 API key / token / 硬编码路径）
+- 如需独立分发，建议将 `core/pagelens_bridge.py` 一同打包或提供独立桌面桥

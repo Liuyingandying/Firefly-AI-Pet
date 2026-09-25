@@ -31,3 +31,29 @@ Plugin Root 默认位于 Firefly 用户数据目录的 `plugins` 子目录，可
 `tju_info_retrieval` 为薄适配器：Firefly 侧零检索逻辑，每个请求通过一次性隔离子进程
 调用外部工程的 Bridge CLI，以 JSON 协议返回并归一化。其完整桥接协议、状态机与环境
 变量契约见 [`tju_info_retrieval/INTERFACE.md`](tju_info_retrieval/INTERFACE.md)。
+
+### pagelens_bridge
+
+```
+Plugin:       pagelens_bridge
+Type:         Browser Extension Bridge
+Frontend:     extensions/pagelens_bridge/  (Chrome/Edge Manifest V3)
+Backend:      core/pagelens_bridge.py      (Python asyncio WebSocket server)
+Protocol:     WebSocket JSON (类型白名单 16 入 / 5 出)
+Endpoint:     ws://127.0.0.1:17321
+Function:     Browser PDF/HTML context capture (selection + pdf_opened + page_context)
+
+Architecture:
+  Browser Extension (content.js + background.js)
+      |
+      | WebSocket JSON (ws://127.0.0.1:17321)
+      |
+  Python Bridge Service (asyncio, daemon thread)
+      |
+      | Qt Signal
+      |
+  Firefly Core (PageLens 面板 / PdfQa 解释链路)
+```
+
+完整协议与安装说明见 [`docs/pagelens/PROTOCOL.md`](../docs/pagelens/PROTOCOL.md) 与
+[`docs/pagelens/INSTALL.md`](../docs/pagelens/INSTALL.md)。
