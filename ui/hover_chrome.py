@@ -365,6 +365,11 @@ class HoverChromeController(QObject):
         # the exit pill floating far from the body.
         body = self.pet.visible_body_rect()
         if body is not None:
+            # The body rect is in WINDOW-LOCAL coordinates — translate by
+            # the pet's top-left before comparing with global screen
+            # geometry.  Mixing the two landed the pill at the screen's
+            # top-left corner.
+            body = body.translated(pet_geo.topLeft())
             anchor_top = body.top()
             anchor_right = body.right()
             anchor_bottom = body.bottom()
