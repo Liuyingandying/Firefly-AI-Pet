@@ -1,10 +1,10 @@
-"""Pet left-click presentation state machine (PET_ONLY/CONTROLS/CHAT) — offline tests.
+"""Pet left-click interaction model (2026-09 hover spec) — offline tests.
 
-Every independent, valid left click immediately advances the three-state cycle
-PET_ONLY -> CONTROLS -> CHAT -> PET_ONLY. No click-count classifier, no
-double-click-interval timer. Covers immediate transitions, the full cycle,
-drag protection, double/triple click as ordinary repeated transitions,
-right-click/wheel isolation, greeting behavior, and the 0.8-scale pass.
+Default shows the character alone. Hovering reveals the two bars + exit
+pill; leaving the region collapses them after the 300 ms grace delay. A
+single valid left click toggles the "打开 UI" entry (never the console
+directly); drags never toggle. Right-click/wheel isolation and the
+0.8-scale pass are preserved.
 """
 
 from __future__ import annotations
@@ -93,6 +93,8 @@ def _minimal_shell(greeting_on_startup: bool):
 
 def test_startup_pet_only(app: QApplication, shell: VisualShell) -> None:
     shell.coordinator.show_shell_pet_only()
+    shell.coordinator.chrome.fade_ms = 0
+    shell.coordinator.chrome.reset_hidden()
     _settle(app)
     assert shell.pet.isVisible()
     assert not shell.dock.isVisible()
@@ -101,91 +103,102 @@ def test_startup_pet_only(app: QApplication, shell: VisualShell) -> None:
     assert shell.coordinator.presentation_state == PET_ONLY
 
 
-# -- B/C/D. single click advances immediately -----------------------------
+# -- B/C/D. single click toggles the "打开 UI" entry -----------------------
 
 def test_pet_only_click_controls(app: QApplication, shell: VisualShell) -> None:
     shell.coordinator.show_shell_pet_only()
+    shell.coordinator.chrome.fade_ms = 0
+    shell.coordinator.chrome.reset_hidden()
     _settle(app)
     _click_once(shell.pet)
     _settle(app)
-    assert shell.coordinator.presentation_state == CONTROLS
     assert shell.dock.isVisible() and shell.toolbar.isVisible()
+    assert shell.coordinator.chrome.open_ui_entry.isVisible()
     assert not shell.bubble.isVisible()
 
 
 def test_controls_click_chat(app: QApplication, shell: VisualShell) -> None:
     shell.coordinator.show_shell_pet_only()
-    shell.coordinator.set_presentation_state(CONTROLS)
+    shell.coordinator.chrome.fade_ms = 0
+    shell.coordinator.chrome.reset_hidden()
     _settle(app)
     _click_once(shell.pet)
+    _click_once(shell.pet)
     _settle(app)
-    assert shell.coordinator.presentation_state == CHAT
-    assert shell.dock.isVisible() and shell.toolbar.isVisible() and shell.bubble.isVisible()
+    assert shell.dock.isVisible() and shell.toolbar.isVisible()
+    assert not shell.coordinator.chrome.open_ui_entry.isVisible()  # toggled back off
 
 
 def test_chat_click_pet_only(app: QApplication, shell: VisualShell) -> None:
     shell.coordinator.show_shell_pet_only()
-    shell.coordinator.set_presentation_state(CHAT)
+    shell.coordinator.chrome.fade_ms = 0
+    shell.coordinator.chrome.reset_hidden()
     _settle(app)
-    _click_once(shell.pet)
+    for _ in range(3):
+        _click_once(shell.pet)
     _settle(app)
-    assert shell.coordinator.presentation_state == PET_ONLY
-    assert not shell.dock.isVisible()
-    assert not shell.toolbar.isVisible()
-    assert not shell.bubble.isVisible()
+    assert shell.coordinator.chrome.open_ui_entry.isVisible()  # odd clicks keep it up
 
 
 # -- E. full six-click cycle ---------------------------------------------
 
 def test_six_click_cycle(app: QApplication, shell: VisualShell) -> None:
     shell.coordinator.show_shell_pet_only()
+    shell.coordinator.chrome.fade_ms = 0
+    shell.coordinator.chrome.reset_hidden()
     _settle(app)
-    states = [shell.coordinator.presentation_state]
-    for _ in range(6):
+    for i in range(6):
         _click_once(shell.pet)
         _settle(app)
-        states.append(shell.coordinator.presentation_state)
-    assert states == [PET_ONLY, CONTROLS, CHAT, PET_ONLY, CONTROLS, CHAT, PET_ONLY]
+        assert shell.coordinator.chrome.open_ui_entry.isVisible() == (i % 2 == 0)
+    assert shell.dock.isVisible() and shell.toolbar.isVisible()
 
 
 # -- F. no doubleClickInterval delay -------------------------------------
 
 def test_no_interval_delay(app: QApplication, shell: VisualShell) -> None:
     shell.coordinator.show_shell_pet_only()
+    shell.coordinator.chrome.fade_ms = 0
+    shell.coordinator.chrome.reset_hidden()
     _settle(app)
     _click_once(shell.pet)
-    # No qWait for the system double-click interval: the transition is immediate.
-    assert shell.coordinator.presentation_state == CONTROLS
+    # No qWait for the system double-click interval: the toggle is immediate.
+    assert shell.coordinator.chrome.open_ui_entry.isVisible()
     assert shell.dock.isVisible() and shell.toolbar.isVisible()
 
 
-# -- G/H. double/triple click = ordinary repeated transitions ------------
+# -- G/H. double/triple click = ordinary repeated toggles ----------------
 
 def test_double_click_two_transitions(app: QApplication, shell: VisualShell) -> None:
     shell.coordinator.show_shell_pet_only()
+    shell.coordinator.chrome.fade_ms = 0
+    shell.coordinator.chrome.reset_hidden()
     _settle(app)
     clicks: list[bool] = []
     shell.pet.left_clicked.connect(lambda: clicks.append(True))
     _double_click(shell.pet, shell.pet.rect().center())
     _settle(app)
     assert clicks == [True, True]
-    assert shell.coordinator.presentation_state == CHAT
+    assert not shell.coordinator.chrome.open_ui_entry.isVisible()  # even clicks leave it off
 
 
 def test_triple_click_three_transitions(app: QApplication, shell: VisualShell) -> None:
     shell.coordinator.show_shell_pet_only()
+    shell.coordinator.chrome.fade_ms = 0
+    shell.coordinator.chrome.reset_hidden()
     _settle(app)
     for _ in range(3):
         _click_once(shell.pet)
-        _settle(app)
-    assert shell.coordinator.presentation_state == PET_ONLY
-    assert not shell.dock.isVisible() and not shell.toolbar.isVisible() and not shell.bubble.isVisible()
+    _settle(app)
+    assert shell.coordinator.chrome.open_ui_entry.isVisible()
 
 
 # -- I/J. drag vs click ---------------------------------------------------
 
 def test_drag_zero_transitions(app: QApplication, shell: VisualShell) -> None:
     shell.coordinator.show_shell_pet_only()
+    shell.coordinator.chrome.fade_ms = 0
+    shell.coordinator.chrome.reset_hidden()
     _settle(app)
     clicks: list[bool] = []
     shell.pet.left_clicked.connect(lambda: clicks.append(True))
@@ -196,11 +209,13 @@ def test_drag_zero_transitions(app: QApplication, shell: VisualShell) -> None:
     QTest.mouseRelease(shell.pet, Qt.LeftButton, pos=finish)
     _settle(app)
     assert clicks == []
-    assert shell.coordinator.presentation_state == PET_ONLY
+    assert not shell.coordinator.chrome.open_ui_entry.isVisible()  # drag never toggles it
 
 
 def test_small_movement_one_transition(app: QApplication, shell: VisualShell) -> None:
     shell.coordinator.show_shell_pet_only()
+    shell.coordinator.chrome.fade_ms = 0
+    shell.coordinator.chrome.reset_hidden()
     _settle(app)
     clicks: list[bool] = []
     shell.pet.left_clicked.connect(lambda: clicks.append(True))
@@ -211,7 +226,7 @@ def test_small_movement_one_transition(app: QApplication, shell: VisualShell) ->
     QTest.mouseRelease(shell.pet, Qt.LeftButton, pos=finish)
     _settle(app)
     assert clicks == [True]
-    assert shell.coordinator.presentation_state == CONTROLS
+    assert shell.coordinator.chrome.open_ui_entry.isVisible()
 
 
 # -- K/L/M. right-click + wheel isolation ---------------------------------
@@ -314,23 +329,19 @@ def test_scale_08_cycle(app: QApplication, shell: VisualShell) -> None:
     _settle(app)
     try:
         shell.coordinator.show_shell_pet_only()
+        shell.coordinator.chrome.fade_ms = 0
+        shell.coordinator.chrome.reset_hidden()
         _settle(app)
         assert shell.pet.isVisible() and not shell.dock.isVisible()
 
         _click_once(shell.pet)
         _settle(app)
-        assert shell.coordinator.presentation_state == CONTROLS
-        assert shell.dock.isVisible() and shell.toolbar.isVisible() and not shell.bubble.isVisible()
+        assert shell.dock.isVisible() and shell.toolbar.isVisible()
+        assert shell.coordinator.chrome.open_ui_entry.isVisible() and not shell.bubble.isVisible()
 
         _click_once(shell.pet)
         _settle(app)
-        assert shell.coordinator.presentation_state == CHAT
-        assert shell.bubble.isVisible()
-
-        _click_once(shell.pet)
-        _settle(app)
-        assert shell.coordinator.presentation_state == PET_ONLY
-        assert not shell.dock.isVisible() and not shell.toolbar.isVisible() and not shell.bubble.isVisible()
+        assert not shell.coordinator.chrome.open_ui_entry.isVisible()
     finally:
         theme.set_ui_scale(1.0)
         shell.coordinator.set_presentation_state(PET_ONLY)

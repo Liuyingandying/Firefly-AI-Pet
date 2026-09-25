@@ -633,6 +633,8 @@ class VisualShell(QObject):
         )
         # UI V2 CompanionConsole — toolbar "console" action opens the singleton.
         self.coordinator.console_requested.connect(self._ensure_companion_console)
+        # Hover chrome "×" pill — same real-exit path as the tray menu.
+        self.coordinator.exit_requested.connect(self.exit_application)
 
     def _ensure_companion_console(self) -> None:
         """Open (or focus) the AI Pet console bound to the character runner."""

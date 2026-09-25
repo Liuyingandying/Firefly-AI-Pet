@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 from core.notification_manager import NotificationEvent
 from . import theme
+from .hover_chrome import HoverChromeController
 from .permission_card import PERMISSION_AGENTS
 
 
@@ -32,6 +33,8 @@ class OverlayCoordinator(QObject):
     memory_panel_requested = Signal()
     scratchpad_requested = Signal()
     console_requested = Signal()
+    # Hover chrome "×" pill → the shell's real exit path.
+    exit_requested = Signal()
     # PDF OCR Overlay Phase 3-B: toolbar "PDF 划词" → app starts the
     # fresh-capture → OCR → arm cycle; the coordinator owns no snapshot.
     pdf_select_requested = Signal()
@@ -90,11 +93,15 @@ class OverlayCoordinator(QObject):
         self._reader_was_visible = True  # track bubble visibility before reader open
 
         self.pet.position_changed.connect(self.reposition)
-        self.pet.left_clicked.connect(self.advance_presentation_state)
+        # Hover spec: a single left-click toggles the "打开 UI" entry — it
+        # no longer cycles PET_ONLY -> CONTROLS -> CHAT. Hover shows the
+        # bars; the chrome controller owns that transition.
+        self.pet.left_clicked.connect(self.on_pet_clicked)
         self.pet.reset_requested.connect(self.reset_position)
         self.pet.drag_started.connect(self._on_drag_started)
         self.toolbar.action_requested.connect(self._toolbar_action)
         theme.on_scale_changed(self.apply_ui_scale)
+        self.chrome = HoverChromeController(pet, toolbar, dock, self)
 
         if self.workspace_popover is not None:
             self.workspace_popover.sessions_requested.connect(self._show_sessions)
@@ -221,6 +228,7 @@ class OverlayCoordinator(QObject):
         self.bubble.move(self._clamp_point(bubble_point, self.bubble, available))
 
         self._position_ask_pill()
+        self.chrome.reposition_chrome()
 
         if self.permission_card is not None and self.permission_card.isVisible():
             self._position_permission_card()
@@ -247,6 +255,7 @@ class OverlayCoordinator(QObject):
         self.dock.apply_scale()
         self.toolbar.apply_scale()
         self.bubble.apply_scale()
+        self.chrome.apply_scale()
         if self.pagelens_panel is not None:
             self.pagelens_panel.apply_scale()
         new_geo = self.pet.frameGeometry()
@@ -302,6 +311,32 @@ class OverlayCoordinator(QObject):
         else:
             self.set_presentation_state(PresentationState.PET_ONLY)
 
+    def on_pet_clicked(self) -> None:
+        """Hover spec: a pet click toggles the "打开 UI" entry, never the
+        legacy state cycle and never the console itself."""
+        self.chrome.toggle_entry()
+
+    def anchored_panel_open(self) -> bool:
+        """True while any panel anchored to the cluster is up — the hover
+        collapse is suppressed so dropdowns never lose their anchor."""
+        if self._visible_popover() is not None:
+            return True
+        if self.permission_card is not None and self.permission_card.isVisible():
+            return True
+        if self.short_ask is not None and self.short_ask.isVisible():
+            return True
+        if self.recommendation_card is not None and self.recommendation_card.isVisible():
+            return True
+        if self.workflow_card is not None and self.workflow_card.isVisible():
+            return True
+        if self.pagelens_panel is not None and self.pagelens_panel.visible:
+            return True
+        if self.explain_box is not None and self.explain_box.isVisible():
+            return True
+        if self.reader_panel is not None and self.reader_panel.isVisible():
+            return True
+        return self.bubble.isVisible()
+
     def _apply_pet_only(self) -> None:
         self.toolbar.hide()
         self.dock.hide()
@@ -341,6 +376,7 @@ class OverlayCoordinator(QObject):
         app = QApplication.instance()
         if app is not None:
             app.removeEventFilter(self)
+        self.chrome.close()
         self.bubble.close()
         self.toolbar.close()
         self.dock.close()
@@ -1072,6 +1108,9 @@ class OverlayCoordinator(QObject):
         return None
 
     def eventFilter(self, watched, event) -> bool:
+        # Hover chrome first: Enter/Leave on the character or any chrome
+        # widget drives the show/collapse timing.
+        self.chrome.on_app_event(watched, event)
         visible = self._visible_popover()
         if visible is not None:
             if event.type() == QEvent.MouseButtonPress:
