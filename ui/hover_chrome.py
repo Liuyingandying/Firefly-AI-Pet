@@ -50,22 +50,20 @@ _ENTRY_SIZE = (88, 32)
 
 _PILL_STYLE = """
     QWidget#chromePill {{
-        background-color: #FFFFFF;
-        border: 1px solid #DCE4EC;
+        background-color: {bg};
+        border: 1px solid {border};
         border-radius: {radius}px;
     }}
     QWidget#chromePill:hover {{
-        background-color: #EAF6F6;
-        border: 1px solid #7C4DFF;
-    }}
-    QWidget#chromePill:hover QLabel {{
-        color: #7C4DFF;
+        background-color: {hover_bg};
+        border: 1px solid {hover_border};
     }}
     QLabel {{
         background: transparent;
         border: none;
-        color: #33414B;
-        font-weight: 600;
+        color: {label_color};
+        font-size: {font_px}px;
+        font-weight: 700;
     }}
 """
 
@@ -85,8 +83,14 @@ class ChromePill(QWidget):
         tooltip: str,
         width: int,
         height: int,
-        accent: str,
+        *,
+        accent: str = "#35B8B8",
         label_color: str = "#33414B",
+        bg: str = "#FFFFFF",
+        border: str = "#DCE4EC",
+        hover_bg: str = "#EAF6F6",
+        hover_border: str = "#35B8B8",
+        font_px: int = 13,
     ):
         super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setObjectName("chromePill")
@@ -97,8 +101,14 @@ class ChromePill(QWidget):
         self.setToolTip(tooltip)
         radius = _scaled(12) if width > 30 else _scaled(height) // 2
         self.setStyleSheet(
-            _PILL_STYLE.format(radius=radius, accent=accent).replace(
-                "color: #33414B", f"color: {label_color}"
+            _PILL_STYLE.format(
+                radius=radius,
+                bg=bg,
+                border=border,
+                hover_bg=hover_bg,
+                hover_border=hover_border,
+                label_color=label_color,
+                font_px=_scaled(font_px),
             )
         )
 
@@ -116,13 +126,18 @@ class ChromePill(QWidget):
 
 class ExitPill(ChromePill):
     def __init__(self):
+        # Solid purple disc with a white ×: unmistakable on any background.
         super().__init__(
             "×",
             "退出程序",
             _EXIT_SIZE,
             _EXIT_SIZE,
-            accent="#7C4DFF",
-            label_color="#7C4DFF",
+            bg="#7C4DFF",
+            border="#7C4DFF",
+            hover_bg="#6936E8",
+            hover_border="#6936E8",
+            label_color="#FFFFFF",
+            font_px=18,
         )
 
 
