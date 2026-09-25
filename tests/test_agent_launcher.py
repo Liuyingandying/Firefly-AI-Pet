@@ -109,6 +109,8 @@ def test_claude_flags_are_real(monkeypatch, fake_workspace):
 def test_codex_default_config_no_yolo(monkeypatch, fake_workspace):
     fake_workspace.mkdir()
     monkeypatch.setattr(agent_launcher, "_find_executable", lambda n: "codex.cmd")
+    # Keep the CLI path under test even on machines with the Store app.
+    monkeypatch.setattr(agent_launcher, "_codex_app_aumid", lambda: None)
     argv = []
     monkeypatch.setattr(agent_launcher.subprocess, "Popen",
                         lambda a, **k: argv.append((a, k)) or True)
@@ -280,8 +282,9 @@ def test_workspace_missing_graceful(monkeypatch, tmp_path):
 def test_cli_missing_graceful(monkeypatch, fake_workspace):
     fake_workspace.mkdir()
     monkeypatch.setattr(agent_launcher, "_find_executable", lambda n: None)
-    # A machine may hold the Codex Store-app copy; this test requires the
-    # not-found path, so the store lookup is stubbed away too.
+    # A machine may hold the Codex desktop app or its Store-app CLI copy;
+    # this test requires the not-found path, so both lookups are stubbed.
+    monkeypatch.setattr(agent_launcher, "_codex_app_aumid", lambda: None)
     monkeypatch.setattr(agent_launcher, "_codex_store_cli", lambda: None)
     for launch in (launch_claude, launch_codex, launch_qwen_yolo):
         ok, msg = launch(fake_workspace)
@@ -345,14 +348,33 @@ def test_codex_store_cli_absent_returns_none(monkeypatch, tmp_path):
     assert agent_launcher._codex_store_cli() is None
 
 
-def test_codex_launch_uses_store_cli(monkeypatch, fake_workspace, tmp_path):
-    """When PATH has no codex, the Store-app copy is launched directly."""
+def test_codex_prefers_desktop_app(monkeypatch):
+    """With the Store app installed, the click opens the GUI — no console,
+    and the workspace is not required (the app manages its own projects)."""
+    opened = []
+    monkeypatch.setattr(
+        agent_launcher, "_codex_app_aumid",
+        lambda: "OpenAI.Codex_2p2nqsd0c76g0!App",
+    )
+    monkeypatch.setattr(
+        agent_launcher.os, "startfile",
+        lambda target: opened.append(target),
+    )
+    ok, _ = launch_codex(Path("does not need to exist"))
+    assert ok
+    assert opened == [r"shell:AppsFolder\OpenAI.Codex_2p2nqsd0c76g0!App"]
+
+
+def test_codex_cli_fallback_uses_store_cli(monkeypatch, fake_workspace, tmp_path):
+    """Without the desktop app, PATH-less machines fall back to the
+    Store-app CLI copy, launched in the workspace console."""
     import os
 
     fake_workspace.mkdir()
     store_exe = tmp_path / "OpenAI" / "Codex" / "bin" / "b1" / "codex.exe"
     store_exe.parent.mkdir(parents=True)
     store_exe.write_text("", encoding="utf-8")
+    monkeypatch.setattr(agent_launcher, "_codex_app_aumid", lambda: None)
     monkeypatch.setattr(agent_launcher, "_find_executable", lambda n: None)
     monkeypatch.setattr(
         agent_launcher, "_codex_store_cli", lambda: store_exe
@@ -376,6 +398,8 @@ def test_q_launcher_has_no_screen_vision_or_provider_side_effects(
     """Q: launching a CLI must never touch ScreenVision / providers / memory."""
     fake_workspace.mkdir()
     monkeypatch.setattr(agent_launcher, "_find_executable", lambda n: "codex.cmd")
+    # Keep the CLI path under test even on machines with the Store app.
+    monkeypatch.setattr(agent_launcher, "_codex_app_aumid", lambda: None)
     monkeypatch.setattr(agent_launcher.subprocess, "Popen",
                         lambda a, **k: True)
     for launch in (launch_claude, launch_codex, launch_qwen_yolo):

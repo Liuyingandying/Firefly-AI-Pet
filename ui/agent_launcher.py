@@ -49,6 +49,9 @@ CLI_INSTALL_HINTS = {
     "qwen": "npm install -g @qwen-code/qwen-code@latest",
 }
 
+# Codex Microsoft Store desktop app: package-name prefix of its Appx AUMID.
+_CODEX_PACKAGE_PREFIX = "OpenAI.Codex"
+
 
 def _extra_candidate_dirs() -> list[Path]:
     """Well-known per-user CLI install dirs beyond the process PATH.
@@ -91,6 +94,42 @@ def _find_executable(name: str) -> str | None:
         if found:
             return found
     return None
+
+
+_APPX_AUMID_UNSET = object()
+_codex_app_aumid_cache: object = _APPX_AUMID_UNSET
+
+
+def _codex_app_aumid() -> str | None:
+    """AUMID of the Codex Microsoft Store desktop app, cached; None if absent.
+
+    ``OpenAI.Codex_<publisher>!<app-id>`` is the ``shell:AppsFolder`` launch
+    target for the desktop GUI.  Queried once per process through the Appx
+    catalog — nothing machine-specific is hardcoded.
+    """
+    global _codex_app_aumid_cache
+    if _codex_app_aumid_cache is not _APPX_AUMID_UNSET:
+        return _codex_app_aumid_cache  # type: ignore[return-value]
+    aumid: str | None = None
+    try:
+        out = subprocess.run(
+            [
+                "powershell", "-NoProfile", "-Command",
+                "(Get-StartApps | Where-Object AppID -like "
+                f"'{_CODEX_PACKAGE_PREFIX}*') | "
+                "Select-Object -First 1 -ExpandProperty AppID",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if out.returncode == 0:
+            aumid = out.stdout.strip() or None
+    except (OSError, subprocess.TimeoutExpired):
+        aumid = None
+    _codex_app_aumid_cache = aumid
+    return aumid
 
 
 def _spawn_cli(argv: list[str], workspace: Path) -> tuple[bool, str]:
@@ -143,6 +182,20 @@ def launch_claude(workspace: Path) -> tuple[bool, str]:
 
 
 def launch_codex(workspace: Path) -> tuple[bool, str]:
+    """Open Codex: the desktop app when installed, else the CLI console.
+
+    The Codex Microsoft Store desktop app manages its own projects, so the
+    workspace does not apply to it (same semantics as Z Code).  When the
+    app is absent, the CLI fallback still runs inside the selected
+    workspace console.
+    """
+    aumid = _codex_app_aumid()
+    if aumid:
+        try:
+            os.startfile(f"shell:AppsFolder\\{aumid}")
+            return True, "ok"
+        except OSError as exc:
+            logger.warning("codex desktop app launch failed: %s", exc)
     ok, msg = _ensure_workspace(workspace)
     if not ok:
         return False, msg
@@ -152,9 +205,8 @@ def launch_codex(workspace: Path) -> tuple[bool, str]:
         exe = str(store_cli) if store_cli else None
     if not exe:
         return False, (
-            "Codex CLI not found (install: "
-            f"{CLI_INSTALL_HINTS['codex']}, or run the Codex Microsoft "
-            "Store app once)"
+            "Codex not found (install the Codex Microsoft Store app, or "
+            f"{CLI_INSTALL_HINTS['codex']})"
         )
     # Default config only: no --yolo / dangerous / full-auto flags.
     return _spawn_cli(_wrapped_cmd_argv(exe, []), workspace)
