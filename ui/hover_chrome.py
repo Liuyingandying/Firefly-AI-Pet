@@ -44,8 +44,8 @@ FADE_MS = 180
 
 _EXIT_SIZE = 28
 # Exit pill center, relative to the character outline's top-right corner.
-_EXIT_ANCHOR_RIGHT = 18
-_EXIT_ANCHOR_ABOVE = 18
+_EXIT_ANCHOR_RIGHT = 24
+_EXIT_ANCHOR_ABOVE = 0
 _ENTRY_SIZE = (88, 32)
 
 _PILL_STYLE = """
@@ -96,6 +96,7 @@ class ChromePill(QWidget):
         hover_bg: str = "#EAF6F6",
         hover_border: str = "#35B8B8",
         font_px: int = 13,
+        paint_background: bool = True,
     ):
         super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -111,6 +112,7 @@ class ChromePill(QWidget):
         self._accent = accent
         self._font_px = _scaled(font_px)
         self._radius = min(_scaled(height) // 2, _scaled(14))
+        self._paint_background = paint_background is True
         self._hovered = False
 
         self._label = QLabel(text, self)
@@ -123,6 +125,9 @@ class ChromePill(QWidget):
         self._label.setStyleSheet(f"color: {label_color}; background: transparent;")
 
     def paintEvent(self, event) -> None:
+        if not self._paint_background:
+            # Transparent variant: the bare glyph carries the whole look.
+            return
         from PySide6.QtGui import QColor, QPainter, QPen
 
         painter = QPainter(self)
@@ -166,19 +171,20 @@ class ChromePill(QWidget):
 
 class ExitPill(ChromePill):
     def __init__(self):
-        # Solid light-purple disc with a white ×: unmistakable on any
-        # background.
+        # Bare pink-purple × on a fully transparent background (user spec).
         super().__init__(
             "×",
             "退出程序",
             _EXIT_SIZE,
             _EXIT_SIZE,
-            bg="#9B6DFF",
-            border="#9B6DFF",
-            hover_bg="#8A5CFF",
-            hover_border="#8A5CFF",
-            label_color="#FFFFFF",
-            font_px=15,
+            bg="transparent",
+            border="transparent",
+            hover_bg="transparent",
+            hover_border="transparent",
+            label_color="#C77DFF",
+            accent="#E3A8FF",
+            font_px=17,
+            paint_background=False,
         )
 
 
