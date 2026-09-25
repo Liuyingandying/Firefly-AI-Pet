@@ -234,6 +234,9 @@ class HoverChromeController(QObject):
         self._shown = False
         self._armed = False
         self._anims: dict[QWidget, QPropertyAnimation] = {}
+        # 淡出进行中的控件：对光标轮询不可见（否则光标停在原位会把
+        # 刚点 × 隐藏的信息栏又拉起来）。
+        self._fading_out: set[QWidget] = set()
 
         self._collapse_timer = QTimer(self)
         self._collapse_timer.setSingleShot(True)
@@ -256,6 +259,8 @@ class HoverChromeController(QObject):
         cursor = self._cursor_pos()
         inside = False
         for widget in self._region:
+            if widget in self._fading_out:
+                continue  # 正在淡出 → 对悬停判定不可见
             if not widget.isVisible() or not widget.frameGeometry().contains(cursor):
                 continue
             if widget is self._bubble and not self._shown:
@@ -336,6 +341,7 @@ class HoverChromeController(QObject):
 
     def _fade_in(self, widget: QWidget) -> None:
         self._stop_anim(widget)
+        self._fading_out.discard(widget)
         widget.setWindowOpacity(0.0)
         widget.show()
         widget.raise_()
@@ -349,10 +355,13 @@ class HoverChromeController(QObject):
     def _fade_out(self, widget: QWidget) -> None:
         self._stop_anim(widget)
         if not widget.isVisible():
+            self._fading_out.discard(widget)
             return
+        self._fading_out.add(widget)
         if self.fade_ms <= 0:
             widget.hide()
             widget.setWindowOpacity(1.0)
+            self._fading_out.discard(widget)
             return
         anim = QPropertyAnimation(widget, b"windowOpacity", widget)
         anim.setDuration(self.fade_ms)
@@ -365,6 +374,7 @@ class HoverChromeController(QObject):
     def _finish_fade_out(self) -> None:
         widget = self.sender().targetObject()
         if widget is not None:
+            self._fading_out.discard(widget)
             widget.hide()
             widget.setWindowOpacity(1.0)
 

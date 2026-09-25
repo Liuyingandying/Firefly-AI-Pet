@@ -207,6 +207,28 @@ def test_collapse_resets_entry(cluster, qapp):
     assert not cluster.chrome.open_ui_entry.isVisible()  # needs a fresh click
 
 
+def test_hide_ignores_cursor_over_fading_widgets(cluster, qapp):
+    """Regression: clicking × with the cursor still parked on the ×/bars —
+    during the 180ms fade-out the widgets remain visible, and the poll
+    must not treat them as hover targets (otherwise the bars pop back in
+    and never fade out while the cursor stays put)."""
+    cluster.chrome.fade_ms = 180  # real fade window
+    _hover_at(cluster, _pet_center(cluster), qapp)
+    assert _chrome_visible(cluster)
+    QTest.mouseClick(
+        cluster.chrome.exit_button,
+        Qt.LeftButton,
+        pos=cluster.chrome.exit_button.rect().center(),
+    )
+    qapp.processEvents()
+    # Cursor stays parked exactly on the × across the fade.
+    cluster.chrome._cursor_pos = lambda: cluster.chrome.exit_button.frameGeometry().center()
+    QTest.qWait(700)  # fade(180) + grace(300) + margin
+    assert cluster.chrome._shown is False
+    assert not cluster.dock.isVisible()
+    cluster.chrome.fade_ms = 0  # restore for later tests
+
+
 def test_hide_x_hint_bubble_does_not_revive_chrome(cluster, qapp):
     """Regression: after × hides everything, the recovery hint bubble is
     visible and the cursor sits near it — the poll must NOT count the
