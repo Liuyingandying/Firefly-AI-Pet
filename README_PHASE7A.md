@@ -44,7 +44,7 @@ User prompts are never concatenated into PowerShell source text.
 Use your existing virtual environment:
 
 ```powershell
-cd E:\Firefly_AI_Pet
+cd <仓库目录>
 .\stop_pet.ps1
 .\start_pet.ps1
 ```

@@ -15,19 +15,19 @@ SUCCEEDED.
 ## Environment
 
 - Host: Windows 11 Home China, 10.0.26200, PowerShell 5.1
-- Python: 3.13.9 (`E:\Firefly_AI_Pet\.venv\Scripts\python.exe`), PySide6 6.11.1
-- claude CLI: `E:\npm-global\claude.ps1` → real native
+- Python: 3.13.9 (`<仓库目录>\.venv\Scripts\python.exe`), PySide6 6.11.1
+- claude CLI: `<npm-global目录>\claude.ps1` → real native
   `node_modules\@anthropic-ai\claude-code\bin\claude.exe` (routed through the local
   proxy configured in `~/.claude/settings.json`; no credentials recorded here)
-- codex CLI: `E:\npm-global\codex.ps1` → resolved native target
-  `node.exe` (`E:\Node\node.exe`) + `node_modules\@openai\codex\bin\codex.js`
+- codex CLI: `<npm-global目录>\codex.ps1` → resolved native target
+  `node.exe` (`<Node目录>\node.exe`) + `node_modules\@openai\codex\bin\codex.js`
 - Test driver: `tools/smoke_phase9d6_end_to_end.py` (new harness, the only new tool;
   no production source modified)
 
 ## Disposable workspace
 
-- `C:\Users\FAJ\AppData\Local\Temp\firefly_phase9d6_gl32qbao` — kept for inspection
-- Fully isolated from `E:\Firefly_AI_Pet`; never used as the Codex workspace root
+- `C:\Users\<用户名>\AppData\Local\Temp\firefly_phase9d6_gl32qbao` — kept for inspection
+- Fully isolated from `<仓库目录>`; never used as the Codex workspace root
 
 ## Initial fixture
 

@@ -1,7 +1,7 @@
 # Firefly AI Pet — Phase D Release Review
 
 > Review date: 2026-08-20  
-> Scope: current `E:\Firefly_AI_Pet` workspace  
+> Scope: current `<仓库目录>` workspace  
 > Review mode: source inspection, offline regression, and Phase D online acceptance evidence  
 > Code changes during review: none
 

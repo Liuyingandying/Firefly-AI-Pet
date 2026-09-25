@@ -1,7 +1,7 @@
 {
   "tool": "tools/benchmark_phase8c_backend.py",
   "claude_version": "2.1.233 (Claude Code)",
-  "claude_cmd": "E:\\npm-global\\claude.CMD",
+  "claude_cmd": "<npm-global目录>\\claude.CMD",
   "prompt": "<prompt redacted>",
   "cold_runs": 2,
   "resume_runs": 2,

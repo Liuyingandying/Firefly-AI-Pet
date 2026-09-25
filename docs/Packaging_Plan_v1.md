@@ -44,7 +44,7 @@ start_pet.ps1
 
 ### 3.1 构建环境实测
 
-- venv：**Python 3.13.9**（`E:\conda` 基座创建）——PyInstaller 需 ≥6.10（3.13 支持），建议最新 6.x + 最新 `pyinstaller-hooks-contrib`。
+- venv：**Python 3.13.9**（`<Python环境目录>` 基座创建）——PyInstaller 需 ≥6.10（3.13 支持），建议最新 6.x + 最新 `pyinstaller-hooks-contrib`。
 - 实装关键版本：PySide6 6.11.1（essentials+addons+shiboken6）、mem0ai 2.0.18、fastembed 0.8.0、qdrant_client 1.19.0、onnxruntime 1.29.0、rapidocr 3.9.2、PyMuPDF 1.28.2、numpy 2.5.2、python-docx 1.2.0、python-pptx 1.0.2、openpyxl 3.1.5、keyboard 0.13.5、requests 2.34.2、pillow 12.3.0、pyserial 3.5、faster_whisper 1.2.1、scenedetect 0.7.1（site-packages 共 198 项）。
 
 ### 3.2 依赖分类（对打包的含义）

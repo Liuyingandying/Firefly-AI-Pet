@@ -2,7 +2,7 @@
 
 > 日期：2026-09-18
 > 目的：以**普通用户视角**验证发布包 `Firefly_AI_Pet_v1.0-rc2_win64.zip` 的"解压 → 首启 → 配置密钥 → 重启恢复"完整旅程。
-> 环境：干净用户目录 `D:\Test\Firefly_RC2_User_Test\`（zip 直接解压，未触碰源码目录/venv）；数据根经 `FIREFLY_USER_DATA_DIR` 指向 `D:\Test\Firefly_RC2_User_Test\userdata\`（既模拟用户数据目录、又保证与真实数据零混淆）。
+> 环境：干净用户目录 `<用户安装测试目录>\`（zip 直接解压，未触碰源码目录/venv）；数据根经 `FIREFLY_USER_DATA_DIR` 指向 `<用户安装测试目录>\userdata\`（既模拟用户数据目录、又保证与真实数据零混淆）。
 > 合成凭据：`sk-rc2-user-test-dummy`（DeepSeek 卡）；无真实 Key；无真实 API 调用；未修改任何代码；未 git commit/push。
 
 ---
@@ -27,7 +27,7 @@
 | 5 | AI 模型管理 | **PASS** | 弹窗底部"AI 模型管理"按钮点击 → **"AI 模型设置"窗口打开**（UIA ClassName=`ProviderManagerWindow` + 标题双确认）——Phase 3B 冻结懒加载导入验证通过 |
 | 6 | dummy key 保存 | **PASS** | 卡片"添加密钥"→ QInputDialog → UIA ValuePattern 注入 `sk-rc2-user-test-dummy` → OK → **store 落盘**：`userdata/credentials/credentials.json` 出现 `DEEPSEEK_API_KEY`（16:12:21）；卡片即时翻转"● 已配置"（截图 frame-3ed4cd13） |
 | 7 | 重启恢复 | **PASS** | stop → 重启 → 重开窗口：UIA 断言 `PASS: manager window reopened after restart` + `persistence rendered, id=…providerCard.replaceKey-deepseek`——持久化凭据在重启后正确渲染为已配置 |
-| 8 | userdata 隔离 | **PASS** | 全部测试数据落 `D:\Test\Firefly_RC2_User_Test\userdata\`（memory/credentials/conversation/learning/logs/runtime…）；真实目录 `%LOCALAPPDATA%\FireflyAI` 在测试窗口期内**零写入**（16:17 后的写入全部来自恢复后的用户源码实例自身） |
+| 8 | userdata 隔离 | **PASS** | 全部测试数据落 `<用户安装测试目录>\userdata\`（memory/credentials/conversation/learning/logs/runtime…）；真实目录 `%LOCALAPPDATA%\FireflyAI` 在测试窗口期内**零写入**（16:17 后的写入全部来自恢复后的用户源码实例自身） |
 
 补充验证（同轮完成）：无 Key 状态下 AI STATUS 全部 `○ (unavailable)`、未配置卡均显示"添加密钥"、已配置卡显示掩码 `************`（明文零渲染——截图 frame-3ed4cd13 逐卡检视）。
 

@@ -133,7 +133,7 @@ Learning 当前已经使用 `%LOCALAPPDATA%\FireflyAI\learning`；本次仅让�
 ## 6. 插件与模型
 
 - 正式默认插件根：`%LOCALAPPDATA%\FireflyAI\plugins`。
-- 为保持现有开发环境兼容，`E:\Firefly_AI_Private_Plugins` 暂时保留为可选的第二发现根；缺失时不影响启动，不是发行硬依赖。
+- 为保持现有开发环境兼容，`<插件根目录>` 暂时保留为可选的第二发现根；缺失时不影响启动，不是发行硬依赖。
 - `FIREFLY_PLUGIN_PATH` 追加机制保持不变。
 - Mem0 数据与向量索引进入 `memory/`；嵌入模型缓存进入 `models/`。
 

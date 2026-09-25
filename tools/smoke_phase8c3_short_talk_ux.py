@@ -14,7 +14,7 @@ total timings come from telemetry, and runtime/sources/claude.json is NOT
 rewritten by either internal ask. Codex online calls: 0.
 
 Usage:
-  python tools/smoke_phase8c3_short_talk_ux.py [--workspace E:\\Firefly_AI_Pet]
+  python tools/smoke_phase8c3_short_talk_ux.py [--workspace <仓库目录>]
 """
 
 from __future__ import annotations

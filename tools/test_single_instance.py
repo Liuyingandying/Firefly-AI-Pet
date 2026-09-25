@@ -4,9 +4,9 @@ Background
 ----------
 `start_pet.ps1` launches `.venv\\Scripts\\pythonw.exe app.py`. On Windows that
 executable is a *venv launcher stub*: it re-execs the base interpreter
-(`E:\\conda\\pythonw.exe`) and stays alive as its parent for the app's whole
+(`<Python环境目录>\\pythonw.exe`) and stays alive as its parent for the app's whole
 lifetime. Both the stub and the real interpreter carry the SAME command line
-(`... pythonw.exe "E:\\Firefly_AI_Pet\\app.py"`), so counting processes by
+(`... pythonw.exe "<仓库目录>\\app.py"`), so counting processes by
 name + command line reports two "instances" for a single running pet.
 
 Layer 1 -- unit tests (safe, no live pet, test-specific mutex names):
