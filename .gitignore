@@ -114,7 +114,7 @@ hook_test.txt
 # Build / package outputs
 # ----------------------------
 
-build/
+/build/
 dist/
 *.egg-info/
 
