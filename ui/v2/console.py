@@ -54,6 +54,7 @@ from ui.v2.companion_panel import CompanionPanel
 from ui.v2.input_area import InputArea
 from ui.v2.sidebar import Sidebar
 from ui.v2.video_card import VideoCard, VideoCardInfo
+from ui.v2.voice_session import VoiceCompanionBar, VoiceSessionController
 
 log = logging.getLogger(__name__)
 
@@ -397,6 +398,8 @@ class CompanionConsole(QMainWindow):
         input_row.setContentsMargins(12, 0, 12, 12)
         input_row.addWidget(self.input)
         wrap_layout.addLayout(input_row)
+        # 语音陪伴条（点击「语音」出现）插在聊天区与输入行之间。
+        self._wrap_layout = wrap_layout
 
         conversation_column = QVBoxLayout()
         conversation_column.setContentsMargins(0, 8, 0, 0)
@@ -429,6 +432,7 @@ class CompanionConsole(QMainWindow):
 
         # Wiring
         self.input.send_requested.connect(self._send)
+        self.input.voice_requested.connect(self._toggle_voice_companion)
         self.ability.requested.connect(self._on_ability)
         self.sidebar.action_requested.connect(self._on_sidebar_action)
         self.sidebar.session_clicked.connect(self._on_recent_session_clicked)
@@ -449,6 +453,10 @@ class CompanionConsole(QMainWindow):
         # 当前回合是否为图片附件回合（FINAL 成功后消费图片；v1 同语义，
         # 避免其他后台回合的 FINAL 误清刚 attaching 的新附件）。
         self._turn_has_image = False
+        # 语音陪伴会话（点击「语音」开启；状态圆球 + 真实事件编排）。
+        self._voice_session: VoiceSessionController | None = None
+        self._voice_bar: VoiceCompanionBar | None = None
+        self._voice_stt_hinted = False
         # Phase UI-3A: consume RuntimeState from the bus when a host provides
         # one (read-only; the console never publishes). No bus = unchanged.
         if runtime_bus is not None and hasattr(runtime_bus, "subscribe_event"):
@@ -555,6 +563,40 @@ class CompanionConsole(QMainWindow):
 
     # ------------------------------------------------------------- sending
 
+    def _toggle_voice_companion(self) -> None:
+        """「语音」胶囊：开启/结束语音陪伴模式（真实语音链路 + 状态圆球）。"""
+        if self._voice_session is not None:
+            self._end_voice_companion()
+            return
+        session = VoiceSessionController(parent=self)
+        bar = VoiceCompanionBar(session, parent=self)
+        bar.end_requested.connect(self._end_voice_companion)
+
+        def _on_utterance(_duration: float) -> None:
+            # STT 未接入（语音服务无识别路由）：一次性说明缺失环节，不伪装。
+            if not self._voice_stt_hinted:
+                self._voice_stt_hinted = True
+                self.chat.append_assistant(
+                    "（语音陪伴已开启：我的回复会自动朗读，你说话时圆球会随音量起伏，"
+                    "插话可以打断我。语音识别还没接入，暂时请用键盘和我聊～）"
+                )
+
+        session.utterance_end.connect(_on_utterance)
+        self._wrap_layout.insertWidget(1, bar, 0, Qt.AlignHCenter)
+        self._voice_session = session
+        self._voice_bar = bar
+        session.start()
+
+    def _end_voice_companion(self) -> None:
+        session, self._voice_session = self._voice_session, None
+        bar, self._voice_bar = self._voice_bar, None
+        if bar is not None:
+            self._wrap_layout.removeWidget(bar)
+            bar.deleteLater()
+        if session is not None:
+            session.stop()
+            session.deleteLater()
+
     def _send(self) -> None:
         text = self.input.text().strip()
         attachment = self.input.attachments.pending
@@ -593,8 +635,12 @@ class CompanionConsole(QMainWindow):
             # 附件对象由回合管线持有，扫描版 PDF 的按需 OCR 不受影响。
             self.input.attachments.clear_for_send()
             self._turn_has_image = False
+            if self._voice_session is not None:
+                self._voice_session.notify_ask_submitted()
             return
         self.chat.append_user(text)
+        if self._voice_session is not None and self._voice_session.active:
+            self._voice_session.notify_ask_submitted()
         # Phase 6.5: when learning mode is on, the input chain is owned by the
         # LearningLoopOrchestrator — it detects the learning request, records
         # the allowed interaction facts, prepares the loop context and answers
@@ -1297,6 +1343,9 @@ class CompanionConsole(QMainWindow):
     # -------------------------------------------------------------- events
 
     def _on_event(self, event: Any) -> None:
+        if self._voice_session is not None:
+            # 真实 Agent 事件 → 陪伴会话的执行/回复状态（与 UI 状态互不影响）。
+            self._voice_session.notify_agent_event(event)
         event_type = getattr(event, "type", None)
         if event_type == AgentEventType.STATUS:
             status = getattr(event, "status", "") or ""
@@ -1312,6 +1361,9 @@ class CompanionConsole(QMainWindow):
             self.header.set_state("success")
             self.companion.set_runtime_state("success")
             self.chat.append_assistant(text, voice_text=text)  # Voice-1.3: 播放按钮
+            if self._voice_session is not None and self._voice_session.active:
+                # 陪伴模式：最终回复经真实 TTS→RVC 链路自动朗读。
+                self._voice_session.notify_reply_done(text)
             if self._turn_has_image:
                 # 图片附件回合成功后消费；文档保留在 composer 可继续追问。
                 self._turn_has_image = False
@@ -1426,6 +1478,9 @@ class CompanionConsole(QMainWindow):
         global _console_instance
         if _console_instance is self:
             _console_instance = None
+        if self._voice_session is not None:
+            # 会话结束：停采集/停播放/停轮询，清理监听与动画资源。
+            self._end_voice_companion()
         pending_attachment = self.input.attachments.pending
         if pending_attachment is not None:
             cancel_lazy = getattr(pending_attachment, "cancel_lazy", None)
