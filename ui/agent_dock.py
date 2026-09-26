@@ -215,10 +215,13 @@ class AgentDock(QWidget):
         self._presence_thread: threading.Thread | None = None
         self._last_presence_check = 0.0
         self.presence_changed.connect(self._on_presence_changed)
-        # Qwen 点 = CLI 存在 或 TJU API 探测成功（任一即绿）。
+        # Qwen 点 = 对话回退链上任一文本 Provider 可用（任一即绿）。
         self._qwen_cli: bool | None = None
         self._qwen_api: bool | None = None
+        self._deepseek_ready = False
+        self._zhipu_ready = False
         self.refresh_presence()
+        self._refresh_fallback_state()
 
         # Qwen 点的 TJU API 健康探测 — 每次探测用工厂重建 Provider，
         # 及时感知 Provider Manager 新保存的密钥。
@@ -277,14 +280,36 @@ class AgentDock(QWidget):
         self._qwen_api = status == TjuApiStatus.AVAILABLE
         self._update_qwen_dot()
 
+    def _refresh_fallback_state(self) -> None:
+        """刷新回退链上其他文本 Provider 的已配置状态（DeepSeek / Zhipu）。"""
+        try:
+            from core.credential_store import default_store
+
+            store = default_store()
+            self._deepseek_ready = bool(store.get("DEEPSEEK_API_KEY"))
+            self._zhipu_ready = bool(store.get("ZHIPU_API_KEY"))
+        except Exception:
+            pass
+        self._update_qwen_dot()
+
+    def on_providers_updated(self) -> None:
+        """凭据变更：立即重探 TJU + 刷新回退状态，不等 90 秒周期。"""
+        if self._tju_health is not None:
+            self._tju_health.probe_now()
+        self._refresh_fallback_state()
+
     def _update_qwen_dot(self) -> None:
-        """Qwen 点 = CLI 可启动 或 TJU API 探测成功，任一即绿。"""
+        """Qwen 点 = 回退链上任一文本 Provider 可用（CLI / TJU / DeepSeek / Zhipu）。"""
         dot = self._presence_dots.get("qwen")
         if dot is None:
             return
-        cli_ok = self._qwen_cli is True
-        api_ok = self._qwen_api is True
-        dot.set_present(cli_ok or api_ok)
+        chat_ok = (
+            self._qwen_cli is True
+            or self._qwen_api is True
+            or self._deepseek_ready is True
+            or self._zhipu_ready is True
+        )
+        dot.set_present(chat_ok)
 
     def on_providers_updated(self) -> None:
         """凭据变更：重置熔断并立即重探 TJU API（不等 90 秒周期）。"""
