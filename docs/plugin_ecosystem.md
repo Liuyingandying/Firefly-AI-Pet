@@ -65,3 +65,5 @@ extensions/
 - **Memory**：显式写入边界 + 红线过滤 + 本地语义索引，插件与记忆互不越界
 - **Browser Intelligence**：PageLens 浏览器扩展提供网页上下文，与文档分析管线共同构成 Agent 的"眼睛"
 - **Voice Capability**：`firefly_voice` 插件管理 TTS+RVC 语音链路（服务状态 / 开关 / 显式启停 / Voice Settings 面板）
+  服务端完整源码已随插件仓发布（`firefly_voice/voice_module/`，edge-tts → RVC → 声卡，
+  模型权重因许可证外置）——宿主 `voice_client/` 与服务端经 `127.0.0.1:8300` HTTP 解耦

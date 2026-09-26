@@ -77,15 +77,20 @@ voice:
 
 ## 5. 服务启动方式
 
-语音服务是**独立外部进程**（不在本仓库内），由用户显式启动：
+语音服务是**独立外部进程**，由用户显式启动。**服务端完整源码已开源**于
+[Firefly-AI-Pet-Plugins → `firefly_voice/voice_module/`](https://github.com/Liuyingandying/Firefly-AI-Pet-Plugins/tree/main/firefly_voice/voice_module)
+（含安装、模型获取与 Troubleshooting；模型权重因许可证外置）：
 
 1. **推荐**：Voice Settings 面板 → 「启动语音服务」（使用配置中的 `service.root/python`）
-2. 手动命令行（服务工程目录内）：
+2. 手动命令行（voice_module 目录内）：
    ```powershell
-   <service.python> api/server.py      # 监听 127.0.0.1:8300
+   .\venv\Scripts\python.exe -m uvicorn api.server:app --host 127.0.0.1 --port 8300
+   # 或
+   .\venv\Scripts\python.exe api\server.py
    ```
-3. 冷启动模型加载约 **20-50 秒**；`GET /health` 返回 200 即就绪
-4. 停止：面板「停止语音服务」（仅终止本插件启动的 PID 或持有 8300 端口的 python 进程）
+3. 冷启动模型加载约 **7-50 秒**；`GET /health` 返回 200 即就绪
+4. 停止：面板「停止语音服务」或 voice_module 内 `stop_voice.ps1`
+   （仅终止本插件启动的 PID 或持有 8300 端口的 python 进程）
 
 **资源控制策略**：服务不随宿主启动、宿主退出不代管服务生命周期。
 

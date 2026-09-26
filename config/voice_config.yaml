@@ -9,7 +9,8 @@ voice:
   auto_play: false
 
   server:
-    # Voice Module 服务地址（服务启动方式见发行文档）
+    # Voice Module 服务地址；服务端源码与部署说明见
+    # https://github.com/Liuyingandying/Firefly-AI-Pet-Plugins/tree/main/firefly_voice/voice_module
     url: "http://127.0.0.1:8300"
     connect_timeout_s: 2.0
     read_timeout_s: 30.0

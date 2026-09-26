@@ -238,7 +238,9 @@ Included:
 - Vision Extension
 - Learning Assistant
 - Campus Information Bridge
-- Voice Capability
+- Voice Capability（含 **Voice Server 完整源码**：插件仓 `firefly_voice/voice_module/`，
+  edge-tts → RVC → 声卡播放，127.0.0.1:8300；模型权重因许可证外置，
+  安装与配置见 [docs/voice/VOICE_SETUP.md](docs/voice/VOICE_SETUP.md)）
 
 **In-repo extensions（`plugins-integration` 分支）**：全部 5 个插件经 git subtree 合并至
 [`extensions/`](extensions/)，与 PageLens 浏览器扩展（`extensions/pagelens_bridge`）同目录共存；
