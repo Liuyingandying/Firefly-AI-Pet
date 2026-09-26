@@ -218,6 +218,9 @@ class SettingsPopover(PopoverBase):
         self._provider_btn.setToolTip(
             "添加或替换模型 API Key（保存在本机用户目录，自动热更新）"
         )
+        # 浅色面板上默认按钮样式（浅色文字）不可读——用与 Reset position
+        # 一致的链接样式（青色文字，悬停浅灰底）。
+        self._provider_btn.setStyleSheet(theme.link_button_style("openProviderManager"))
         self._provider_btn.clicked.connect(self.provider_manager_requested.emit)
         self.content_layout.addWidget(self._provider_btn, 0, Qt.AlignLeft)
 
