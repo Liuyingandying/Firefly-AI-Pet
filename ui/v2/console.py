@@ -1769,6 +1769,33 @@ class CompanionConsole(QMainWindow):
 _console_instance: CompanionConsole | None = None
 
 
+def _bring_to_front(window: "CompanionConsole") -> None:
+    """恢复（若最小化）并把窗口拉到顶层、抢到输入焦点。
+
+    仅 ``raise_()``/``activateWindow()`` 不够：桌宠悬浮件不夺取焦点，
+    点击 Ask 时前台仍属于别的应用，Windows 会拦截后台进程的焦点请求
+    （只在任务栏闪烁）。以 Win32 ``SetForegroundWindow`` 兜底，配合
+    一次瞬时 ALT 敲击满足系统的前台转移许可。
+    """
+    if window.isMinimized():
+        window.showNormal()
+    window.show()
+    window.raise_()
+    window.activateWindow()
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            hwnd = int(window.winId())
+            user32 = ctypes.windll.user32
+            user32.keybd_event(0x12, 0, 0, 0)  # ALT down（仅此瞬间）
+            user32.SetForegroundWindow(hwnd)
+            user32.keybd_event(0x12, 0, 2, 0)  # ALT up
+        except Exception:  # noqa: BLE001 - focus hint only, never fatal
+            pass
+    window.input.setFocus()
+
+
 def open_singleton(runner: Any, runtime_bus: Any = None) -> "CompanionConsole":
     """Open (or focus) one console window for the shared character runner.
 
@@ -1784,17 +1811,11 @@ def open_singleton(runner: Any, runtime_bus: Any = None) -> "CompanionConsole":
     global _console_instance
     window = _console_instance
     if window is not None:
-        window.show()
-        window.raise_()
-        window.activateWindow()
-        window.input.setFocus()
+        _bring_to_front(window)
         return window
     console = CompanionConsole(runner, runtime_bus=runtime_bus)
     _console_instance = console
-    console.show()
-    console.raise_()
-    console.activateWindow()
-    console.input.setFocus()
+    _bring_to_front(console)
     return console
 
 
