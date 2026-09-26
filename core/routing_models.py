@@ -22,6 +22,7 @@ class TaskIntent(str, Enum):
     REVIEW = "review"
     DEBUG = "debug"
     VISION = "vision"
+    DOCUMENT = "document"
     UNKNOWN = "unknown"
 
 

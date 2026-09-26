@@ -277,6 +277,19 @@ def _build_requested_triggers() -> dict[str, tuple[tuple[str, bool], ...]]:
 
 _REQUESTED_TRIGGERS = _build_requested_triggers()
 
+# Phase 8.2 (official-document-writing production integration): document
+# genres + writing verbs / deliverables. "写一份科研项目总结" is a *write*
+# task that must reach a native, skill-aware surface — never the read-only
+# managed Short Talk the analysis markers would otherwise select.
+_DOCUMENT_GENRES = (
+    "总结", "汇报材料", "申报书", "申请书", "调研报告", "研究报告",
+    "实验报告", "技术报告", "开题报告", "结题报告", "工作计划", "研究计划",
+    "会议纪要", "纪要", "通知", "请示", "报告", "计划", "函",
+    "个人陈述", "求职信", "实习总结", "简历",
+)
+_DOCUMENT_VERBS = ("写", "起草", "撰写", "拟", "生成", "做一份", "出一份")
+_DOCUMENT_DELIVERY = ("word", "docx", "pdf", "pptx", "ppt", "文档", "文件")
+
 
 @dataclass(frozen=True, slots=True)
 class _Detected:
@@ -289,6 +302,7 @@ class _Detected:
     vision: bool = False
     sequence: bool = False
     chat: bool = False
+    document_writing: bool = False
     requested: tuple[str, bool] | None = None  # (agent_id, is_open)
 
 
@@ -349,6 +363,14 @@ class AgentRouter:
             vision=has(_VISION_MARKERS),
             sequence=has(_SEQUENCE_MARKERS),
             chat=has(_CHAT_MARKERS),
+            document_writing=(
+                has(_DOCUMENT_GENRES)
+                and (
+                    has(_DOCUMENT_VERBS)
+                    or has(_DOCUMENT_DELIVERY)
+                    or has(_WRITE_MARKERS)
+                )
+            ),
             requested=self._detect_requested(compact),
         )
 
@@ -433,6 +455,21 @@ class AgentRouter:
                 self._rec(
                     "claude", 40, ReasonCode.VISION_MANAGED_UNAVAILABLE,
                     Confidence.LOW, TaskIntent.VISION, HandoffMode.UNAVAILABLE,
+                )
+            ]
+
+        # Document writing ("写一份科研项目总结" / "写大创申报书"): a file-
+        # producing task for a skill-aware native surface. Managed Short Talk
+        # is read-only, and the generic write branch targets coding (Codex);
+        # neither reaches the document skills, so route to the native Claude
+        # surface explicitly — same semantics as write_task in
+        # _route_requested.
+        if flags.document_writing:
+            return [
+                self._rec(
+                    "claude", 88, ReasonCode.NATIVE_SURFACE_REQUIRED,
+                    Confidence.HIGH, TaskIntent.DOCUMENT, HandoffMode.OPEN_NATIVE,
+                    requires_confirmation=True,
                 )
             ]
 
@@ -548,6 +585,8 @@ class AgentRouter:
     def _text_intent(flags: _Detected) -> TaskIntent:
         if flags.vision:
             return TaskIntent.VISION
+        if flags.document_writing:
+            return TaskIntent.DOCUMENT
         if flags.write:
             if flags.error and not (flags.why or flags.how or flags.analysis or flags.review):
                 return TaskIntent.DEBUG
