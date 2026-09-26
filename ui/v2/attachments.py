@@ -311,6 +311,9 @@ class ComposerAttachments(QWidget):
         self._hint.setVisible(False)
         self._layout.addWidget(self._hint)
         self.setVisible(False)
+        # 解析线程只 emit 信号；chip 更新经 Qt 队列回到 GUI 线程执行
+        # （跨线程直接改 QLabel 会被静默丢弃——txt 卡「解析中…」的根因）。
+        self.attachment_parsed.connect(self._on_attachment_parsed)
 
     # ------------------------------------------------------------ 状态
 
@@ -411,7 +414,7 @@ class ComposerAttachments(QWidget):
             chip: _ImageChip | _DocumentChip = _DocumentChip(
                 attachment, large=attachment.original_size >= _LARGE_FILE_BYTES,
             )
-            parse_document_async(attachment, self._on_parse_state)
+            parse_document_async(attachment, self.attachment_parsed.emit)
         else:
             chip = _ImageChip(attachment)
         chip.remove_clicked.connect(self.consume)
@@ -425,10 +428,10 @@ class ComposerAttachments(QWidget):
         self._hint.setVisible(True)
         self.setVisible(True)
 
-    def _on_parse_state(self, attachment: DocumentAttachment, state: str) -> None:
+    def _on_attachment_parsed(self, attachment: DocumentAttachment, state: str) -> None:
+        """GUI 线程槽：解析线程经 attachment_parsed 信号驱动，更新 chip 状态。"""
         if self._chip is not None and getattr(self._chip, "attachment", None) is attachment:
             self._chip.set_state(state)
-        self.attachment_parsed.emit(attachment, state)
 
     def on_ocr_progress(self, attachment: DocumentAttachment, completed: int, total: int) -> None:
         if self._chip is not None and getattr(self._chip, "attachment", None) is attachment:
