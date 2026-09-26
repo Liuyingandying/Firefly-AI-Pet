@@ -258,7 +258,12 @@ class AgentDock(QWidget):
             self._items[launcher_id] = item
 
         # TJU tju-llm availability dot — background probe, never blocks the UI.
-        self._tju_health = TjuLlmHealthChecker(parent=self)
+        # provider_factory: 每次探测重建实例，及时感知 Provider Manager 新存的密钥。
+        from providers.tju_qwen import TJUQwenProvider
+
+        self._tju_health = TjuLlmHealthChecker(
+            parent=self, provider_factory=TJUQwenProvider
+        )
         self._tju_health.status_changed.connect(self._on_tju_status)
         self.destroyed.connect(self._stop_tju_health)
 

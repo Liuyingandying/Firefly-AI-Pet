@@ -174,6 +174,7 @@ class TjuLlmHealthChecker(QObject):
         self,
         *,
         provider=None,
+        provider_factory: Callable[[], Any] | None = None,
         transport=None,
         initial_delay: float = DEFAULT_INITIAL_DELAY_SECONDS,
         interval: float = DEFAULT_INTERVAL_SECONDS,
@@ -182,6 +183,9 @@ class TjuLlmHealthChecker(QObject):
     ) -> None:
         super().__init__(parent)
         self._provider = provider if provider is not None else TJUQwenProvider()
+        # 每次探测重建 Provider：凭据在构造时解析，旧实例感知不到
+        # Provider Manager 后来保存的密钥（红点不熄灭的根因）。
+        self._provider_factory = provider_factory
         self._transport = transport
         self._timeout = float(timeout)
         self._initial_delay = float(initial_delay)
@@ -191,6 +195,14 @@ class TjuLlmHealthChecker(QObject):
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread = None
+
+    def _current_provider(self):
+        if self._provider_factory is not None:
+            try:
+                return self._provider_factory()
+            except Exception:
+                return self._provider
+        return self._provider
 
     @property
     def status(self) -> str:
@@ -231,7 +243,11 @@ class TjuLlmHealthChecker(QObject):
         if self._breaker.is_open:
             return  # breaker open: reuse its state, send no extra probe
         try:
-            probe_tju_llm(self._provider, transport=self._transport, timeout=self._timeout)
+            probe_tju_llm(
+                self._current_provider(),
+                transport=self._transport,
+                timeout=self._timeout,
+            )
         except Exception as exc:
             self._breaker.record_failure()
             self._set_status(classify_probe_error(exc))
