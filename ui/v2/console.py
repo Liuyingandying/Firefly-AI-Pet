@@ -589,7 +589,10 @@ class CompanionConsole(QMainWindow):
                 self.chat.append_assistant("（我这边正忙着，稍等一下再试？）")
                 return
             self.header.set_state("working")
-            self._turn_has_image = not is_document
+            # 发送接管即清空输入区 chip（用户预期：发送后输入框归零）；
+            # 附件对象由回合管线持有，扫描版 PDF 的按需 OCR 不受影响。
+            self.input.attachments.clear_for_send()
+            self._turn_has_image = False
             return
         self.chat.append_user(text)
         # Phase 6.5: when learning mode is on, the input chain is owned by the

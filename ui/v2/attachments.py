@@ -331,6 +331,19 @@ class ComposerAttachments(QWidget):
             self._chip = None
         self.setVisible(False)
 
+    def clear_for_send(self) -> None:
+        """发送被接管后清掉 chip（输入框回到空态）。
+
+        与 ``consume`` 的差别：不 cancel_lazy——附件对象已被回合管线
+        持有，扫描版 PDF 的按需 OCR 还要在回合里继续用。
+        """
+        self._pending = None
+        if self._chip is not None:
+            self._layout.removeWidget(self._chip)
+            self._chip.deleteLater()
+            self._chip = None
+        self.setVisible(False)
+
     # ------------------------------------------------------------ 入口
 
     def pick_file(self) -> None:
