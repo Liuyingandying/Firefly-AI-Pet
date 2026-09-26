@@ -19,7 +19,7 @@ setPlaceholderText() / setFocus()`` delegates stay QLineEdit-compatible.
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from ui.v2 import motion
+from ui.v2.attachments import ComposerAttachments, mime_has_attachment
 
 
 class InputArea(QWidget):
@@ -66,7 +67,7 @@ class InputArea(QWidget):
         self._card_shadow = motion.purple_shadow(self, blur=14, y_offset=2)
 
         self.text_edit = QPlainTextEdit(self)
-        self.text_edit.setPlaceholderText("输入你的问题…")
+        self.text_edit.setPlaceholderText("输入你的问题…（可直接拖入 / 粘贴 图片、Word、PDF、PPT）")
         # 透明无边框, 视觉上直接"长"在卡片里; 高度随内容自动长高（见 _sync_height）
         self.text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit.setStyleSheet(
@@ -96,6 +97,9 @@ class InputArea(QWidget):
             self._sync_height
         )
         self._sync_height()
+        # 多模态附件条（图片 / Word / PDF / PPT，一个 composer 最多一个）。
+        # 入口：「文件」胶囊 / Ctrl+V 图片 / 拖放；发送路由在 console._send。
+        self.attachments = ComposerAttachments(self)
         # 卡片聚焦发光 / IME 重影抑制 / Enter 发送共用同一个事件过滤器（见下）。
 
         # -- 快捷操作: ZCode 式半透明淡紫胶囊（图标 + 小字, 全圆角） -----------
@@ -123,7 +127,11 @@ class InputArea(QWidget):
         tools_row.setSpacing(6)
         for action_id, label, icon_kind, signal_name in self._QUICK_ACTIONS:
             button = _tool_button(label, icon_kind)
-            button.clicked.connect(getattr(self, signal_name).emit)
+            if action_id == "file":
+                # 「文件」胶囊 = 附件选择器（多模态输入入口），不再空发信号。
+                button.clicked.connect(self.attachments.pick_file)
+            else:
+                button.clicked.connect(getattr(self, signal_name).emit)
             setattr(self, f"_{action_id}_button", button)
             tools_row.addWidget(button)
         tools_row.addStretch(1)
@@ -168,6 +176,7 @@ class InputArea(QWidget):
         root.setContentsMargins(14, 10, 14, 10)  # 大留白
         root.setSpacing(8)
         root.addWidget(self.text_edit)
+        root.addWidget(self.attachments)
         root.addLayout(tools_row)
 
         # Enter 发送发生在 text_edit 上（真实键盘焦点所在），用事件过滤器
@@ -206,15 +215,31 @@ class InputArea(QWidget):
                     self.text_edit.setPlaceholderText(self._placeholder_saved)
                     self._placeholder_saved = None
             elif event_type == QEvent.KeyPress:
+                if event.matches(QKeySequence.Paste):
+                    # Ctrl+V 剪贴板带图 → 转附件（v1 同语义；纯文本粘贴不受影响）。
+                    clipboard = QGuiApplication.clipboard()
+                    image = clipboard.image()
+                    if not image.isNull():
+                        self.attachments.add_image(image, "剪贴板图片")
+                        return True
                 if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not (
                     event.modifiers() & Qt.ShiftModifier
                 ):
                     # 先 emit 后清空：console._send 是同步连接，会从输入框读取文本。
+                    # 只带附件（无文字）也允许发送，问题文本由宿主补默认值。
                     text = self.text().strip()
-                    if text:
+                    if text or self.attachments.pending is not None:
                         self.send_requested.emit(text)
                     self.clear()
                     return True  # 已消费，不再插入换行
+            elif event_type in (QEvent.DragEnter, QEvent.DragMove):
+                if mime_has_attachment(event.mimeData()):
+                    event.acceptProposedAction()
+                    return True
+            elif event_type == QEvent.Drop:
+                if self.attachments.handle_mime(event.mimeData()):
+                    event.acceptProposedAction()
+                    return True
         return super().eventFilter(watched, event)
 
     # ------------------------------------------------------------ behavior
@@ -246,7 +271,7 @@ class InputArea(QWidget):
 
     def _emit_send(self) -> None:
         text = self.text().strip()
-        if not text:
+        if not text and self.attachments.pending is None:
             return
         self.send_requested.emit(text)
 
@@ -256,8 +281,9 @@ class InputArea(QWidget):
             event.modifiers() & Qt.ShiftModifier
         ):
             # 先 emit 后清空（console._send 同步读输入框文本）。
+            # 只带附件（无文字）也允许发送，问题文本由宿主补默认值。
             text = self.text().strip()
-            if text:
+            if text or self.attachments.pending is not None:
                 self.send_requested.emit(text)
             self.clear()
             event.accept()

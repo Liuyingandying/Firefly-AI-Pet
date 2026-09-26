@@ -41,7 +41,13 @@ from PySide6.QtWidgets import (
 from core.agent_events import AgentEventType
 from core.learning.orchestrator import LoopStatus
 from ui import theme
+from ui.companion_attachment import (
+    DEFAULT_ATTACHMENT_QUESTION,
+    DEFAULT_DOCUMENT_QUESTION,
+    DocumentAttachment,
+)
 from ui.v2.ability_panel import AbilityPanel
+from ui.v2.attachments import mime_has_attachment
 from ui.v2.character_header import CharacterHeader
 from ui.v2.chat_view import ChatView
 from ui.v2.companion_panel import CompanionPanel
@@ -431,6 +437,18 @@ class CompanionConsole(QMainWindow):
         runner_signal = getattr(self.runner, "agent_event", None)
         if runner_signal is not None:
             runner_signal.connect(self._on_event)
+        # 附件：后台/按需 OCR 进度实时上 chip。
+        ocr_progress = getattr(self.runner, "ocr_progress", None)
+        if ocr_progress is not None:
+            ocr_progress.connect(self.input.attachments.on_ocr_progress)
+        ocr_page = getattr(self.runner, "ocr_page", None)
+        if ocr_page is not None:
+            ocr_page.connect(self.input.attachments.on_ocr_page)
+        # 拖放不限输入卡：控制台整窗接收后转给 composer（同一套预检）。
+        self.setAcceptDrops(True)
+        # 当前回合是否为图片附件回合（FINAL 成功后消费图片；v1 同语义，
+        # 避免其他后台回合的 FINAL 误清刚 attaching 的新附件）。
+        self._turn_has_image = False
         # Phase UI-3A: consume RuntimeState from the bus when a host provides
         # one (read-only; the console never publishes). No bus = unchanged.
         if runtime_bus is not None and hasattr(runtime_bus, "subscribe_event"):
@@ -524,13 +542,55 @@ class CompanionConsole(QMainWindow):
             self.title_bar.refresh_max_icon()
         super().changeEvent(event)
 
+    def dragEnterEvent(self, event) -> None:  # type: ignore[override]
+        """整窗拖放预检：受支持的附件 mime 才接受（与输入卡同规则）。"""
+        if mime_has_attachment(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event) -> None:  # type: ignore[override]
+        if self.input.attachments.handle_mime(event.mimeData()):
+            event.acceptProposedAction()
+
     # ------------------------------------------------------------- sending
 
     def _send(self) -> None:
         text = self.input.text().strip()
-        if not text:
+        attachment = self.input.attachments.pending
+        if not text and attachment is None:
             return
         self.input.clear()
+        # 多模态附件：直达自由对话链路（学习 loop 只拦纯文本请求）。
+        # 文档走 ask_with_document，图片走 ask_with_image；空文字补默认
+        # 提问（v1 同语义），发送失败保留附件供重试。
+        if attachment is not None:
+            is_document = isinstance(attachment, DocumentAttachment)
+            question = text or (
+                DEFAULT_DOCUMENT_QUESTION if is_document else DEFAULT_ATTACHMENT_QUESTION
+            )
+            self.chat.append_user(
+                f"[文档] {attachment.display_name}" if is_document
+                else f"[图片] {attachment.display_name}"
+            )
+            if text:
+                self.chat.append_user(text)
+            asker = (
+                self.runner.ask_with_document if is_document
+                else self.runner.ask_with_image
+            )
+            try:
+                ok = asker(question, attachment)
+            except Exception as exc:  # runner must never crash the console
+                log.exception("console attachment ask failed")
+                self.chat.append_assistant(f"（发送失败了：{exc}）")
+                return
+            if not ok:
+                self.chat.append_assistant("（我这边正忙着，稍等一下再试？）")
+                return
+            self.header.set_state("working")
+            self._turn_has_image = not is_document
+            return
         self.chat.append_user(text)
         # Phase 6.5: when learning mode is on, the input chain is owned by the
         # LearningLoopOrchestrator — it detects the learning request, records
@@ -1249,6 +1309,10 @@ class CompanionConsole(QMainWindow):
             self.header.set_state("success")
             self.companion.set_runtime_state("success")
             self.chat.append_assistant(text, voice_text=text)  # Voice-1.3: 播放按钮
+            if self._turn_has_image:
+                # 图片附件回合成功后消费；文档保留在 composer 可继续追问。
+                self._turn_has_image = False
+                self.input.attachments.consume()
             self._maybe_insert_video_card(text)
             # 消息完成后刷新右侧上下文状态卡（focus 可能已变化）。
             self._update_context_status()
@@ -1258,6 +1322,8 @@ class CompanionConsole(QMainWindow):
             self.header.set_state("error")
             self.companion.set_runtime_state("error")
             self.chat.append_assistant(f"（{text}）")
+            # 失败：保留附件让用户直接重发（图片回合标记复位）。
+            self._turn_has_image = False
         elif event_type == AgentEventType.CANCELLED:
             self.chat.set_status("已取消")
             self.header.set_state("idle")
@@ -1357,6 +1423,11 @@ class CompanionConsole(QMainWindow):
         global _console_instance
         if _console_instance is self:
             _console_instance = None
+        pending_attachment = self.input.attachments.pending
+        if pending_attachment is not None:
+            cancel_lazy = getattr(pending_attachment, "cancel_lazy", None)
+            if cancel_lazy is not None:
+                cancel_lazy()  # 停掉在途 OCR 工作线程
         if self._runtime_unsubscribe is not None:
             unsubscribe = self._runtime_unsubscribe
             self._runtime_unsubscribe = None
