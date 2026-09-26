@@ -164,6 +164,16 @@ def classify_probe_error(exc: Exception) -> str:
     return TjuApiStatus.UNAVAILABLE
 
 
+# 模块级最近探测结论：checker 实例归 dock 所有，而控制台状态行也需要
+# 读取；跨实例共享一份最近结论即可（只在 _set_status 中写入）。
+_LAST_PROBE_STATUS = ""
+
+
+def last_probe_status() -> str:
+    """最近一次 TJU 健康探测结论（TjuApiStatus 值；尚未探测过为空串）。"""
+    return _LAST_PROBE_STATUS
+
+
 class TjuLlmHealthChecker(QObject):
     """Background TJU ``tju-llm`` availability probe with a thread-safe status.
 
@@ -280,9 +290,11 @@ class TjuLlmHealthChecker(QObject):
         ).start()
 
     def _set_status(self, status: str) -> None:
+        global _LAST_PROBE_STATUS
         with self._lock:
             changed = status != self._status
             self._status = status
+            _LAST_PROBE_STATUS = status
         if changed:
             # Emitting from the worker thread is safe: the receiver (dock)
             # lives on the main thread, so Qt auto-queues delivery there.

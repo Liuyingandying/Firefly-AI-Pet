@@ -114,3 +114,13 @@ def test_probe_now_forces_immediate_probe(qapp):
 
 
 from PySide6.QtTest import QTest  # noqa: E402  (probe_now 后的等待用)
+
+
+def test_last_probe_status_module_cache(qapp):
+    """_set_status 同步更新模块级缓存，供控制台状态行跨实例读取。"""
+    from ui.tju_llm_health import last_probe_status
+
+    checker = TjuLlmHealthChecker(provider=_Provider(api_key=""), initial_delay=0)
+    checker._probe_once()
+    assert last_probe_status() == TjuApiStatus.NOT_CONFIGURED
+    checker.stop()

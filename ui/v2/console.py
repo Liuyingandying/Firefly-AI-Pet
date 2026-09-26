@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal, QTimer
 from PySide6.QtGui import QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -438,6 +438,13 @@ class CompanionConsole(QMainWindow):
                 self._on_runtime_event
             )
 
+        # TJU 健康探测结论不经过 runtime bus（dock 内部 Qt 信号）；状态卡
+        # 的 AI 服务行需要跟随探测结论翻转，可见时以轻量周期刷新兜底。
+        self._status_refresh_timer = QTimer(self)
+        self._status_refresh_timer.setInterval(15_000)
+        self._status_refresh_timer.timeout.connect(self._on_status_refresh_tick)
+        self._status_refresh_timer.start()
+
         # Phase 1E: startup restore — if the persisted learning project still
         # exists, re-enable learning mode and re-attach an unfinished session
         # so the strip/status card shows it again. Never auto-starts an exam.
@@ -680,18 +687,46 @@ class CompanionConsole(QMainWindow):
         return "" if title in ("", "新对话") else title
 
     def _ai_service_line(self) -> str:
-        """Primary text-provider availability (credential presence, read-only).
-        Never claims a model was actually used — only「AI 服务 · 可用」."""
-        try:
-            from core.providers.status import ProviderStatusService
+        """回退链上当前实际可用的文本 Provider（配置 + TJU 实测，只读）。
 
+        TJU 行以健康探测结论为准：未配置或探测不可达时让位给下一个可用
+        Provider（Zhipu / DeepSeek / 用户自配），不再凭「密钥存在」显示
+        不可达的端点。绝不宣称模型已被使用——只有「· 可用」。
+        """
+        try:
+            from core.providers.catalog import CATEGORY_TEXT
+            from core.providers.status import ProviderStatusService
+            from ui.tju_llm_health import TjuApiStatus, last_probe_status
+
+            tju_live = last_probe_status()
             for row in ProviderStatusService().snapshot():
-                if getattr(row, "role", "") == "primary" and getattr(row, "available", False):
-                    name = getattr(row, "display_name", "") or ""
-                    return f"{name} · 可用" if name else ""
+                if getattr(row, "category", "") != CATEGORY_TEXT:
+                    continue
+                if getattr(row, "role", "") not in ("primary", "fallback"):
+                    continue
+                if not getattr(row, "available", False):
+                    continue
+                name = getattr(row, "display_name", "") or ""
+                if not name:
+                    continue
+                if row.provider_id == "tju" and tju_live != TjuApiStatus.AVAILABLE:
+                    continue
+                return f"{name} · 可用"
+            from core.credential_store import default_store
+            from core.custom_providers import enabled_custom_providers
+
+            for entry in enabled_custom_providers(default_store()):
+                name = str(entry.get("name") or "").strip()
+                if name:
+                    return f"{name} · 可用"
         except Exception:  # noqa: BLE001 - status is optional display data
             pass
         return ""
+
+    def _on_status_refresh_tick(self) -> None:
+        """窗口可见时跟随 TJU 探测结论刷新状态卡（隐藏时不做无谓工作）。"""
+        if self.isVisible():
+            self._update_context_status()
 
     def _learning_status_card(self):
         from core.learning.ui import build_status_card
@@ -1302,6 +1337,10 @@ class CompanionConsole(QMainWindow):
         kind = getattr(event, "kind", "")
         if kind == "camera.observed":
             self.companion.set_task("最近观察：刚刚")
+            return
+        if kind == "providers.updated":
+            # 密钥保存/删除（Provider Manager）→ AI 服务行立即刷新。
+            self._update_context_status()
             return
         if kind != "runtime.activity":
             return

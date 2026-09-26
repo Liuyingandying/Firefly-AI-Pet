@@ -220,6 +220,7 @@ class AgentDock(QWidget):
         self._qwen_api: bool | None = None
         self._deepseek_ready = False
         self._zhipu_ready = False
+        self._custom_ready = False
         self.refresh_presence()
         self._refresh_fallback_state()
 
@@ -281,13 +282,15 @@ class AgentDock(QWidget):
         self._update_qwen_dot()
 
     def _refresh_fallback_state(self) -> None:
-        """刷新回退链上其他文本 Provider 的已配置状态（DeepSeek / Zhipu）。"""
+        """刷新回退链上其他文本 Provider 的已配置状态（DeepSeek / Zhipu / 自配）。"""
         try:
             from core.credential_store import default_store
+            from core.custom_providers import enabled_custom_providers
 
             store = default_store()
             self._deepseek_ready = bool(store.get("DEEPSEEK_API_KEY"))
             self._zhipu_ready = bool(store.get("ZHIPU_API_KEY"))
+            self._custom_ready = bool(enabled_custom_providers(store))
         except Exception:
             pass
         self._update_qwen_dot()
@@ -299,7 +302,7 @@ class AgentDock(QWidget):
         self._refresh_fallback_state()
 
     def _update_qwen_dot(self) -> None:
-        """Qwen 点 = 回退链上任一文本 Provider 可用（CLI / TJU / DeepSeek / Zhipu）。"""
+        """Qwen 点 = 回退链上任一文本 Provider 可用（CLI / TJU / DeepSeek / Zhipu / 自配）。"""
         dot = self._presence_dots.get("qwen")
         if dot is None:
             return
@@ -308,13 +311,9 @@ class AgentDock(QWidget):
             or self._qwen_api is True
             or self._deepseek_ready is True
             or self._zhipu_ready is True
+            or self._custom_ready is True
         )
         dot.set_present(chat_ok)
-
-    def on_providers_updated(self) -> None:
-        """凭据变更：重置熔断并立即重探 TJU API（不等 90 秒周期）。"""
-        if self._tju_health is not None:
-            self._tju_health.probe_now()
 
     def _on_item_activated(self, launcher_id: str) -> None:
         self.launch_agent.emit(launcher_id)
