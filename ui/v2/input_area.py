@@ -182,6 +182,9 @@ class InputArea(QWidget):
         # Enter 发送发生在 text_edit 上（真实键盘焦点所在），用事件过滤器
         # 拦截；Shift+Enter 不拦截，走 QPlainTextEdit 默认换行。
         self.text_edit.installEventFilter(self)
+        # 拖放事件发给 QAbstractScrollArea 的 viewport 而非本体——过滤器
+        # 必须两个都装，否则拖文件会走默认行为把 file:/// 路径插进输入框。
+        self.text_edit.viewport().installEventFilter(self)
         # IME composition state: while Chinese composition is active the
         # QPlainTextEdit document is still empty, so Qt keeps drawing the
         # placeholder underneath the preedit at the top-left — two text
@@ -190,8 +193,22 @@ class InputArea(QWidget):
         self._placeholder_saved: str | None = None
 
     def eventFilter(self, watched, event) -> bool:  # type: ignore[override]
-        if watched is self.text_edit:
-            event_type = event.type()
+        editor = self.text_edit
+        is_editor = watched is editor
+        if not is_editor and watched is not editor.viewport():
+            return super().eventFilter(watched, event)
+        event_type = event.type()
+        # 拖放落在 viewport，其余编辑事件落在 editor 本体；附件拖放在
+        # 两个监听对象上统一拦截（先预检再消费，非附件拖放走默认文本行为）。
+        if event_type in (QEvent.DragEnter, QEvent.DragMove):
+            if mime_has_attachment(event.mimeData()):
+                event.acceptProposedAction()
+                return True
+        elif event_type == QEvent.Drop:
+            if self.attachments.handle_mime(event.mimeData()):
+                event.acceptProposedAction()
+                return True
+        elif is_editor:
             if event_type == QEvent.FocusIn:
                 # 聚焦: 整卡边框变紫 + 阴影变亮泛紫光
                 self._apply_card_style(focused=True)
@@ -232,14 +249,6 @@ class InputArea(QWidget):
                         self.send_requested.emit(text)
                     self.clear()
                     return True  # 已消费，不再插入换行
-            elif event_type in (QEvent.DragEnter, QEvent.DragMove):
-                if mime_has_attachment(event.mimeData()):
-                    event.acceptProposedAction()
-                    return True
-            elif event_type == QEvent.Drop:
-                if self.attachments.handle_mime(event.mimeData()):
-                    event.acceptProposedAction()
-                    return True
         return super().eventFilter(watched, event)
 
     # ------------------------------------------------------------ behavior
