@@ -33,6 +33,7 @@ from .agent_launcher import (
     launch_qwen_yolo,
     launch_zcode,
 )
+from .tju_llm_health import TjuApiStatus, TjuLlmHealthChecker
 
 LAUNCHERS = (
     ("claude", "Claude", "C", theme.CLAUDE_ORANGE,
@@ -207,7 +208,23 @@ class AgentDock(QWidget):
         self._presence_thread: threading.Thread | None = None
         self._last_presence_check = 0.0
         self.presence_changed.connect(self._on_presence_changed)
+        # Qwen 点 = CLI 存在 或 TJU API 探测成功（任一即绿）。
+        self._qwen_cli: bool | None = None
+        self._qwen_api: bool | None = None
         self.refresh_presence()
+
+        # Qwen 点的 TJU API 健康探测 — 每次探测用工厂重建 Provider，
+        # 及时感知 Provider Manager 新保存的密钥。
+        from providers.tju_qwen import TJUQwenProvider
+
+        self._tju_health = TjuLlmHealthChecker(
+            parent=self, provider_factory=TJUQwenProvider
+        )
+        self._tju_health.status_changed.connect(self._on_tju_status)
+        self.destroyed.connect(self._stop_tju_health)
+
+    def _stop_tju_health(self) -> None:
+        self._tju_health.stop()
 
     def refresh_presence(self) -> None:
         """Re-scan Codex / Z Code availability off the UI thread (throttled)."""
@@ -241,17 +258,37 @@ class AgentDock(QWidget):
         return result
 
     def _on_presence_changed(self, result: dict) -> None:
+        if "qwen" in result:
+            self._qwen_cli = bool(result["qwen"])
+        self._update_qwen_dot()
         for launcher_id, dot in self._presence_dots.items():
+            if launcher_id == "qwen":
+                continue
             dot.set_present(bool(result.get(launcher_id)))
+
+    def _on_tju_status(self, status: str) -> None:
+        self._qwen_api = status == TjuApiStatus.AVAILABLE
+        self._update_qwen_dot()
+
+    def _update_qwen_dot(self) -> None:
+        """Qwen 点 = CLI 可启动 或 TJU API 探测成功，任一即绿。"""
+        dot = self._presence_dots.get("qwen")
+        if dot is None:
+            return
+        cli_ok = self._qwen_cli is True
+        api_ok = self._qwen_api is True
+        dot.set_present(cli_ok or api_ok)
 
     def _on_item_activated(self, launcher_id: str) -> None:
         self.launch_agent.emit(launcher_id)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._tju_health.start()
         self.refresh_presence()
 
     def closeEvent(self, event) -> None:
+        self._tju_health.stop()
         super().closeEvent(event)
 
     def apply_scale(self) -> None:
