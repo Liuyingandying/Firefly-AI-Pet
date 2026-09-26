@@ -18,7 +18,9 @@ Firefly AI Pet 采用**扩展化架构**：核心运行时保持稳定，能力�
 ```
 extensions/
 ├── firefly_camera_vision/     # Agent Capability：摄像头视觉适配器（按需单帧，永不后台开启）
-├── firefly_video_extension/   # Agent Capability：本地视频分析（时长/场景/关键帧/字幕）
+├── firefly_video_extension/   # Agent Capability：本地视频文件分析（时长/场景/关键帧/字幕）
+│                              #   注：B站 URL 阅读是另一条执行链——BiliInsightClient → 独立
+│                              #   GPL-3.0 服务仓 Firefly-BiliInsight-Service（匿名可用，登录可选）
 ├── learning_focus/            # Agent Capability：学习专注（知识图谱×画像记忆×作答证据）
 ├── tju_info_retrieval/        # Agent Capability：校园信息检索（接口契约分发）
 ├── firefly_voice/             # Agent Capability：语音能力管理（TTS+RVC 服务状态/开关/显式启停）
@@ -67,3 +69,9 @@ extensions/
 - **Voice Capability**：`firefly_voice` 插件管理 TTS+RVC 语音链路（服务状态 / 开关 / 显式启停 / Voice Settings 面板）
   服务端完整源码已随插件仓发布（`firefly_voice/voice_module/`，edge-tts → RVC → 声卡，
   模型权重因许可证外置）——宿主 `voice_client/` 与服务端经 `127.0.0.1:8300` HTTP 解耦
+- **B站视频阅读**：`core/bili_video_reader` 经 subprocess JSONL 调用独立 GPL-3.0 服务仓
+  [Firefly-BiliInsight-Service](https://github.com/Liuyingandying/Firefly-BiliInsight-Service)
+  （上游 [Shanoa2/BiliInsight](https://github.com/Shanoa2/BiliInsight) services 层的封装）：
+  metadata / 本地 faster-whisper 转写 / 抽帧；公开视频**匿名可用、登录可选**
+  （Cookie 只走环境变量/本地 .env，永不入库）；许可证边界 = MIT 主仓只保留
+  JSONL 客户端，GPL 服务在进程外运行

@@ -234,7 +234,10 @@ https://github.com/Liuyingandying/Firefly-AI-Pet-Plugins
 
 Included:
 
-- Video Extension
+- Video Extension（本地视频文件分析。**B站 URL 视频阅读**另由独立 GPL-3.0 服务
+  [Firefly-BiliInsight-Service](https://github.com/Liuyingandying/Firefly-BiliInsight-Service)
+  提供：metadata / 本地 faster-whisper 转写 / 抽帧，公开视频**匿名即可用、登录可选**；
+  需自备 ffmpeg 与 Python 依赖，安装与 Cookie 安全边界见其 README）
 - Vision Extension
 - Learning Assistant
 - Campus Information Bridge
