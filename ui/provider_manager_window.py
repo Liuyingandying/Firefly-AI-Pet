@@ -23,12 +23,15 @@ from typing import Any, Callable
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
+    QFormLayout,
     QFrame,
     QHBoxLayout,
     QInputDialog,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -37,6 +40,13 @@ from PySide6.QtWidgets import (
 
 from core.ai_router import reload_default_routers
 from core.credential_store import default_store
+from core.custom_providers import (
+    CustomProviderError,
+    delete_custom_provider,
+    get_custom_provider,
+    list_custom_providers,
+    save_custom_provider,
+)
 from core.provider_manager import (
     SOURCE_CREDENTIAL_STORE,
     SOURCE_ENVIRONMENT,
@@ -184,6 +194,155 @@ class ProviderCard(QFrame):
         return text if ok and text else None
 
 
+class CustomProviderDialog(QDialog):
+    """新建/编辑一个自定义 OpenAI 兼容 Provider。
+
+    编辑已保存条目时 API Key 留空表示保持不变；返回 ``entry()`` 供调用方
+    写入凭据库（校验失败时由调用方弹窗提示并保留窗口数据）。
+    """
+
+    def __init__(self, entry: dict[str, Any] | None = None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        entry = entry or {}
+        self._provider_id = str(entry.get("id") or "")
+        self._original_key = str(entry.get("api_key") or "")
+        self.setWindowTitle("编辑自定义 Provider" if self._provider_id else "添加自定义 Provider")
+        self.setModal(True)
+        self.resize(440, 240)
+
+        form = QFormLayout(self)
+        form.setSpacing(8)
+
+        self._name_edit = QLineEdit(str(entry.get("name") or ""))
+        self._name_edit.setPlaceholderText("例如：硅基流动 / DeepSeek / 公司内网")
+        form.addRow("显示名称", self._name_edit)
+
+        self._url_edit = QLineEdit(str(entry.get("base_url") or ""))
+        self._url_edit.setPlaceholderText("https://api.example.com/v1")
+        form.addRow("Base URL", self._url_edit)
+
+        self._model_edit = QLineEdit(str(entry.get("model") or ""))
+        self._model_edit.setPlaceholderText("例如：deepseek-chat")
+        form.addRow("模型名", self._model_edit)
+
+        self._key_edit = QLineEdit()
+        self._key_edit.setEchoMode(QLineEdit.Password)
+        if self._provider_id:
+            self._key_edit.setPlaceholderText("留空 = 保持已保存的 Key 不变")
+        else:
+            self._key_edit.setPlaceholderText("sk-...")
+        form.addRow("API Key", self._key_edit)
+
+        self._enabled_check = QCheckBox("启用（参与对话回退）")
+        self._enabled_check.setChecked(bool(entry.get("enabled", True)))
+        form.addRow(self._enabled_check)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        cancel = QPushButton("取消")
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton("保存")
+        ok.setDefault(True)
+        ok.clicked.connect(self._on_save)
+        buttons.addWidget(cancel)
+        buttons.addWidget(ok)
+        form.addRow(buttons)
+
+    def _on_save(self) -> None:
+        name = self._name_edit.text().strip()
+        base_url = self._url_edit.text().strip()
+        model = self._model_edit.text().strip()
+        if not name or not base_url.startswith(("http://", "https://")) or not model:
+            QMessageBox.warning(
+                self, "信息不完整",
+                "显示名称、Base URL（http/https 开头）与模型名都不能为空。",
+            )
+            return
+        self.accept()
+
+    def entry(self) -> dict[str, Any]:
+        api_key = self._key_edit.text().strip()
+        if not api_key and self._provider_id:
+            api_key = self._original_key  # 编辑时留空 = 保持原 Key
+        return {
+            "id": self._provider_id or "",
+            "name": self._name_edit.text().strip(),
+            "base_url": self._url_edit.text().strip(),
+            "model": self._model_edit.text().strip(),
+            "api_key": api_key,
+            "enabled": self._enabled_check.isChecked(),
+        }
+
+
+class CustomProviderCard(QFrame):
+    """一条自定义 Provider：名称 / Base URL / 模型 / 启用状态 + 编辑/删除。"""
+
+    def __init__(self, entry: dict[str, Any], *, on_edit, on_delete, parent=None) -> None:
+        super().__init__(parent)
+        self.provider_id = str(entry["id"])
+        self.setObjectName("customProviderCard")
+        self.setStyleSheet(
+            "QFrame#customProviderCard { border: 1px solid "
+            f"{theme.css_color(theme.SEPARATOR_COLOR)}; border-radius: 8px; }}"
+        )
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(4)
+
+        header = QHBoxLayout()
+        name_label = QLabel(
+            f"{entry['name']}" + ("" if entry.get("enabled") else "（已停用）")
+        )
+        self._entry_name = entry["name"]
+        name_label.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_PRIMARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; font-weight: 600;"
+        )
+        header.addWidget(name_label)
+        header.addStretch(1)
+        state = QLabel("● 已启用" if entry.get("enabled") else "○ 已停用")
+        state.setStyleSheet(
+            f"color: {theme.css_color(theme.DOCK_STATUS_GREEN if entry.get('enabled') else theme.TEXT_SECONDARY)}; "
+            "font-weight: 600;"
+        )
+        header.addWidget(state)
+        layout.addLayout(header)
+
+        detail = QLabel(f"{entry['base_url']}  ·  模型 {entry['model']}")
+        detail.setWordWrap(True)
+        detail.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {theme.FONT_SIZE_SMALL}pt;"
+        )
+        layout.addWidget(detail)
+        self._detail_text = detail.text()
+
+        key_mask = QLabel(KEY_MASK)
+        key_mask.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-size: {theme.FONT_SIZE_SMALL}pt;"
+        )
+        layout.addWidget(key_mask)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        edit_button = QPushButton("编辑")
+        edit_button.clicked.connect(lambda: on_edit(self.provider_id))
+        delete_button = QPushButton("删除")
+        delete_button.clicked.connect(lambda: on_delete(self.provider_id))
+        for button in (edit_button, delete_button):
+            button.setCursor(Qt.PointingHandCursor)
+            button.setStyleSheet(theme.link_button_style(button.objectName()))
+            buttons.addWidget(button)
+        layout.addLayout(buttons)
+
+    def label_text(self) -> str:
+        """Human-readable summary (name + endpoint + model) for tests."""
+        return f"{self._entry_name} {self._detail_text}"
+
+
 class ProviderManagerWindow(QDialog):
     """AI 模型设置 — credential cards over the Phase 3A status layer."""
 
@@ -239,17 +398,25 @@ class ProviderManagerWindow(QDialog):
         layout.addWidget(scroll, 1)
 
         self._cards: list[ProviderCard] = []
+        self._custom_cards: list[CustomProviderCard] = []
         self.refresh()
 
     # ------------------------------------------------------------------
     # rendering
     # ------------------------------------------------------------------
     def refresh(self) -> None:
-        """Rebuild all cards from the live status layer."""
+        """Rebuild all cards from the live status layer + custom entries."""
         for card in self._cards:
             card.setParent(None)
             card.deleteLater()
         self._cards = []
+        self._custom_cards = []
+        # 清空整个卡片布局（含历史 stretch），随后按固定顺序重建。
+        while self._cards_layout.count():
+            item = self._cards_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
 
         for row in self._manager.list_providers():
             card = ProviderCard(
@@ -264,11 +431,47 @@ class ProviderManagerWindow(QDialog):
             )
             self._cards_layout.addWidget(card)
             self._cards.append(card)
+
+        # ---- 自定义 Provider（用户自配 OpenAI 兼容端点） ----
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        divider.setStyleSheet(
+            f"color: {theme.css_color(theme.SEPARATOR_COLOR)};"
+        )
+        self._cards_layout.addWidget(divider)
+        section = QLabel("自定义 Provider（任意 OpenAI 兼容端点）")
+        section.setStyleSheet(
+            f"color: {theme.css_color(theme.TEXT_SECONDARY)}; "
+            f"font-family: '{theme.FONT_FAMILY}'; "
+            f"font-size: {theme.FONT_SIZE_SMALL}pt;"
+        )
+        self._cards_layout.addWidget(section)
+
+        for entry in list_custom_providers(self._store):
+            card = CustomProviderCard(
+                entry,
+                on_edit=self._edit_custom_provider,
+                on_delete=self._delete_custom_provider,
+            )
+            self._cards_layout.addWidget(card)
+            self._custom_cards.append(card)
+
+        add_button = QPushButton("＋ 添加自定义 Provider")
+        add_button.setObjectName("addCustomProvider")
+        add_button.setCursor(Qt.PointingHandCursor)
+        add_button.setStyleSheet(theme.link_button_style(add_button.objectName()))
+        add_button.clicked.connect(self._add_custom_provider)
+        self._cards_layout.addWidget(add_button)
+
         self._cards_layout.addStretch(1)
 
     def cards(self) -> list[ProviderCard]:
         """Card handles for tests/tooling (id / status / labels)."""
         return list(self._cards)
+
+    def custom_cards(self) -> list[CustomProviderCard]:
+        """Custom-provider card handles for tests/tooling."""
+        return list(self._custom_cards)
 
     # ------------------------------------------------------------------
     # flows
@@ -282,6 +485,51 @@ class ProviderManagerWindow(QDialog):
 
     def _delete_key(self, provider_id: str, credential_key: str) -> None:
         self._store.delete(credential_key)
+        self._reload_fn()
+        self.refresh()
+
+    # ------------------------------------------------------------------
+    # 自定义 Provider（用户自配 OpenAI 兼容端点）
+    # ------------------------------------------------------------------
+    def _add_custom_provider(self) -> None:
+        dialog = CustomProviderDialog(parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            save_custom_provider(self._store, dialog.entry())
+        except CustomProviderError as exc:
+            QMessageBox.warning(self, "无法保存", str(exc))
+            return
+        self._reload_fn()
+        self.refresh()
+
+    def _edit_custom_provider(self, provider_id: str) -> None:
+        entry = get_custom_provider(self._store, provider_id)
+        if entry is None:
+            self.refresh()
+            return
+        dialog = CustomProviderDialog(entry, parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            save_custom_provider(self._store, dialog.entry())
+        except CustomProviderError as exc:
+            QMessageBox.warning(self, "无法保存", str(exc))
+            return
+        self._reload_fn()
+        self.refresh()
+
+    def _delete_custom_provider(self, provider_id: str) -> None:
+        confirm = QMessageBox.question(
+            self,
+            "删除自定义 Provider",
+            "确定删除该自定义 Provider？删除后对话回退链不再使用它。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+        delete_custom_provider(self._store, provider_id)
         self._reload_fn()
         self.refresh()
 

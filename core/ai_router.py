@@ -23,6 +23,7 @@ from providers.base import (
     DEFAULT_TIMEOUT_SECONDS,
     BaseProvider,
     ChatCompletion,
+    OpenAICompatibleProvider,
     ProviderTimeoutError,
     validate_messages,
 )
@@ -42,6 +43,19 @@ DEFAULT_STATE = {
         "deepseek": 0,
     },
 }
+
+# User-configured custom providers (OpenAI-compatible).  The composition
+# root registers a loader backed by the credential store; the router only
+# knows the loader contract: callable -> list of entry dicts with
+# id/name/base_url/model/api_key/enabled.  Entries are appended AFTER the
+# built-in trio and re-read on every reload() (hot update).
+_custom_provider_loader: Callable[[], list[dict[str, Any]]] | None = None
+
+
+def set_custom_provider_loader(loader: Callable[[], list[dict[str, Any]]] | None) -> None:
+    """Register (or clear) the custom-provider loader used at rebuild time."""
+    global _custom_provider_loader
+    _custom_provider_loader = loader
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,11 +220,25 @@ class ProviderRouter:
     @staticmethod
     def _build_default_providers() -> tuple[BaseProvider, ...]:
         """Fresh default adapter set; credentials resolve at construction."""
-        return (
+        providers: list[BaseProvider] = [
             TJUQwenProvider(),
             ZhipuGLMProvider(),
             DeepSeekProvider(),
-        )
+        ]
+        loader = _custom_provider_loader
+        if loader is not None:
+            for entry in loader():
+                if not entry.get("enabled"):
+                    continue
+                providers.append(
+                    OpenAICompatibleProvider(
+                        name=f"custom:{entry['id']}",
+                        base_url=str(entry.get("base_url") or ""),
+                        api_key=str(entry.get("api_key") or ""),
+                        default_model=str(entry.get("model") or ""),
+                    )
+                )
+        return tuple(providers)
 
     def _load_state(self) -> dict[str, Any]:
         try:

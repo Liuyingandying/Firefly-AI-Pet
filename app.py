@@ -54,7 +54,12 @@ from core.settings_manager import SettingsManager
 from core.pet_state_resolver import PetStateResolver
 from core.visual_state_filter import VisualStateFilter
 from core.runtime_bus import RuntimeBus, RuntimeEvent, RuntimeState
-from core.ai_router import ProvidersUpdated, reload_default_routers, set_updated_publisher
+from core.ai_router import (
+    ProvidersUpdated,
+    reload_default_routers,
+    set_custom_provider_loader,
+    set_updated_publisher,
+)
 from core.credential_store import default_store
 from providers.base import register_credential_source
 from core.runtime_state_aggregator import RuntimeStateAggregator
@@ -2277,6 +2282,12 @@ def main() -> int:
     # Registration is safe before the shell: the store itself is lazy and
     # creates its directory on first write only.
     register_credential_source(default_store().get)
+    # 用户自配 Provider：路由重建时从凭据库读取自定义 OpenAI 兼容端点。
+    from core.custom_providers import enabled_custom_providers
+
+    set_custom_provider_loader(
+        lambda: enabled_custom_providers(default_store())
+    )
 
     server = QLocalServer()
     server.removeServer(SERVER_NAME)
