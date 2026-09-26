@@ -57,6 +57,9 @@ from ui import theme
 
 KEY_MASK = "************"
 
+# 模型名称统一使用亮蓝紫色（深色窗口上清晰醒目，与品牌紫呼应）。
+PROVIDER_NAME_COLOR = "#A78BFA"
+
 _SOURCE_HINTS = {
     SOURCE_ENVIRONMENT: "环境变量优先级最高，本窗口修改不生效",
     SOURCE_CREDENTIAL_STORE: "本机存储",
@@ -107,7 +110,7 @@ class ProviderCard(QFrame):
         header = QHBoxLayout()
         name_label = QLabel(display_name)
         name_label.setStyleSheet(
-            f"color: {theme.css_color(theme.TEXT_PRIMARY)}; "
+            f"color: {PROVIDER_NAME_COLOR}; "
             f"font-family: '{theme.FONT_FAMILY}'; font-weight: 600;"
         )
         header.addWidget(name_label)
@@ -296,7 +299,7 @@ class CustomProviderCard(QFrame):
         )
         self._entry_name = entry["name"]
         name_label.setStyleSheet(
-            f"color: {theme.css_color(theme.TEXT_PRIMARY)}; "
+            f"color: {PROVIDER_NAME_COLOR}; "
             f"font-family: '{theme.FONT_FAMILY}'; font-weight: 600;"
         )
         header.addWidget(name_label)
