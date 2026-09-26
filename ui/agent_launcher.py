@@ -298,6 +298,10 @@ def codex_available() -> bool:
     )
 
 
+def qwen_available() -> bool:
+    return _find_executable("qwen") is not None
+
+
 def zcode_available() -> bool:
     return _discover_zcode() is not None
 
