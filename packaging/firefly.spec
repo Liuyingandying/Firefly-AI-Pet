@@ -58,6 +58,9 @@ hiddenimports = [
     'core.credential_store',
     'core.provider_manager',
     'ui.provider_manager_window',
+    # 插件专属链：core.video_pipeline 仅被 firefly_video_extension 引用，
+    # 宿主入口不可达 → 静态分析不收（rc3 缺失致该插件加载失败）。
+    'core.video_pipeline',
 ]
 # lazily imported at runtime (memory semantic index chain, OCR)
 hiddenimports += collect_submodules('mem0')
