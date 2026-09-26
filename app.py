@@ -575,6 +575,8 @@ class VisualShell(QObject):
         # Phase 1B shadow: records old-path + new-path for consistency check.
         self.state_monitor.resolved_state_changed.connect(self._state_verifier.on_old_path)
         self.runtime_bus.subscribe_state(self._state_verifier.on_new_path)
+        # 凭据变更 → Qwen 状态点立即重探（不再等 90 秒周期）。
+        self.runtime_bus.subscribe_event(self._on_providers_updated_event)
         self.coordinator.permission_view_requested.connect(self._on_permission_view)
         self.coordinator.short_ask_requested.connect(self._on_short_ask_requested)
         self.short_ask.send_requested.connect(self._on_short_ask_send)
@@ -901,6 +903,11 @@ class VisualShell(QObject):
         self.coordinator.on_agent_state(agent_id, state)
         self.notification_manager.on_agent_state(state)
         self.keep_awake.on_agent_state(state)
+
+    def _on_providers_updated_event(self, event: Any) -> None:
+        """凭据变更（providers.updated）→ Qwen 状态点立即重探，不等 90 秒周期。"""
+        if getattr(event, "kind", "") == "providers.updated":
+            self.dock.on_providers_updated()
 
     def _on_dock_agent_selected(self, agent_id: str) -> None:
         # The dock is now a launcher: each click opens the CLI / app for the

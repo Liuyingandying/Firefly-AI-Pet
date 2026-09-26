@@ -279,6 +279,11 @@ class AgentDock(QWidget):
         api_ok = self._qwen_api is True
         dot.set_present(cli_ok or api_ok)
 
+    def on_providers_updated(self) -> None:
+        """凭据变更：重置熔断并立即重探 TJU API（不等 90 秒周期）。"""
+        if self._tju_health is not None:
+            self._tju_health.probe_now()
+
     def _on_item_activated(self, launcher_id: str) -> None:
         self.launch_agent.emit(launcher_id)
 

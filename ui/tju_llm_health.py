@@ -51,9 +51,14 @@ logger = logging.getLogger(__name__)
 
 
 class TjuApiStatus:
-    """Three-state availability of the configured TJU ``tju-llm`` API."""
+    """Four-state availability of the configured TJU ``tju-llm`` API.
+
+    ``NOT_CONFIGURED`` = no key/endpoint/model set (a configuration state,
+    not an outage) — the dock hides the dot for this state.
+    """
 
     UNKNOWN = "unknown"
+    NOT_CONFIGURED = "not_configured"
     AVAILABLE = "available"
     UNAVAILABLE = "unavailable"
 
@@ -242,9 +247,15 @@ class TjuLlmHealthChecker(QObject):
     def _probe_once(self) -> None:
         if self._breaker.is_open:
             return  # breaker open: reuse its state, send no extra probe
+        provider = self._current_provider()
+        # 未配置密钥/端点/模型 = 配置状态而非故障：不进熔断器，
+        # 点直接隐藏（红点只保留给"配置了但探测失败"）。
+        if not provider.api_key or not provider.endpoint or not provider.default_model:
+            self._set_status(TjuApiStatus.NOT_CONFIGURED)
+            return
         try:
             probe_tju_llm(
-                self._current_provider(),
+                provider,
                 transport=self._transport,
                 timeout=self._timeout,
             )
@@ -255,6 +266,18 @@ class TjuLlmHealthChecker(QObject):
         else:
             self._breaker.record_success()
             self._set_status(TjuApiStatus.AVAILABLE)
+
+    def probe_now(self) -> None:
+        """事件驱动的立即探测：重置熔断器后在后台线程执行一次。
+
+        供凭据变更（providers.updated）等场景调用——保存密钥后 1~2 秒内
+        状态点即可更新，无需等下一轮 90 秒周期。
+        """
+        with self._lock:
+            self._breaker.record_success()  # 重置熔断，允许立即探测
+        threading.Thread(
+            target=self._probe_once, daemon=True, name="firefly-tju-probe-now"
+        ).start()
 
     def _set_status(self, status: str) -> None:
         with self._lock:
