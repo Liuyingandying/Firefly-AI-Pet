@@ -19,12 +19,15 @@ from __future__ import annotations
 import logging
 import re
 import sys
+from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtGui import QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -35,7 +38,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from character import CharacterDisplayNames
 from core.agent_events import AgentEventType
 from core.learning.orchestrator import LoopStatus
 from ui import theme
@@ -48,6 +50,201 @@ from ui.v2.sidebar import Sidebar
 from ui.v2.video_card import VideoCard, VideoCardInfo
 
 log = logging.getLogger(__name__)
+
+# ---- v5: 无边框融合标题栏（Claude Desktop 式） -------------------------------
+# logo 探测: 调试副本(ui美化/logo.png) → 项目根 logo.png → assets/firefly.ico
+# → 线性 ✦ 图标兜底; 全部相对路径, Release 打包不绑机器。
+
+_LOGO_CANDIDATES = (
+    Path(__file__).resolve().parents[2] / "logo.png",
+    theme.repo_root() / "logo.png",
+    theme.repo_root() / "assets" / "firefly.ico",
+)
+
+_RESIZE_MARGIN = 6  # 窗口四边可拖拽调宽的边缘宽度(px)
+
+
+def _load_logo_pixmap(size: int = 26) -> QPixmap | None:
+    for path in _LOGO_CANDIDATES:
+        if path.is_file():
+            pixmap = QPixmap(str(path))
+            if not pixmap.isNull():
+                # 高 DPI: 按物理像素采样并标记 DPR, 缩放屏上保持锐利。
+                return theme.scaled_asset_pixmap(pixmap, size)
+    return None
+
+
+class _WindowButton(QPushButton):
+    """标题栏窗口控制按钮: 透明底, hover 显示淡紫底（关闭钮红底白 ✕）."""
+
+    def __init__(
+        self,
+        icon_kind: str,
+        tooltip: str,
+        *,
+        hover_fill: tuple[int, int, int, int] | None = None,
+        hover_icon: tuple[int, int, int, int] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._kind = icon_kind
+        self._hover_icon = hover_icon
+        self._hovered = False
+        self.setFixedSize(44, 34)
+        self.setCursor(Qt.ArrowCursor)
+        self.setToolTip(tooltip)
+        self.setFlat(True)
+        fill = hover_fill if hover_fill is not None else theme.V2.PRIMARY_SOFT
+        self.setStyleSheet(
+            "QPushButton { background: transparent; border: none;"
+            " border-radius: 8px; }"
+            f"QPushButton:hover {{ background: rgba{fill}; }}"
+        )
+        self._apply_icon()
+
+    def _apply_icon(self) -> None:
+        if self._hovered and self._hover_icon is not None:
+            color = self._hover_icon
+        else:
+            color = theme.V2.TEXT_SECONDARY
+        self.setIcon(theme.vector_icon(self._kind, color, 13))
+
+    def set_kind(self, icon_kind: str) -> None:
+        if icon_kind != self._kind:
+            self._kind = icon_kind
+            self._apply_icon()
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        self._hovered = True
+        self._apply_icon()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._hovered = False
+        self._apply_icon()
+        super().leaveEvent(event)
+
+
+_LOGO_SIZE = 42  # v8.7: logo 本体尺寸（28 × 1.5）
+
+
+class _LogoBadge(QLabel):
+    """logo 容器（v8.8: 加大留白, 完整承载圆形蒙版后的位图）."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(_LOGO_SIZE + 12, _LOGO_SIZE + 12)
+        self.setAlignment(Qt.AlignCenter)
+        self.setStyleSheet("background: transparent; border: none;")
+
+
+class _TitleBar(QFrame):
+    """与主界面融合的自定义标题栏: logo + 应用名 + 最小化/最大化/关闭.
+
+    背景透明（延续主窗口米白渐变）, 按住拖动 = 系统级窗口移动
+    (``startSystemMove``, 支持 Windows 贴边分屏), 双击 = 最大化/还原。
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("appTitleBar")
+        self.setFixedHeight(_LOGO_SIZE + 10)
+        self.setStyleSheet(
+            "#appTitleBar { background: transparent; border: none; }"
+        )
+        self.setCursor(Qt.ArrowCursor)
+
+        layout = QHBoxLayout(self)
+        # v8.7: 左侧边距调小（14 → 6, 连同窗口外边距视觉更贴近左缘）。
+        layout.setContentsMargins(6, 3, 4, 3)
+        layout.setSpacing(10)
+
+        # v8.7: 无底托纯 logo —— 删除紫色光晕背景, logo 本体放大 1.5 倍
+        # （28 → 42, 圆形蒙版保留, 与标题基线视觉平衡）。
+        logo = _LogoBadge(self)
+        logo_pixmap = _load_logo_pixmap(_LOGO_SIZE)
+        if logo_pixmap is not None:
+            # v8.8: 源图非正方形时先居中裁方（KeepAspectRatio 缩放后位图
+            # 贴在左上角, 圆形蒙版会把出界内容裁掉 → 显示不完整）。
+            width, height = logo_pixmap.width(), logo_pixmap.height()
+            if width != height:
+                square = min(width, height)
+                logo_pixmap = logo_pixmap.copy(
+                    (width - square) // 2, (height - square) // 2, square, square
+                )
+            # 圆形蒙版: 位图裁成正圆。
+            ratio = logo_pixmap.devicePixelRatio()
+            side = int(_LOGO_SIZE * ratio)
+            masked = QPixmap(side, side)
+            masked.setDevicePixelRatio(ratio)
+            masked.fill(Qt.transparent)
+            mask_painter = QPainter(masked)
+            mask_painter.setRenderHint(QPainter.Antialiasing)
+            circle = QPainterPath()
+            circle.addEllipse(0, 0, _LOGO_SIZE, _LOGO_SIZE)
+            mask_painter.setClipPath(circle)
+            mask_painter.drawPixmap(0, 0, logo_pixmap)
+            mask_painter.end()
+            logo.setPixmap(masked)
+        else:
+            logo.setPixmap(
+                theme.vector_pixmap("sparkle", theme.V2.PRIMARY, _LOGO_SIZE - 6)
+            )
+        layout.addWidget(logo)
+
+        title = QLabel("流萤 · Firefly AI Pet", self)
+        title.setStyleSheet(
+            f"color: rgba{theme.V2.TEXT_MAIN}; background: transparent;"
+            f"font-family: {theme.V2_FONT_STACK};"
+            f"font-size: {theme.V2.FONT_BODY}pt; font-weight: 700;"
+        )
+        layout.addWidget(title)
+        layout.addStretch(1)
+
+        self._min_button = _WindowButton("win_min", "最小化", parent=self)
+        self._min_button.clicked.connect(
+            lambda: self.window().showMinimized()
+        )
+        self._max_button = _WindowButton("win_max", "最大化", parent=self)
+        self._max_button.clicked.connect(self._toggle_maximize)
+        self._close_button = _WindowButton(
+            "win_close", "关闭",
+            hover_fill=(232, 17, 35, 255),
+            hover_icon=(255, 255, 255, 255),
+            parent=self,
+        )
+        self._close_button.clicked.connect(self.window().close)
+        layout.addWidget(self._min_button)
+        layout.addWidget(self._max_button)
+        layout.addWidget(self._close_button)
+
+    def refresh_max_icon(self) -> None:
+        window = self.window()
+        self._max_button.set_kind(
+            "win_restore" if window is not None and window.isMaximized() else "win_max"
+        )
+
+    def _toggle_maximize(self) -> None:
+        window = self.window()
+        if window is None:
+            return
+        if window.isMaximized():
+            window.showNormal()
+        else:
+            window.showMaximized()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            handle = self.window().windowHandle()
+            if handle is not None:
+                handle.startSystemMove()
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            self._toggle_maximize()
+        super().mouseDoubleClickEvent(event)
+
 
 _HEADER_STATE_BY_STATUS = {
     "thinking": "working",
@@ -97,29 +294,28 @@ class CompanionConsole(QMainWindow):
         *,
         on_video_card: Callable[[VideoCardInfo], None] | None = None,
         runtime_bus: Any = None,
-        display_names: CharacterDisplayNames | None = None,
     ) -> None:
         super().__init__(parent)
         self.runner = runner
-        runtime = getattr(runner, "runtime", None)
-        character = getattr(runtime, "character", None)
-        self._display_names = display_names or CharacterDisplayNames.from_character(
-            character
-        )
         self._on_video_card = on_video_card
         self._last_card_bvid: str | None = None
         self._runtime_unsubscribe: Callable[[], None] | None = None
 
-        self.setWindowTitle(f"{self._display_names.brand_name} 控制台")
+        self.setWindowTitle("流萤 · AI Pet 控制台")
         self.resize(1280, 800)
+        # v5: 无边框融合标题栏 —— 去掉系统标题栏, logo 与窗口控件融入主界面
+        # (拖动=系统级移动支持贴边分屏; 边缘 6px 可拉伸; 双击标题栏最大化)。
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+        logo_pixmap = _load_logo_pixmap(64)
+        if logo_pixmap is not None:
+            self.setWindowIcon(QIcon(logo_pixmap))
         # Phase UI-2-C: deep-space background from the centralized theme
         # (assets/ui/background image overrides the code gradient).
         self.setStyleSheet(theme.v2_background_style())
+        self._pending_edges: Qt.Edge | None = None
 
-        self.header = CharacterHeader(
-            name=self._display_names.display_name, parent=self
-        )
-        self.chat = ChatView(self, display_names=self._display_names)
+        self.header = CharacterHeader(parent=self)
+        self.chat = ChatView(self)
         self.ability = AbilityPanel(self)
 
         # Phase 1B: learning-mode controller. The console owns the shell
@@ -138,10 +334,7 @@ class CompanionConsole(QMainWindow):
         # Phase UI-2-B: AI Terminal composer (drop-in for the old QLineEdit —
         # text()/setText()/clear()/setPlaceholderText()/setFocus() delegates).
         self.input = InputArea(self)
-        self.input.setPlaceholderText(
-            f"和{self._display_names.assistant_name}聊天…"
-            "（B站链接=视频阅读；考考我=学习模式）"
-        )
+        self.input.setPlaceholderText("和流萤聊天…（B站链接=视频阅读；考考我=学习模式）")
         self.send_button = self.input.send_button  # keep the attribute surface
         # Phase 8B-2: review reminder shows once per learning-mode session;
         # the textbook import remembers the file path for the resource viewer.
@@ -150,14 +343,18 @@ class CompanionConsole(QMainWindow):
         self._textbook_import_paths: dict[str, str] = {}
         self._textbook_review_cards: dict[str, Any] = {}
 
-        # Phase UI-1 three-column layout:
+        # Phase UI-1 three-column layout (ui美化比例 1 : 3 : 1.2 —
+        # Sidebar 240px | Conversation (stretch) | CompanionPanel 288px,
+        # 突出聊天核心区域):
         #   Sidebar (identity + abilities + bottom actions)
         #   | Conversation (chat + terminal-style input)
-        #   | CompanionPanel (companion placeholder + status card)
+        #   | CompanionPanel (character stage + status card)
+        # v7 还原: 能力菜单容器 = 白卡 + 浅底菜单（初版样式;
+        # 紫色悬浮面板已被 ui初版 之外的迭代放弃, 样式细节在 ability_panel）。
         self.ability.setStyleSheet(
             f"AbilityPanel {{ background: rgba{theme.V2.CARD_BG};"
             f" border: 1px solid rgba{theme.V2.BORDER_SOFT};"
-            f" border-radius: 12px; }}"
+            f" border-radius: {theme.V2.RADIUS_CONTAINER}px; }}"
         )
         self._recent_provider = self._build_recent_session_provider()
         self.sidebar = Sidebar(
@@ -166,46 +363,63 @@ class CompanionConsole(QMainWindow):
             recent_provider=self._recent_provider,
             parent=self,
         )
-        self.companion = CompanionPanel(
-            parent=self,
-            runner=self.runner,
-            display_names=self._display_names,
-        )
+        self.companion = CompanionPanel(parent=self, runner=self.runner)
         # Phase 8B-2: [查看材料] executes the viewer request (Part A).
         self.companion.view_materials_requested.connect(self._on_view_materials)
+
+        # ui美化: 顶部模式状态栏并入 ChatView（chat.set_mode / set_status,
+        # 含「AI 正在思考…」跳动光点）, 学习模式条不再单独占位。
+        # v6.5: 聊天区淡紫渐变背景从 ChatView 上移到这个外层容器, 使背景
+        # 延伸覆盖输入框区域; ChatView 透明化, InputArea 白卡悬浮在渐变上
+        # （仿 ZCode: 输入框是浮在聊天背景之上的 composer 卡片）。
+        self.chat_wrap = QFrame(self)
+        self.chat_wrap.setObjectName("chatWrap")
+        self.chat_wrap.setStyleSheet(
+            f"#chatWrap {{"
+            f"  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+            f"    stop:0 rgba{theme.V2.CHAT_BG_TOP}, stop:1 rgba{theme.V2.CHAT_BG_BOTTOM});"
+            f"  border: 1px solid rgba{theme.V2.CHAT_BORDER};"
+            f"  border-radius: {theme.V2.RADIUS_CONTAINER}px;"
+            f"}}"
+        )
+        wrap_layout = QVBoxLayout(self.chat_wrap)
+        wrap_layout.setContentsMargins(0, 0, 0, 0)
+        wrap_layout.setSpacing(8)
+        wrap_layout.addWidget(self.chat, 1)
+        # 输入框四周留出渐变边缘 → 悬浮感（白卡 + 紫调阴影浮于渐变之上）
+        input_row = QHBoxLayout()
+        input_row.setContentsMargins(12, 0, 12, 12)
+        input_row.addWidget(self.input)
+        wrap_layout.addLayout(input_row)
 
         conversation_column = QVBoxLayout()
         conversation_column.setContentsMargins(0, 8, 0, 0)
         conversation_column.setSpacing(4)
-        # Phase 1B: one lightweight mode strip above the chat ("学习模式 ·
-        # 自动控制原理"). Hidden when learning mode is off.
-        self.mode_strip = QLabel("", self)
-        self.mode_strip.setObjectName("learningModeStrip")
-        self.mode_strip.setStyleSheet(
-            f"#learningModeStrip {{"
-            f"  color: rgba{theme.V2.TEXT_MAIN};"
-            f"  background: rgba{theme.V2.CARD_BG};"
-            f"  border: 1px solid rgba{theme.V2.BORDER_SOFT};"
-            f"  border-radius: 10px;"
-            f"  padding: 4px 12px;"
-            f"  font-family: {theme.V2_FONT_STACK};"
-            f"  font-size: {theme.V2.FONT_CAPTION}pt;"
-            f"}}"
-        )
-        self.mode_strip.setVisible(False)
-        conversation_column.addWidget(self.mode_strip)
-        conversation_column.addWidget(self.chat, 1)
-        conversation_column.addWidget(self.input)
+        conversation_column.addWidget(self.chat_wrap, 1)
+
+        # v5: 融合标题栏（跨三栏全宽, 透明背景延续主窗口渐变）。
+        self.title_bar = _TitleBar(self)
 
         root = QHBoxLayout()
-        root.setContentsMargins(10, 10, 10, 10)
+        root.setContentsMargins(0, 8, 0, 0)
         root.setSpacing(8)
         root.addWidget(self.sidebar)
         root.addLayout(conversation_column, 1)
         root.addWidget(self.companion)
+
         central = QWidget(self)
-        central.setLayout(root)
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(10, 0, 10, 8)
+        outer.setSpacing(0)
+        outer.addWidget(self.title_bar)
+        outer.addLayout(root)
         self.setCentralWidget(central)
+        # v5: 边缘拖拽 resize —— 中央区四边 6px 检测（子布局 margin 10px,
+        # 边缘带无子控件, 事件由 central 自身接收）。
+        self._central = central
+        central.setMouseTracking(True)
+        central.setAttribute(Qt.WA_Hover, True)
+        central.installEventFilter(self)
 
         # Wiring
         self.input.send_requested.connect(self._send)
@@ -239,6 +453,69 @@ class CompanionConsole(QMainWindow):
         self._refresh_recent_sessions()
         if self._current_session_id:
             self._render_history(self._current_session_id)
+
+    # -------------------------------------------------- v5 frameless chrome
+
+    def _edge_at(self, pos) -> tuple[Qt.Edge, Qt.CursorShape]:
+        """窗口坐标 → (待拉伸边缘组合, 光标形状); 无边缘 → (0, Arrow)."""
+        x, y = pos.x(), pos.y()
+        width, height = self._central.width(), self._central.height()
+        left = x <= _RESIZE_MARGIN
+        right = x >= width - _RESIZE_MARGIN
+        top = y <= _RESIZE_MARGIN
+        bottom = y >= height - _RESIZE_MARGIN
+        edges = Qt.Edges()
+        if left:
+            edges |= Qt.LeftEdge
+        if right:
+            edges |= Qt.RightEdge
+        if top:
+            edges |= Qt.TopEdge
+        if bottom:
+            edges |= Qt.BottomEdge
+        if not edges:
+            return edges, Qt.ArrowCursor
+        if (left or right) and not (top or bottom):
+            cursor = Qt.SizeHorCursor
+        elif (top or bottom) and not (left or right):
+            cursor = Qt.SizeVerCursor
+        elif (left and top) or (right and bottom):
+            cursor = Qt.SizeFDiagCursor
+        else:
+            cursor = Qt.SizeBDiagCursor
+        return edges, cursor
+
+    def eventFilter(self, watched, event) -> bool:  # type: ignore[override]
+        if watched is self._central:
+            event_type = event.type()
+            if event_type in (QEvent.HoverMove, QEvent.HoverEnter, QEvent.MouseMove):
+                if self.isMaximized():
+                    self._central.setCursor(Qt.ArrowCursor)
+                    self._pending_edges = None
+                else:
+                    edges, cursor = self._edge_at(event.position().toPoint())
+                    self._central.setCursor(cursor)
+                    self._pending_edges = edges or None
+            elif event_type == QEvent.Leave:
+                self._central.setCursor(Qt.ArrowCursor)
+                self._pending_edges = None
+            elif event_type == QEvent.MouseButtonPress:
+                if (
+                    not self.isMaximized()
+                    and self._pending_edges
+                    and event.button() == Qt.LeftButton
+                ):
+                    handle = self.windowHandle()
+                    if handle is not None:
+                        handle.startSystemResize(self._pending_edges)
+                        return True
+        return super().eventFilter(watched, event)
+
+    def changeEvent(self, event) -> None:  # type: ignore[override]
+        """最大化/还原时刷新标题栏按钮图标（□ ↔ 叠框）。"""
+        if event.type() == QEvent.WindowStateChange:
+            self.title_bar.refresh_max_icon()
+        super().changeEvent(event)
 
     # ------------------------------------------------------------- sending
 
@@ -321,14 +598,15 @@ class CompanionConsole(QMainWindow):
         self._apply_learning_state()
 
     def _apply_learning_state(self) -> None:
-        """Refresh the lightweight mode strip + right status card from the
+        """Refresh the chat mode strip + right status card from the
         controller's current state (read-only)."""
         controller = self.learning
         enabled = bool(getattr(controller.state, "enabled", False))
         # status_line() already carries the 📘 prefix (single formatting
         # source in LearningModeState/LearningRuntimeContext).
-        self.mode_strip.setText(controller.status_line())
-        self.mode_strip.setVisible(enabled)
+        self.chat.set_mode(controller.status_line() if enabled else "")
+        # 学习模式菜单选中态同步（AbilityPanel 互斥单选）。
+        self.ability.set_active("study" if enabled else None)
         # 右侧「当前上下文状态卡」——只展示真实事实（无占位）。
         self._update_context_status()
         # Phase 7B: bound learning resources stay a separate display block.
@@ -922,29 +1200,33 @@ class CompanionConsole(QMainWindow):
 
     def _on_event(self, event: Any) -> None:
         event_type = getattr(event, "type", None)
-        if event_type is AgentEventType.STATUS:
+        if event_type == AgentEventType.STATUS:
             status = getattr(event, "status", "") or ""
             state = _HEADER_STATE_BY_STATUS.get(status)
             if state:
                 self.header.set_state(state)
+                self.companion.set_runtime_state(state)
             self.chat.set_status(_STATUS_TEXT.get(status, ""))
-        elif event_type is AgentEventType.FINAL:
+        elif event_type == AgentEventType.FINAL:
             text = getattr(event, "text", "") or ""
             self.chat.set_status("")
             self.header.set_task(text)
             self.header.set_state("success")
+            self.companion.set_runtime_state("success")
             self.chat.append_assistant(text, voice_text=text)  # Voice-1.3: 播放按钮
             self._maybe_insert_video_card(text)
             # 消息完成后刷新右侧上下文状态卡（focus 可能已变化）。
             self._update_context_status()
-        elif event_type is AgentEventType.ERROR:
+        elif event_type == AgentEventType.ERROR:
             text = getattr(event, "text", "") or "出错了"
             self.chat.set_status("")
             self.header.set_state("error")
+            self.companion.set_runtime_state("error")
             self.chat.append_assistant(f"（{text}）")
-        elif event_type is AgentEventType.CANCELLED:
+        elif event_type == AgentEventType.CANCELLED:
             self.chat.set_status("已取消")
             self.header.set_state("idle")
+            self.companion.set_runtime_state("idle")
 
     def _maybe_insert_video_card(self, assistant_text: str) -> None:
         """After a video-analysis turn, show one card per video in the flow."""
@@ -1028,6 +1310,8 @@ class CompanionConsole(QMainWindow):
         label = _RUNTIME_ACTIVITY_LABELS.get(state)
         if label is not None:
             self.companion.set_companion_state(label)
+            # ui美化: 同一状态 id 驱动右侧立绘动画 / 指示灯 / 状态短句。
+            self.companion.set_runtime_state(state)
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         """Release the singleton holder and bus subscription."""
@@ -1048,10 +1332,7 @@ class CompanionConsole(QMainWindow):
         if action_id == "settings":
             self._on_ability("settings")
         elif action_id == "about":
-            self._hint(
-                f"{self._display_names.brand_name} 控制台\n"
-                "陪伴、阅读、学习、科研，与你同行。"
-            )
+            self._hint("流萤 · Firefly AI Pet 控制台\n陪伴、阅读、学习、科研，与你同行。")
         elif action_id == "new_chat":
             self._new_chat_session()
 
@@ -1254,8 +1535,7 @@ class CompanionConsole(QMainWindow):
         dialog.setWindowTitle("删除会话")
         dialog.setIcon(QMessageBox.Warning)
         dialog.setText(
-            "删除这个会话？\n"
-            f"该操作会删除本会话的聊天记录，无法从{self._display_names.brand_name}中恢复。"
+            "删除这个会话？\n该操作会删除本会话的聊天记录，无法从 Firefly 中恢复。"
         )
         delete_button = dialog.addButton("删除", QMessageBox.DestructiveRole)
         dialog.addButton("取消", QMessageBox.RejectRole)
@@ -1355,13 +1635,17 @@ class CompanionConsole(QMainWindow):
 
         card = QFrame(self)
         card.setObjectName("researchToolsCard")
+        # ui美化: 深色聊天区内的白色卡片（与 AI 气泡一致）+ 16px 圆角。
         card.setStyleSheet(
             f"#researchToolsCard {{"
             f"  background: rgba{theme.V2.CARD_BG};"
-            f"  border: 1px solid rgba{theme.V2.BORDER_SOFT};"
-            f"  border-radius: 16px;"
+            f"  border: 1px solid rgba{theme.V2.CHAT_BORDER};"
+            f"  border-radius: {theme.V2.RADIUS_INPUT}px;"
             f"}}"
         )
+        from ui.v2 import motion
+
+        motion.purple_shadow(card, blur=12, y_offset=2, alpha=26)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(8)
@@ -1389,13 +1673,14 @@ class CompanionConsole(QMainWindow):
         open_btn.setCursor(Qt.PointingHandCursor)
         open_btn.setStyleSheet(
             f"QPushButton {{"
-            f"  color: rgba{theme.V2.TEXT_MAIN}; background: rgba{theme.V2.CARD_BG_USER};"
-            f"  border: 1px solid rgba{theme.V2.BORDER_SOFT}; border-radius: 10px;"
-            f"  padding: 4px 12px; font-family: {theme.V2_FONT_STACK};"
-            f"  font-size: {theme.V2.FONT_CAPTION}pt;"
+            f"  color: rgba{theme.V2.ON_PRIMARY_TEXT}; background: rgba{theme.V2.PRIMARY};"
+            f"  border: none; border-radius: {theme.V2.RADIUS_CARD}px;"
+            f"  padding: 5px 14px; font-family: {theme.V2_FONT_STACK};"
+            f"  font-size: {theme.V2.FONT_CAPTION}pt; font-weight: 600;"
             f"}}"
-            f"QPushButton:hover {{ border: 1px solid rgba{theme.V2.PRIMARY_BLUE}; }}"
+            f"QPushButton:hover {{ background: rgba{theme.V2.PRIMARY_HOVER}; }}"
         )
+        motion.attach_hover_glow(open_btn)
         open_btn.clicked.connect(self._on_research_open_tju)
         row.addWidget(tju_name)
         row.addWidget(tju_note)
@@ -1445,12 +1730,7 @@ class CompanionConsole(QMainWindow):
 _console_instance: CompanionConsole | None = None
 
 
-def open_singleton(
-    runner: Any,
-    runtime_bus: Any = None,
-    *,
-    display_names: CharacterDisplayNames | None = None,
-) -> "CompanionConsole":
+def open_singleton(runner: Any, runtime_bus: Any = None) -> "CompanionConsole":
     """Open (or focus) one console window for the shared character runner.
 
     The instance is held at module level (like the legacy
@@ -1470,11 +1750,7 @@ def open_singleton(
         window.activateWindow()
         window.input.setFocus()
         return window
-    console = CompanionConsole(
-        runner,
-        runtime_bus=runtime_bus,
-        display_names=display_names,
-    )
+    console = CompanionConsole(runner, runtime_bus=runtime_bus)
     _console_instance = console
     console.show()
     console.raise_()

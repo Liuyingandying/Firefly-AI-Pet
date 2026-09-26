@@ -1,13 +1,13 @@
 """Sidebar — left menu column of the companion console (UI V2).
 
-Phase UI-4B-3: Anthropic 简洁工作区 + 星穹铁道菜单式导航. The column keeps
-the SAME CharacterHeader / AbilityPanel instances the console owns (signal
-wiring and the ability→console mapping are untouched); this module only
-re-homes them and restyles the ability buttons into a quiet menu list:
+ui美化版（「流萤」发光紫视觉语言）:
 
-- identity card: avatar/name strip + 「AI 智能伙伴」 tag + ● 在线 status
-- menu: text-only entries (emoji dropped), hover = pale cyan + cyan text
-- bottom: low-key auxiliary actions (设置 / 关于 / 新建对话)
+- 身份卡: 白卡 16px 圆角; 「在线」状态点为慢呼吸动效
+  (ui.v2.motion.BreathingDot)
+- 能力菜单: AbilityPanel 自带线性图标 + 选中态（淡紫填充 + 紫字 +
+  左侧 2px 紫竖条）, 此处不再二次改样式
+- 「新对话」: 加号图标按钮, hover 背景浅紫
+- 底部: 设置 / 关于 对齐左下角; 用户条弱化（图标 + 小字）, 不抢主视觉
 
 No business logic: the bottom buttons only emit ``action_requested``.
 """
@@ -23,39 +23,43 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from ui import theme
-from ui.v2.ability_panel import CAPABILITIES
+from ui.v2 import motion
 from ui.v2.recent_sessions import RecentSessionsCard, UserInfoCard
 
 SIDEBAR_WIDTH = 240
 
-_MENU_BUTTON_STYLE = (
-    "QToolButton {"
-    f"  color: rgba{theme.V2.TEXT_MAIN};"
-    "  background: transparent; border: none; border-radius: 10px;"
-    f"  padding: 7px 4px; text-align: left;"
-    f"  font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_BODY}pt;"
-    "}"
-    "QToolButton:hover {"
-    f"  background: rgba{theme.V2.CARD_BG_USER};"
-    f"  color: rgba{theme.V2.PRIMARY_BLUE};"
-    "}"
-)
-
 _BOTTOM_BUTTON_STYLE = (
     "QPushButton {"
     f"  color: rgba{theme.V2.TEXT_SECONDARY};"
-    "  background: transparent; border: none; border-radius: 8px;"
+    "  background: transparent; border: none;"
+    f"  border-radius: {theme.V2.RADIUS_CARD}px;"
     f"  padding: 4px 8px; text-align: left;"
     f"  font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_CAPTION}pt;"
     "}"
     "QPushButton:hover {"
-    f"  color: rgba{theme.V2.TEXT_MAIN};"
-    f"  background: rgba{theme.V2.CARD_BG_USER};"
+    f"  color: rgba{theme.V2.PRIMARY};"
+    f"  background: rgba{theme.V2.PRIMARY_SOFT};"
+    "}"
+)
+
+_NEW_CHAT_STYLE = (
+    "QToolButton {"
+    f"  color: rgba{theme.V2.PRIMARY};"
+    f"  background: rgba{theme.V2.PRIMARY_SOFT};"
+    f"  border: 1px solid rgba{theme.V2.PRIMARY_GLOW};"
+    f"  border-radius: {theme.V2.RADIUS_CARD}px;"
+    f"  padding: 6px 12px; text-align: left;"
+    f"  font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_BODY}pt;"
+    "}"
+    "QToolButton:hover {"
+    f"  background: rgba{theme.V2.PRIMARY_SOFT};"
+    f"  border: 1px solid rgba{theme.V2.PRIMARY};"
     "}"
 )
 
@@ -77,7 +81,7 @@ def _divider(parent: QWidget) -> QFrame:
 
 
 class Sidebar(QWidget):
-    """Left column: identity card + ability menu + low-key bottom actions."""
+    """Left column: identity card + ability menu + recent chats + bottom."""
 
     action_requested = Signal(str)  # "settings" | "about" | "new_chat"
     session_clicked = Signal(str)   # recent-session title (display-only)
@@ -101,14 +105,14 @@ class Sidebar(QWidget):
         header.setParent(self)
         ability.setParent(self)
 
-        # -- Identity card: avatar/name strip + tag + online status ---------
+        # -- Identity card: avatar/name strip + breathing online dot ---------
         identity_card = QFrame(self)
         identity_card.setObjectName("identityCard")
         identity_card.setStyleSheet(
             f"#identityCard {{"
             f"  background: rgba{theme.V2.CARD_BG};"
             f"  border: 1px solid rgba{theme.V2.BORDER_SOFT};"
-            f"  border-radius: 16px;"
+            f"  border-radius: {theme.V2.RADIUS_CONTAINER}px;"
             f"}}"
         )
         identity_layout = QVBoxLayout(identity_card)
@@ -121,19 +125,33 @@ class Sidebar(QWidget):
         meta_row.setSpacing(6)
         meta_row.addWidget(_small_label("AI 智能伙伴", theme.V2.TEXT_SECONDARY))
         meta_row.addStretch(1)
-        meta_row.addWidget(_small_label("● 在线", theme.MINT_STATUS))
+        meta_row.addWidget(motion.BreathingDot(theme.MINT_STATUS, diameter=8))
+        meta_row.addWidget(_small_label("在线", theme.V2.TEXT_SECONDARY))
         identity_layout.addLayout(meta_row)
 
-        # -- Ability menu: restyle the existing buttons in place ------------
-        # (AbilityPanel's file/signals are untouched; emoji is dropped and
-        # the entries become text-only menu rows.)
-        self._apply_menu_style(ability)
+        # -- 「新对话」: 加号图标 + hover 浅紫 --------------------------------
+        self._new_chat_button = QToolButton(self)
+        self._new_chat_button.setText("新对话")
+        self._new_chat_button.setIcon(
+            theme.vector_icon("plus", theme.V2.PRIMARY, 14)
+        )
+        self._new_chat_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._new_chat_button.setCursor(Qt.PointingHandCursor)
+        self._new_chat_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._new_chat_button.setStyleSheet(_NEW_CHAT_STYLE)
+        self._new_chat_button.clicked.connect(
+            lambda: self.action_requested.emit("new_chat")
+        )
 
-        # -- Bottom auxiliary actions ---------------------------------------
+        # -- Bottom auxiliary actions (左下角对齐) ----------------------------
         self._action_buttons: dict[str, QPushButton] = {}
-        for action_id, label in (("settings", "设置"), ("about", "关于"),
-                                 ("new_chat", "新建对话")):
+        for action_id, label, icon_kind in (
+            ("settings", "设置", "gear"),
+            ("about", "关于", "sparkle"),
+        ):
             button = QPushButton(label, self)
+            if icon_kind:
+                button.setIcon(theme.vector_icon(icon_kind, theme.V2.TEXT_SECONDARY, 13))
             button.setCursor(Qt.PointingHandCursor)
             button.setStyleSheet(_BOTTOM_BUTTON_STYLE)
             button.clicked.connect(
@@ -147,7 +165,6 @@ class Sidebar(QWidget):
         actions_row.addWidget(self._action_buttons["settings"])
         actions_row.addWidget(self._action_buttons["about"])
         actions_row.addStretch(1)
-        actions_row.addWidget(self._action_buttons["new_chat"])
 
         # -- Recent sessions + user info (left-bottom navigation) -----------
         # Display-only: the card emits session_clicked (relayed upward); the
@@ -160,12 +177,14 @@ class Sidebar(QWidget):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(12)
+        root.setSpacing(10)
         root.addWidget(identity_card)
+        # v7 还原: 「能力」标题放在白卡菜单外部（初版布局）
         root.addWidget(_small_label("能力", theme.V2.TEXT_SECONDARY))
         root.addWidget(ability)
-        # v1.4: 最近会话卡片占据中部弹性行 (stretch 1), 内部 QScrollArea 滚动,
-        # 数量多时不再把底部 用户卡/动作行 挤出窗口; 少于可视高度时自然留白。
+        root.addWidget(self._new_chat_button)
+        # 最近会话卡片占据中部弹性行 (stretch 1), 内部 QScrollArea 滚动,
+        # 数量多时不再把底部 用户卡/动作行 挤出窗口。
         root.addWidget(self._recent_card, 1)
         root.addWidget(_divider(self))
         root.addLayout(actions_row)
@@ -175,22 +194,17 @@ class Sidebar(QWidget):
 
     @staticmethod
     def _apply_menu_style(ability: QWidget) -> None:
-        """Restyle the AbilityPanel buttons into text-only menu entries.
+        """Back-compat shim: the menu style now lives in AbilityPanel itself."""
+        from ui.v2.ability_panel import _menu_button_style
 
-        Only visual properties are touched — signals, object identity and the
-        console's ability→handler mapping stay exactly as they are.
-        """
-        labels = {cap: label for cap, _, label in CAPABILITIES}
-        for capability, _, _ in CAPABILITIES:
-            button = ability.button(capability)
-            button.setText(labels[capability])  # drop the leading emoji
-            button.setToolButtonStyle(Qt.ToolButtonTextOnly)
-            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            button.setMinimumHeight(36)
-            button.setStyleSheet(_MENU_BUTTON_STYLE)
+        for child in ability.findChildren(QToolButton):
+            child.setStyleSheet(_menu_button_style())
 
     def action_button(self, action_id: str) -> QPushButton:
         return self._action_buttons[action_id]
+
+    def new_chat_button(self) -> QToolButton:
+        return self._new_chat_button
 
     def set_current_session(self, session_id: str | None) -> None:
         """Delegate: highlight the active session row in the recent card."""

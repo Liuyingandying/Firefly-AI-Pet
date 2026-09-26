@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFontDatabase, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtGui import QColor, QFontDatabase, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import QFrame, QGraphicsDropShadowEffect, QWidget
 
 
@@ -60,13 +60,19 @@ STATUS_COLORS = {
 # Deliberately namespaced (theme.V2.*) so the existing pet-overlay islands
 # keep their own palette untouched.
 #
-# Phase UI-4A direction (per reference README): Anthropic 简约工作台 + 星铁
-# 菜单式布局 + 流萤陪伴空间 —— 暖纸浅色系、大留白、高字号、低饱和、少量青紫
-# 点缀。禁止深色赛博 HUD / 霓虹发光 / 小字体信息墙。GLOW_* 降为低 alpha 的
-# 柔和点缀色（仅细边框/极浅投影），不再承担发光。
+# ui美化版视觉语言:「流萤 = 发光、轻盈、紫调」—— 品牌紫主色 + 暖米白全局背景
+# + 深紫暖灰聊天区 + 统一紫调软阴影。GLOW 语义回归萤火微光（低 alpha 外发光）。
 
 class V2:
-    """Semantic palette for the companion console (warm paper light theme)."""
+    """Semantic palette for the companion console — 「流萤」发光紫视觉语言.
+
+    ui美化统一色板:
+    - 品牌主色: 紫 #9B6DFF（悬停 #8A5CFF）
+    - 全局背景: 暖米白 #FAF7F2
+    - 聊天区:   淡紫轻盈渐变 #F7F4FC → #ECE5F8 + 萤火微光斑（v4）
+    - 阴影:     统一紫调软阴影 rgba(155,109,255,0.08)
+    - 圆角:     容器 16 / 卡片·按钮 10 / 输入框 12
+    """
 
     # 字体栈族名（科研级渲染，Phase UI-4 字体系统）：
     #   STIX Two Math  数学/物理公式优先（应用级资源可加载）
@@ -86,28 +92,48 @@ class V2:
         "Symbola",
     )
 
-    # 背景与卡片：暖米纸面 + 暖白卡片
-    BACKGROUND = (242, 238, 230, 255)          # 暖米纸面
-    BACKGROUND_DEEP = (234, 228, 216, 255)     # 略深暖米（渐变边缘）
-    CARD_BG = (251, 249, 244, 245)             # 暖白卡片
-    CARD_BG_USER = (228, 238, 243, 240)        # 用户卡片 · 浅青蓝
-    CARD_BG_ASSISTANT = (241, 238, 247, 240)   # 流萤卡片 · 淡紫白
+    # —— 品牌紫（主色体系）——
+    PRIMARY = (155, 109, 255, 255)           # #9B6DFF 常态
+    PRIMARY_HOVER = (138, 92, 255, 255)      # #8A5CFF 悬停加深
+    PRIMARY_SOFT = (155, 109, 255, 26)       # 淡紫填充（选中/hover 底 ≈0.10）
+    PRIMARY_GLOW = (155, 109, 255, 77)       # 外发光 ≈0.30（萤火微光）
+    SHADOW_PURPLE = (155, 109, 255, 20)      # 统一紫调软阴影 ≈0.08
+    ON_PRIMARY_TEXT = (255, 255, 255, 255)   # 紫底上的文字
 
-    # 品牌点缀：低饱和青 / 紫
-    PRIMARY_BLUE = (90, 155, 181, 255)
-    ACCENT_PURPLE = (139, 127, 199, 255)
+    # —— 全局背景: 暖奶油黄（v8.6: 顶部按指定值微调）——
+    BACKGROUND = (248, 244, 232, 255)        # #F8F4E8 顶部主色
+    BACKGROUND_DEEP = (243, 238, 224, 255)   # 渐变边缘略深
+    GRADIENT_STOPS = ("#f8f4e8", "#f7f2e4", "#f4eed9")
 
-    # 文字：Anthropic 深棕灰系（浅底高可读）
-    TEXT_MAIN = (61, 57, 41, 255)
-    TEXT_SECONDARY = (138, 133, 120, 255)
+    # —— 卡片（浅底表面）——
+    CARD_BG = (255, 255, 255, 255)           # 纯白卡片
+    CARD_GLASS = (255, 255, 255, 140)        # 轻玻璃拟态（半透明白 ≈0.55）
+    CARD_BORDER_WHITE = (255, 255, 255, 120) # 玻璃卡 1px 白边
+    CARD_BG_USER = (155, 109, 255, 255)      # 用户气泡 = 品牌紫（渐变起点）
+    CARD_BG_ASSISTANT = (255, 255, 255, 255) # 流萤气泡 = 白卡
 
-    # 柔光：低 alpha 点缀（细边框/极浅投影），替代霓虹发光
-    GLOW_BLUE = (90, 155, 181, 40)
-    GLOW_PURPLE = (139, 127, 199, 45)
-    BORDER_SOFT = (224, 217, 204, 180)
+    # —— 聊天区（淡紫轻盈渐变 · ui美化 v2, v4 恢复并叠加萤火微光斑）——
+    CHAT_BG_TOP = (247, 244, 252, 255)      # #F7F4FC 淡紫白
+    CHAT_BG_BOTTOM = (236, 229, 248, 255)   # #ECE5F8 柔紫
+    CHAT_BORDER = (155, 109, 255, 30)       # 1px 淡紫描边 ≈0.12
+    CHAT_TEXT_MAIN = (52, 48, 61, 255)      # 浅底主文字（深紫灰）
+    CHAT_TEXT_SOFT = (139, 134, 150, 255)   # 浅底次文字（中灰）
 
-    # 背景渐变：暖米纸面（几乎单色，留白感）
-    GRADIENT_STOPS = ("#f6f2ea", "#f1ece2", "#ece5d8")
+    # —— 文字（浅底）——
+    TEXT_MAIN = (52, 48, 61, 255)            # 深紫灰
+    TEXT_SECONDARY = (139, 134, 150, 255)    # 中灰
+
+    # —— 兼容别名（旧字段名 → 新紫体系，未改动的旧文件继续可用）——
+    PRIMARY_BLUE = PRIMARY                   # 旧「主色」统一为品牌紫
+    ACCENT_PURPLE = PRIMARY
+    GLOW_BLUE = (155, 109, 255, 40)
+    GLOW_PURPLE = (155, 109, 255, 45)
+    BORDER_SOFT = (226, 217, 195, 210)       # 暖黄浅边（黄底卡片, v8.4）
+
+    # —— 圆角体系（v8: 全面圆形化, 轮廓更圆润）——
+    RADIUS_CONTAINER = 20   # 大容器（聊天区 / 侧边面板）
+    RADIUS_CARD = 14        # 小卡片 / 按钮
+    RADIUS_INPUT = 16       # 输入框 / 气泡
 
     # 字体等级（Phase UI-4A 定义；组件消费在 Phase UI-4B）。
     # "高字号"要求：说明不低于 9pt，正文 11pt，标题 16pt。
@@ -123,13 +149,33 @@ class V2:
 V2_FONT_STACK = ", ".join(f'"{family}"' for family in V2.FONT_STACK_FAMILIES)
 
 
+def repo_root() -> Path:
+    """Locate the project root that owns ``assets/``.
+
+    ui美化副本运行在项目目录之外（parents[2] 不再指向仓库根）, 因此先沿
+    模块路径向上找 ``assets/``, 找不到时再在副本同级目录中探测含
+    ``assets/`` 的项目目录; 拷回原项目后第一条分支立即命中。
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "assets").is_dir():
+            return parent
+    try:
+        for sibling in sorted(here.parents[2].glob("*")):
+            if sibling.is_dir() and (sibling / "assets").is_dir():
+                return sibling
+    except OSError:
+        pass
+    return here.parents[2]
+
+
 def v2_font_css(size_pt: int) -> str:
     """QSS 片段：字号 + 字体栈（测试与组件统一入口）。"""
     return f"font-family: {V2_FONT_STACK}; font-size: {size_pt}pt;"
 
 
 # 应用级字体资源目录（assets/fonts/，Phase UI-4 字体系统）。
-FONTS_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
+FONTS_DIR = repo_root() / "assets" / "fonts"
 _LOADED_APP_FONTS: list[str] = []
 _FONTS_LOADED = False
 
@@ -166,9 +212,7 @@ def load_application_fonts(directory: Path | None = None) -> list[str]:
     return list(_LOADED_APP_FONTS)
 
 
-_BACKGROUND_ASSET = (
-    Path(__file__).resolve().parent.parent / "assets" / "ui" / "background" / "background.png"
-)
+_BACKGROUND_ASSET = repo_root() / "assets" / "ui" / "background" / "background.png"
 
 
 def v2_background_style(asset_path: Path | None = None) -> str:
@@ -455,6 +499,7 @@ def link_button_style(object_name: str) -> str:
 
 
 def bubble_html(display_names=None) -> str:
+    """问候气泡 HTML；display_names 来自角色生态（运行时切换角色时跟随）。"""
     from character import CharacterDisplayNames
 
     names = display_names or CharacterDisplayNames()
@@ -554,32 +599,286 @@ class VectorIcon(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.translate(self.width() / 2, self.height() / 2)
         radius = min(self.width(), self.height()) * 0.38
-        pen = QPen(qcolor(self._color), 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        VectorIcon.draw_kind(painter, self._kind, radius, color=self._color)
+
+    # ------------------------------------------------------------------ icon
+    # ui美化: 线性图标库（1.6px 圆帽描边、无填充——除个别需要实心的点缀）。
+    # draw_kind 同时服务 VectorIcon.paintEvent 和 vector_icon()（QIcon 渲染），
+    # 因此坐标系约定: 原点在图标中心, 可用范围约为 ±radius。
+
+    @staticmethod
+    def draw_kind(
+        painter: QPainter,
+        kind: str,
+        radius: float,
+        color: tuple[int, int, int, int] | None = None,
+        pen_width: float = 1.6,
+    ) -> None:
+        pen = QPen(
+            qcolor(color or V2.TEXT_MAIN),
+            pen_width, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin,
+        )
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
 
-        if self._kind in {"star", "companion"}:
-            self._draw_star(painter, radius)
-        elif self._kind in {"hexagon", "workspace", "codex"}:
-            self._draw_hexagon(painter, radius, inner=self._kind == "codex")
-        elif self._kind in {"gear", "settings"}:
-            self._draw_gear(painter, radius)
-        elif self._kind in {"claude"}:
-            self._draw_claude(painter, radius)
-        elif self._kind in {"chatgpt"}:
-            self._draw_chatgpt(painter, radius)
-        elif self._kind in {"pagelens"}:
-            self._draw_pagelens(painter, radius)
-        elif self._kind in {"paper"}:
-            self._draw_paper(painter, radius)
-        elif self._kind in {"memory"}:
-            self._draw_memory(painter, radius)
-        elif self._kind in {"console"}:
-            self._draw_console(painter, radius)
-        elif self._kind in {"note", "scratchpad"}:
-            self._draw_note(painter, radius)
+        if kind in {"star", "sparkle", "firefly"}:
+            VectorIcon._draw_star(painter, radius)
+        elif kind in {"hexagon", "workspace", "codex"}:
+            VectorIcon._draw_hexagon(painter, radius, inner=kind == "codex")
+        elif kind in {"gear", "settings"}:
+            VectorIcon._draw_gear(painter, radius)
+        elif kind == "claude":
+            VectorIcon._draw_claude(painter, radius)
+        elif kind == "chatgpt":
+            VectorIcon._draw_chatgpt(painter, radius)
+        elif kind == "pagelens":
+            VectorIcon._draw_pagelens(painter, radius)
+        elif kind in {"paper", "document"}:
+            VectorIcon._draw_paper(painter, radius)
+        elif kind == "memory":
+            VectorIcon._draw_memory(painter, radius)
+        elif kind == "console":
+            VectorIcon._draw_console(painter, radius)
+        elif kind in {"note", "scratchpad"}:
+            VectorIcon._draw_note(painter, radius)
+        elif kind == "play":
+            VectorIcon._draw_play(painter, radius)
+        elif kind == "book":
+            VectorIcon._draw_book(painter, radius)
+        elif kind == "monitor":
+            VectorIcon._draw_monitor(painter, radius)
+        elif kind == "flask":
+            VectorIcon._draw_flask(painter, radius)
+        elif kind == "plus":
+            VectorIcon._draw_plus(painter, radius)
+        elif kind == "folder":
+            VectorIcon._draw_folder(painter, radius)
+        elif kind == "camera":
+            VectorIcon._draw_camera(painter, radius)
+        elif kind == "mic":
+            VectorIcon._draw_mic(painter, radius)
+        elif kind == "bolt":
+            VectorIcon._draw_bolt(painter, radius)
+        elif kind == "send":
+            VectorIcon._draw_send(painter, radius)
+        elif kind == "chat":
+            VectorIcon._draw_chat(painter, radius)
+        elif kind == "user":
+            VectorIcon._draw_user(painter, radius)
+        elif kind == "win_min":
+            VectorIcon._draw_win_min(painter, radius)
+        elif kind == "win_max":
+            VectorIcon._draw_win_max(painter, radius)
+        elif kind == "win_restore":
+            VectorIcon._draw_win_restore(painter, radius)
+        elif kind == "win_close":
+            VectorIcon._draw_win_close(painter, radius)
         else:
             painter.drawEllipse(QRectF(-radius, -radius, radius * 2, radius * 2))
+
+    @staticmethod
+    def _draw_play(painter: QPainter, radius: float) -> None:
+        """视频阅读: 圆环 + 实心播放三角."""
+        color = painter.pen().color()
+        painter.drawEllipse(QRectF(-radius, -radius, radius * 2, radius * 2))
+        triangle = QPolygonF([
+            QPointF(-radius * 0.20, -radius * 0.42),
+            QPointF(-radius * 0.20, radius * 0.42),
+            QPointF(radius * 0.48, 0),
+        ])
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(color)
+        painter.drawPolygon(triangle)
+
+    @staticmethod
+    def _draw_book(painter: QPainter, radius: float) -> None:
+        """学习模式: 打开的书（两页弧线 + 中缝）."""
+        path = QPainterPath()
+        path.moveTo(0, -radius * 0.62)
+        path.cubicTo(
+            QPointF(-radius * 0.55, -radius * 0.85),
+            QPointF(-radius * 0.95, -radius * 0.55),
+            QPointF(-radius * 0.95, radius * 0.55),
+        )
+        path.lineTo(-radius * 0.95, radius * 0.62)
+        painter.drawPath(path)
+        path2 = QPainterPath()
+        path2.moveTo(0, -radius * 0.62)
+        path2.cubicTo(
+            QPointF(radius * 0.55, -radius * 0.85),
+            QPointF(radius * 0.95, -radius * 0.55),
+            QPointF(radius * 0.95, radius * 0.55),
+        )
+        path2.lineTo(radius * 0.95, radius * 0.62)
+        painter.drawPath(path2)
+        painter.drawLine(QPointF(0, -radius * 0.62), QPointF(0, radius * 0.62))
+        # 两页各一条「文字」短线
+        painter.drawLine(
+            QPointF(-radius * 0.62, -radius * 0.18),
+            QPointF(-radius * 0.25, -radius * 0.06),
+        )
+        painter.drawLine(
+            QPointF(radius * 0.25, -radius * 0.06),
+            QPointF(radius * 0.62, -radius * 0.18),
+        )
+
+    @staticmethod
+    def _draw_monitor(painter: QPainter, radius: float) -> None:
+        """屏幕视觉: 显示器（圆角屏幕 + 底座）."""
+        painter.drawRoundedRect(
+            QRectF(-radius, -radius * 0.75, radius * 2, radius * 1.25),
+            radius * 0.18, radius * 0.18,
+        )
+        painter.drawLine(QPointF(-radius * 0.35, radius * 0.5), QPointF(radius * 0.35, radius * 0.5))
+        painter.drawLine(QPointF(0, radius * 0.5), QPointF(0, radius * 0.9))
+        painter.drawLine(QPointF(-radius * 0.45, radius * 0.92), QPointF(radius * 0.45, radius * 0.92))
+
+    @staticmethod
+    def _draw_flask(painter: QPainter, radius: float) -> None:
+        """科研助手: 锥形烧瓶（瓶颈 + 三角瓶身 + 液面）."""
+        neck = radius * 0.22
+        painter.drawLine(QPointF(-neck, -radius), QPointF(-neck, -radius * 0.25))
+        painter.drawLine(QPointF(neck, -radius), QPointF(neck, -radius * 0.25))
+        painter.drawLine(QPointF(-neck, -radius), QPointF(neck, -radius))
+        path = QPainterPath()
+        path.moveTo(-neck, -radius * 0.25)
+        path.lineTo(-radius * 0.95, radius * 0.85)
+        path.lineTo(radius * 0.95, radius * 0.85)
+        path.lineTo(neck, -radius * 0.25)
+        painter.drawPath(path)
+        painter.drawLine(
+            QPointF(-radius * 0.55, radius * 0.35), QPointF(radius * 0.55, radius * 0.35)
+        )
+
+    @staticmethod
+    def _draw_plus(painter: QPainter, radius: float) -> None:
+        painter.drawLine(QPointF(0, -radius * 0.8), QPointF(0, radius * 0.8))
+        painter.drawLine(QPointF(-radius * 0.8, 0), QPointF(radius * 0.8, 0))
+
+    @staticmethod
+    def _draw_folder(painter: QPainter, radius: float) -> None:
+        """文件: 文件夹."""
+        path = QPainterPath()
+        path.moveTo(-radius * 0.95, -radius * 0.55)
+        path.lineTo(-radius * 0.2, -radius * 0.55)
+        path.lineTo(-radius * 0.02, -radius * 0.32)
+        path.lineTo(radius * 0.95, -radius * 0.32)
+        path.lineTo(radius * 0.95, radius * 0.6)
+        path.lineTo(-radius * 0.95, radius * 0.6)
+        path.closeSubpath()
+        painter.drawPath(path)
+
+    @staticmethod
+    def _draw_camera(painter: QPainter, radius: float) -> None:
+        """截图: 相机（机身 + 镜头）."""
+        painter.drawRoundedRect(
+            QRectF(-radius, -radius * 0.6, radius * 2, radius * 1.4),
+            radius * 0.22, radius * 0.22,
+        )
+        painter.drawEllipse(QRectF(-radius * 0.42, -radius * 0.35, radius * 0.84, radius * 0.84))
+        painter.drawLine(
+            QPointF(radius * 0.45, -radius * 0.6), QPointF(radius * 0.45, -radius * 0.78)
+        )
+
+    @staticmethod
+    def _draw_mic(painter: QPainter, radius: float) -> None:
+        """语音: 麦克风（胶囊 + 支架弧）."""
+        painter.drawRoundedRect(
+            QRectF(-radius * 0.3, -radius, radius * 0.6, radius * 1.15),
+            radius * 0.3, radius * 0.3,
+        )
+        path = QPainterPath()
+        path.arcTo(QRectF(-radius * 0.62, -radius * 0.45, radius * 1.24, radius * 1.05), 0, 180)
+        painter.drawPath(path)
+        painter.drawLine(QPointF(0, radius * 0.6), QPointF(0, radius * 0.95))
+        painter.drawLine(QPointF(-radius * 0.4, radius * 0.95), QPointF(radius * 0.4, radius * 0.95))
+
+    @staticmethod
+    def _draw_bolt(painter: QPainter, radius: float) -> None:
+        """快捷指令: 闪电."""
+        path = QPainterPath()
+        path.moveTo(radius * 0.25, -radius)
+        path.lineTo(-radius * 0.55, radius * 0.12)
+        path.lineTo(radius * 0.05, radius * 0.12)
+        path.lineTo(-radius * 0.25, radius)
+        path.lineTo(radius * 0.55, -radius * 0.12)
+        path.lineTo(-radius * 0.05, -radius * 0.12)
+        path.closeSubpath()
+        painter.drawPath(path)
+
+    @staticmethod
+    def _draw_send(painter: QPainter, radius: float) -> None:
+        """发送: 纸飞机."""
+        path = QPainterPath()
+        path.moveTo(-radius * 0.95, -radius * 0.55)
+        path.lineTo(radius, 0)
+        path.lineTo(-radius * 0.95, radius * 0.55)
+        path.lineTo(-radius * 0.55, 0)
+        path.closeSubpath()
+        painter.drawPath(path)
+
+    @staticmethod
+    def _draw_chat(painter: QPainter, radius: float) -> None:
+        """对话气泡（最近会话行）."""
+        painter.drawRoundedRect(
+            QRectF(-radius * 0.95, -radius * 0.78, radius * 1.9, radius * 1.3),
+            radius * 0.32, radius * 0.32,
+        )
+        path = QPainterPath()
+        path.moveTo(-radius * 0.3, radius * 0.5)
+        path.lineTo(-radius * 0.3, radius * 0.95)
+        path.lineTo(radius * 0.1, radius * 0.5)
+        painter.drawPath(path)
+        painter.drawEllipse(QPointF(-radius * 0.35, -radius * 0.13), radius * 0.09, radius * 0.09)
+        painter.drawEllipse(QPointF(0, -radius * 0.13), radius * 0.09, radius * 0.09)
+        painter.drawEllipse(QPointF(radius * 0.35, -radius * 0.13), radius * 0.09, radius * 0.09)
+
+    @staticmethod
+    def _draw_user(painter: QPainter, radius: float) -> None:
+        """用户: 头 + 肩（底部对齐）."""
+        painter.drawEllipse(QRectF(-radius * 0.38, -radius * 0.95, radius * 0.76, radius * 0.76))
+        path = QPainterPath()
+        path.arcTo(
+            QRectF(-radius * 0.75, -radius * 0.25, radius * 1.5, radius * 1.4), 180, -180
+        )
+        painter.drawPath(path)
+
+    # ------------------------------------------------- 窗口控制（v5 顶栏）
+
+    @staticmethod
+    def _draw_win_min(painter: QPainter, radius: float) -> None:
+        """最小化: 一短横."""
+        painter.drawLine(
+            QPointF(-radius * 0.55, radius * 0.25),
+            QPointF(radius * 0.55, radius * 0.25),
+        )
+
+    @staticmethod
+    def _draw_win_max(painter: QPainter, radius: float) -> None:
+        """最大化: 空心方框."""
+        half = radius * 0.62
+        painter.drawRect(QRectF(-half, -half, half * 2, half * 2))
+
+    @staticmethod
+    def _draw_win_restore(painter: QPainter, radius: float) -> None:
+        """还原: 前后叠放的两个方框."""
+        front = QRectF(-radius * 0.62, -radius * 0.30, radius * 0.94, radius * 0.94)
+        back = QRectF(-radius * 0.30, -radius * 0.62, radius * 0.94, radius * 0.94)
+        painter.drawRect(back)
+        painter.drawRect(front)
+        painter.drawLine(
+            QPointF(back.left(), front.top()), QPointF(front.left(), front.top())
+        )
+        painter.drawLine(
+            QPointF(front.left(), back.top()), QPointF(front.left(), front.top())
+        )
+
+    @staticmethod
+    def _draw_win_close(painter: QPainter, radius: float) -> None:
+        """关闭: ✕."""
+        half = radius * 0.55
+        painter.drawLine(QPointF(-half, -half), QPointF(half, half))
+        painter.drawLine(QPointF(-half, half), QPointF(half, -half))
 
     @staticmethod
     def _draw_star(painter: QPainter, radius: float) -> None:
@@ -731,6 +1030,65 @@ class VectorIcon(QWidget):
         painter.drawLine(-radius * 0.55, -radius * 0.25, radius * 0.35, -radius * 0.25)
         # Cursor line
         painter.drawLine(-radius * 0.55, radius * 0.25, radius * 0.15, radius * 0.25)
+
+
+# -- ui美化: VectorIcon → QPixmap / QIcon 渲染 helper -------------------------
+# 按钮图标统一入口: 线性图标以指定颜色渲染成 QIcon, 供 QToolButton/QPushButton
+# setIcon 使用（Qt 按钮 QSS 无法内嵌矢量, QIcon 是原生途径）。需在
+# QApplication 创建之后调用。
+#
+# 高 DPI (v6 修复): 物理像素 = 逻辑 size × 设备像素比, 并给 QPixmap 设置
+# setDevicePixelRatio —— 否则 125%/150% 缩放屏上图标被拉伸渲染, 线条发虚。
+
+def _device_pixel_ratio() -> float:
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    try:
+        ratio = app.devicePixelRatio() if app is not None else 1.0
+    except RuntimeError:  # QApplication 已销毁的极端情形
+        ratio = 1.0
+    return max(1.0, float(ratio))
+
+
+def vector_pixmap(
+    kind: str,
+    color: tuple[int, int, int, int] | None = None,
+    size: int = 18,
+    pen_width: float = 1.6,
+) -> QPixmap:
+    """Render one linear icon centered on a transparent square pixmap."""
+    ratio = _device_pixel_ratio()
+    pixmap = QPixmap(int(size * ratio), int(size * ratio))
+    pixmap.setDevicePixelRatio(ratio)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    # setDevicePixelRatio 后 painter 坐标系为逻辑像素, 直接按 size 绘制。
+    painter.translate(size / 2, size / 2)
+    VectorIcon.draw_kind(painter, kind, size * 0.38, color=color, pen_width=pen_width)
+    painter.end()
+    return pixmap
+
+
+def scaled_asset_pixmap(source: QPixmap, size: int) -> QPixmap:
+    """按设备像素比缩放位图素材（logo 等）, 高 DPI 下保持锐利。"""
+    ratio = _device_pixel_ratio()
+    result = source.scaled(
+        int(size * ratio), int(size * ratio),
+        Qt.KeepAspectRatio, Qt.SmoothTransformation,
+    )
+    result.setDevicePixelRatio(ratio)
+    return result
+
+
+def vector_icon(
+    kind: str,
+    color: tuple[int, int, int, int] | None = None,
+    size: int = 18,
+    pen_width: float = 1.6,
+) -> QIcon:
+    return QIcon(vector_pixmap(kind, color, size, pen_width))
 
 
 # -- PageLens mock data (Phase 9A static shell) ------------------------------

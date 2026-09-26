@@ -5,14 +5,20 @@ it via ``set_state`` / ``set_task`` / ``set_ability`` (derived from the
 existing ``AgentEvent`` stream and runtime activity state), so the header
 stays a dumb view with no core imports.
 
-The avatar is a code-drawn glowing orb (theme accent), not a licensed asset.
+ui美化版（「流萤」发光紫视觉语言）:
+
+- 头像: 品牌紫渐变球 + 微弱外发光 0 0 12px rgba(155,109,255,0.3),
+  呼应萤火虫发光的产品意象
+- 副标题精简为「待机中」, 去掉冗余描述
+- 状态 chip 跟随品牌紫 / 状态色
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QRadialGradient
 from PySide6.QtWidgets import (
-    QFrame,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -23,7 +29,7 @@ from PySide6.QtWidgets import (
 from ui import theme
 
 _STATUS_LABELS = {
-    "idle": "待机",
+    "idle": "待机中",
     "working": "工作中",
     "tool_running": "运行工具",
     "waiting_input": "等你输入",
@@ -31,40 +37,54 @@ _STATUS_LABELS = {
     "error": "出错",
 }
 
-# Phase UI-2.5: status colors remapped onto the V2 deep-space palette so the
-# header reads correctly on the dark console background.
+# 状态色: 主品牌紫为工作态, 其余沿用语义色。
 _STATUS_COLORS = {
     "idle": theme.V2.TEXT_SECONDARY,
-    "working": theme.V2.PRIMARY_BLUE,
-    "tool_running": theme.V2.PRIMARY_BLUE,
+    "working": theme.V2.PRIMARY,
+    "tool_running": theme.V2.PRIMARY,
     "waiting_input": theme.WAITING_STATUS,
     "success": theme.MINT_STATUS,
     "error": theme.ERROR_STATUS,
 }
 
-_TASK_DEFAULT = "空闲中，随时找我聊天、读视频、看文档～"
+_TASK_DEFAULT = "待机中"
 
 
-class _AvatarOrb(QFrame):
-    """Glowing circular avatar placeholder drawn from the V2 palette."""
+class _AvatarOrb(QWidget):
+    """Glowing brand-purple orb with a soft outer halo (萤火微光)."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFixedSize(48, 48)
-        self._style(active=True)
-
-    def _style(self, active: bool) -> None:
-        border = theme.V2.ACCENT_PURPLE if active else theme.V2.BORDER_SOFT
-        glow = theme.V2.GLOW_PURPLE if active else theme.V2.GLOW_BLUE
-        self.setStyleSheet(
-            f"background: qradialgradient(cx:0.4, cy:0.35, radius:1.0, "
-            f"fx:0.4, fy:0.35, stop:0 rgba{theme.V2.CARD_BG_USER}, "
-            f"stop:0.6 rgba{theme.V2.ACCENT_PURPLE}, stop:1 rgba{glow}); "
-            f"border: 2px solid rgba{border}; border-radius: 24px;"
-        )
+        self._active = True
+        # 外发光 0 0 12px rgba(155,109,255,0.3) — QSS 无 box-shadow 的等价实现
+        self._glow = QGraphicsDropShadowEffect(self)
+        self._glow.setBlurRadius(12)
+        self._glow.setOffset(0, 0)
+        self._glow.setColor(QColor(155, 109, 255, 90))
+        self.setGraphicsEffect(self._glow)
 
     def set_active(self, active: bool) -> None:
-        self._style(active=active)
+        self._active = active
+        self._glow.setColor(
+            QColor(155, 109, 255, 90 if active else 28)
+        )
+        self.update()
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        gradient = QRadialGradient(19, 17, 26)
+        top = theme.V2.PRIMARY_HOVER if self._active else theme.V2.TEXT_SECONDARY
+        gradient.setColorAt(0.0, QColor(214, 199, 255, 255))
+        gradient.setColorAt(0.55, QColor(*top[:3], 255))
+        gradient.setColorAt(1.0, QColor(*theme.V2.PRIMARY[:3], 120))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(gradient)
+        painter.drawEllipse(QRectF(1.5, 1.5, 45, 45))
+        # 高光点
+        painter.setBrush(QColor(255, 255, 255, 170))
+        painter.drawEllipse(QRectF(14, 11, 7, 7))
 
 
 class CharacterHeader(QWidget):
@@ -87,7 +107,7 @@ class CharacterHeader(QWidget):
             f"color: {theme.css_color(theme.V2.TEXT_MAIN)}; "
             f"font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_HEADING}pt; font-weight: 700;"
         )
-        self._status_chip = QLabel("待机")
+        self._status_chip = QLabel("待机中")
         self._status_chip.setStyleSheet(self._chip_style(theme.V2.TEXT_SECONDARY))
         self._task_label = QLabel(self._task)
         self._task_label.setWordWrap(True)
@@ -100,7 +120,7 @@ class CharacterHeader(QWidget):
         )
         self._ability_label = QLabel("")
         self._ability_label.setStyleSheet(
-            f"color: {theme.css_color(theme.V2.ACCENT_PURPLE)}; font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_CAPTION}pt;"
+            f"color: {theme.css_color(theme.V2.PRIMARY)}; font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_CAPTION}pt;"
         )
 
         text_col = QVBoxLayout()
@@ -122,11 +142,11 @@ class CharacterHeader(QWidget):
 
     @staticmethod
     def _chip_style(color: tuple[int, int, int, int]) -> str:
-        """Dark glass chip with a colored label — V2 deep-space style."""
+        """Light chip with a colored label — 品牌紫视觉语言."""
         return (
-            f"background: rgba{theme.V2.CARD_BG}; "
+            f"background: rgba{theme.V2.PRIMARY_SOFT}; "
             f"color: {theme.css_color(color)}; "
-            f"border: 1px solid rgba{theme.V2.BORDER_SOFT}; "
+            f"border: 1px solid rgba{theme.V2.PRIMARY_GLOW}; "
             f"border-radius: 9px; padding: 2px 10px; font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_CAPTION}pt;"
         )
 

@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from character import CharacterDisplayNames
 from ui import theme
 
 # LearningAction -> user-readable "下一步" copy. Presentation ONLY — this
@@ -48,6 +47,11 @@ _MODE_STYLE = (
     f"color: rgba{theme.V2.TEXT_MAIN}; background: transparent;"
     f"font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_BODY}pt; font-weight: 700;"
 )
+# ui美化: 副标题样式 —「正在进行 与流萤聊天」缩小弱化, 与加粗主行分层。
+_SUB_STYLE = (
+    f"color: rgba{theme.V2.TEXT_SECONDARY}; background: transparent;"
+    f"font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_CAPTION}pt;"
+)
 
 
 @dataclass(frozen=True)
@@ -73,20 +77,16 @@ class ContextStatusView:
 class ContextStatusCard(QFrame):
     """Dynamic-section status card; rebuilds visible sections per update."""
 
-    def __init__(
-        self,
-        parent: QWidget | None = None,
-        *,
-        display_names: CharacterDisplayNames | None = None,
-    ) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._display_names = display_names or CharacterDisplayNames()
         self.setObjectName("contextStatusCard")
+        # ui美化: 轻玻璃拟态 — 半透明白 + 1px 白边 + 16px 圆角
+        # (Qt QSS 无 backdrop-filter, 以半透明叠加近似「轻盈」质感)。
         self.setStyleSheet(
             f"#contextStatusCard {{"
-            f"  background: rgba{theme.V2.CARD_BG};"
-            f"  border: 1px solid rgba{theme.V2.BORDER_SOFT};"
-            f"  border-radius: 16px;"
+            f"  background: rgba{theme.V2.CARD_GLASS};"
+            f"  border: 1px solid rgba{theme.V2.CARD_BORDER_WHITE};"
+            f"  border-radius: {theme.V2.RADIUS_CONTAINER}px;"
             f"}}"
         )
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
@@ -126,9 +126,7 @@ class ContextStatusCard(QFrame):
                 # 只读结构事实——不是 AI 推荐，绝不写成「推荐下一步」。
                 self._stack.addWidget(self._section("课程顺序下一项", view.next_in_order))
         else:
-            self._stack.addWidget(self._section(
-                "正在进行", f"与{self._display_names.assistant_name}聊天"
-            ))
+            self._stack.addWidget(self._section("正在进行", "与流萤聊天", sub=True))
             if view.conversation_title:
                 self._stack.addWidget(self._section("当前会话", view.conversation_title))
         self._add_optional(view)
@@ -139,7 +137,7 @@ class ContextStatusCard(QFrame):
 
     # ------------------------------------------------------------- widgets
 
-    def _section(self, caption: str, value: str, *, bold: bool = False) -> QWidget:
+    def _section(self, caption: str, value: str, *, bold: bool = False, sub: bool = False) -> QWidget:
         box = QWidget(self)
         layout = QVBoxLayout(box)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -151,7 +149,12 @@ class ContextStatusCard(QFrame):
             layout.addWidget(caption_label)
         value_label = QLabel(value, box)
         value_label.setWordWrap(True)
-        value_label.setStyleSheet(_MODE_STYLE if bold else _VALUE_STYLE)
+        if bold:
+            value_label.setStyleSheet(_MODE_STYLE)
+        elif sub:
+            value_label.setStyleSheet(_SUB_STYLE)
+        else:
+            value_label.setStyleSheet(_VALUE_STYLE)
         layout.addWidget(value_label)
         return box
 

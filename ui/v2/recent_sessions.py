@@ -35,6 +35,9 @@ MOCK_SESSIONS = (
 
 _TITLE_MAX_CHARS = 18
 
+# ui美化: 会话行左侧行业图标（线性对话气泡, 取代 📄 emoji）。
+_SESSION_ICON_SIZE = 14
+
 
 class RecentSessionProvider:
     """Real recent-session source over the existing ``ConversationStore``.
@@ -197,9 +200,15 @@ class _SessionRow(QFrame):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 0, 10, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(8)
 
-        title_label = QLabel(f"📄 {title}")
+        icon_label = QLabel(self)
+        icon_label.setPixmap(
+            theme.vector_pixmap("chat", theme.V2.TEXT_SECONDARY, _SESSION_ICON_SIZE)
+        )
+        icon_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+        title_label = QLabel(title)
         title_label.setStyleSheet(_TITLE_STYLE)
         title_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
@@ -207,19 +216,21 @@ class _SessionRow(QFrame):
         time_label.setStyleSheet(_TIME_STYLE)
         time_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
+        layout.addWidget(icon_label)
         layout.addWidget(title_label, 1)
         layout.addWidget(time_label)
         self._apply_style()
 
     def _apply_style(self) -> None:
         if self._current:
-            background = "rgba(228, 238, 243, 0.9)"  # 当前会话 · 浅青蓝高亮
+            background = "rgba(155, 109, 255, 32)"   # 当前会话 · 淡紫高亮
         elif self._hover:
-            background = "rgba(255, 255, 255, 0.5)"
+            background = "rgba(155, 109, 255, 16)"   # hover · 更淡的浅紫
         else:
             background = "transparent"
         self.setStyleSheet(
-            f"QFrame#sessionRow {{ background: {background}; border-radius: 8px; }}"
+            f"QFrame#sessionRow {{ background: {background};"
+            f" border-radius: {theme.V2.RADIUS_CARD}px; }}"
         )
 
     def set_current(self, current: bool) -> None:
@@ -248,11 +259,13 @@ class _SessionRow(QFrame):
         menu = QMenu(self)
         menu.setStyleSheet(
             f"QMenu {{ background: rgba{theme.V2.CARD_BG};"
-            f" border: 1px solid rgba{theme.V2.BORDER_SOFT}; border-radius: 10px;"
+            f" border: 1px solid rgba{theme.V2.BORDER_SOFT};"
+            f" border-radius: {theme.V2.RADIUS_CONTAINER}px;"
             f" padding: 4px; font-family: {theme.V2_FONT_STACK};"
             f" font-size: {theme.V2.FONT_BODY}pt; color: rgba{theme.V2.TEXT_MAIN}; }}"
             f"QMenu::item {{ padding: 5px 16px; border-radius: 6px; }}"
-            f"QMenu::item:selected {{ background: rgba{theme.V2.CARD_BG_USER}; }}"
+            f"QMenu::item:selected {{ background: rgba{theme.V2.PRIMARY_SOFT};"
+            f" color: rgba{theme.V2.PRIMARY}; }}"
         )
         rename_action = menu.addAction("重命名")
         delete_action = menu.addAction("删除")
@@ -287,8 +300,8 @@ class RecentSessionsCard(QFrame):
         self.setStyleSheet(
             f"#recentSessionsCard {{"
             f"  background: rgba{theme.V2.CARD_BG};"
-            f"  border: 1px solid rgba(0, 0, 0, 0.05);"
-            f"  border-radius: 16px;"
+            f"  border: 1px solid rgba{theme.V2.BORDER_SOFT};"
+            f"  border-radius: {theme.V2.RADIUS_CONTAINER}px;"
             f"}}"
         )
 
@@ -364,7 +377,11 @@ class RecentSessionsCard(QFrame):
 
 
 class UserInfoCard(QFrame):
-    """Avatar + username + plan badge (display-only; no account system)."""
+    """弱化的左下角用户条: 线性小人图标 + 小字用户名 + 小型 Plus 徽章.
+
+    ui美化: 缩小字号、图标 + 小字, 避免抢夺主视觉（display-only;
+    no account system）.
+    """
 
     def __init__(
         self,
@@ -377,36 +394,33 @@ class UserInfoCard(QFrame):
         self.setObjectName("userInfoCard")
         self.setStyleSheet(
             f"#userInfoCard {{"
-            f"  background: transparent; border: none; border-radius: 16px;"
+            f"  background: transparent; border: none;"
+            f"  border-radius: {theme.V2.RADIUS_CARD}px;"
             f"}}"
         )
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(8)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(6)
 
         avatar = QLabel()
-        avatar.setFixedSize(28, 28)
-        avatar.setStyleSheet(
-            f"background: qradialgradient(cx:0.4, cy:0.35, radius:1.0, "
-            f"fx:0.4, fy:0.35, stop:0 rgba{theme.V2.CARD_BG_USER}, "
-            f"stop:1 rgba{theme.V2.ACCENT_PURPLE});"
-            f"border: 1px solid rgba{theme.V2.BORDER_SOFT}; border-radius: 14px;"
-        )
+        avatar.setFixedSize(20, 20)
+        avatar.setPixmap(theme.vector_pixmap("user", theme.V2.TEXT_SECONDARY, 20))
+        avatar.setAlignment(Qt.AlignCenter)
 
         name_label = QLabel(self._username)
         name_label.setStyleSheet(
-            f"color: rgba{theme.V2.TEXT_MAIN}; background: transparent;"
-            f"font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_BODY}pt;"
-            f"font-weight: 600;"
+            f"color: rgba{theme.V2.TEXT_SECONDARY}; background: transparent;"
+            f"font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_CAPTION}pt;"
+            f"font-weight: 400;"
         )
 
         plan_badge = QLabel(plan)
         plan_badge.setStyleSheet(
-            f"color: rgba{theme.V2.PRIMARY_BLUE}; background: rgba{theme.V2.CARD_BG_USER};"
-            f"border: 1px solid rgba{theme.V2.BORDER_SOFT}; border-radius: 9px;"
-            f"padding: 1px 8px; font-family: {theme.V2_FONT_STACK};"
-            f"font-size: {theme.V2.FONT_CAPTION}pt;"
+            f"color: rgba{theme.V2.PRIMARY}; background: rgba{theme.V2.PRIMARY_SOFT};"
+            f"border: 1px solid rgba{theme.V2.PRIMARY_GLOW}; border-radius: 7px;"
+            f"padding: 0px 7px; font-family: {theme.V2_FONT_STACK};"
+            f"font-size: 8pt;"
         )
 
         layout.addWidget(avatar)

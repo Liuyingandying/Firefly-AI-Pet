@@ -50,17 +50,21 @@ class VideoCard(QFrame):
     def __init__(self, info: VideoCardInfo, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.info = info
+        # ui美化: 深色聊天区内的白色卡片 + 紫调软阴影（与 AI 气泡一致）。
         self.setStyleSheet(
             f"VideoCard {{"
-            f"  background: rgba{theme.GLASS_BACKGROUND};"
-            f"  border: 1px solid rgba{theme.GLASS_BORDER};"
-            f"  border-radius: 14px;"
+            f"  background: rgba{theme.V2.CARD_BG};"
+            f"  border: 1px solid rgba{theme.V2.CHAT_BORDER};"
+            f"  border-radius: {theme.V2.RADIUS_INPUT}px;"
             f"}}"
         )
+        from ui.v2 import motion
+
+        motion.purple_shadow(self, blur=12, y_offset=2, alpha=26)
         title = QLabel(info.title)
         title.setWordWrap(True)
         title.setStyleSheet(
-            f"color: {theme.qcolor(theme.TEXT_PRIMARY)}; font-weight: 700; "
+            f"color: rgba{theme.V2.TEXT_MAIN}; font-weight: 700; "
             f"font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_HEADING}pt;"
         )
         meta = QLabel(
@@ -68,7 +72,7 @@ class VideoCard(QFrame):
             + (f"｜{info.bvid}" if info.bvid else "")
         )
         meta.setStyleSheet(
-            f"color: {theme.qcolor(theme.TEXT_SECONDARY)}; "
+            f"color: rgba{theme.V2.TEXT_SECONDARY}; "
             f"font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_CAPTION}pt;"
         )
 
@@ -79,7 +83,7 @@ class VideoCard(QFrame):
             status_parts.append(f"🎓 {self._STAGE_LABELS[info.study_stage]}")
         status_label = QLabel("　".join(status_parts) if status_parts else "")
         status_label.setStyleSheet(
-            f"color: {theme.qcolor(theme.MINT_STATUS)}; "
+            f"color: rgba{theme.MINT_STATUS}; "
             f"font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_CAPTION}pt;"
         )
 
@@ -94,15 +98,15 @@ class VideoCard(QFrame):
             button.setCursor(Qt.PointingHandCursor)
             button.setStyleSheet(
                 f"QPushButton {{"
-                f"  color: {theme.qcolor(theme.TEXT_PRIMARY)};"
-                f"  background: rgba{theme.GLASS_BACKGROUND_SELECTED};"
-                f"  border: 1px solid rgba{theme.GLASS_BORDER_SELECTED};"
-                f"  border-radius: 9px; padding: 4px 10px;"
+                f"  color: rgba{theme.V2.PRIMARY};"
+                f"  background: rgba{theme.V2.PRIMARY_SOFT};"
+                f"  border: 1px solid rgba{theme.V2.PRIMARY_GLOW};"
+                f"  border-radius: {theme.V2.RADIUS_CARD}px; padding: 4px 12px;"
                 f"  font-family: {theme.V2_FONT_STACK}; font-size: {theme.V2.FONT_CAPTION}pt;"
                 f"}}"
                 f"QPushButton:hover {{"
-                f"  background: rgba{theme.GLASS_BACKGROUND_HOVER};"
-                f"  border: 1px solid rgba{theme.CYAN_ACCENT};"
+                f"  background: rgba{theme.V2.PRIMARY};"
+                f"  color: rgba{theme.V2.ON_PRIMARY_TEXT};"
                 f"}}"
             )
             button.clicked.connect(signal.emit)
