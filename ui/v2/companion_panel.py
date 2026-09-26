@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from character import CharacterDisplayNames
 from ui import theme
 from ui.v2.context_status_card import ContextStatusCard
 
@@ -98,14 +99,21 @@ class CompanionPanel(QWidget):
     view_materials_requested = Signal()
     """Right column: companion showcase + status card + slogan."""
 
-    def __init__(self, parent: QWidget | None = None, *, runner=None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        runner=None,
+        display_names: CharacterDisplayNames | None = None,
+    ) -> None:
         super().__init__(parent)
         self.runner = runner  # reserved for live state wiring (future phase)
+        self._display_names = display_names or CharacterDisplayNames()
         self.setFixedWidth(COMPANION_WIDTH)
 
         # -- Top: companion showcase ---------------------------------------
         self.avatar = _CompanionAvatar(self)
-        self.name_label = QLabel("流萤", self)
+        self.name_label = QLabel(self._display_names.display_name, self)
         self.name_label.setAlignment(Qt.AlignCenter)
         self.name_label.setStyleSheet(
             f"color: rgba{theme.V2.TEXT_MAIN}; font-weight: 700;"
@@ -138,7 +146,9 @@ class CompanionPanel(QWidget):
         # The card renders sections dynamically — no "—" / "等待指令" / "00:00"
         # placeholders are ever synthesized. Phase 7B learning resources stay
         # as a small block below it (fed by set_learning_status).
-        self.context_status = ContextStatusCard(self)
+        self.context_status = ContextStatusCard(
+            self, display_names=self._display_names
+        )
 
         # Phase 7B: bound learning resources (display only — labels come
         # verbatim from LearningResource.label()).

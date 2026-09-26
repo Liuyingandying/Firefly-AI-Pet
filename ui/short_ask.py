@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from character import CharacterDisplayNames
 from core.agent_events import (
     STATUS_CONNECTING,
     STATUS_GENERATING,
@@ -233,9 +234,15 @@ class AskPill(QWidget):
 
     ask_clicked = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        display_names: CharacterDisplayNames | None = None,
+    ):
         super().__init__(parent, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setWindowTitle("Firefly Ask")
+        names = display_names or CharacterDisplayNames()
+        self.setWindowTitle(f"{names.brand_name} Ask")
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet(theme.transparent_window_style())
         self.setFixedSize(84, 32)
@@ -278,6 +285,13 @@ class AskPill(QWidget):
         super().mouseReleaseEvent(event)
 
 
+    def set_display_names(self, display_names) -> None:
+        """Refresh character labels (live switch)."""
+        from character import CharacterDisplayNames
+
+        self._display_names = display_names or CharacterDisplayNames()
+        self.setWindowTitle(f"{self._display_names.brand_name} Ask")
+
 class ShortAskPanel(PopoverBase):
     send_requested = Signal(str)
     force_send_requested = Signal(str)
@@ -285,9 +299,18 @@ class ShortAskPanel(PopoverBase):
     retry_requested = Signal()
     open_agent_requested = Signal(str)
 
-    def __init__(self, *, width: int = theme.POPOVER_WIDTH, parent=None):
+    def __init__(
+        self,
+        *,
+        width: int = theme.POPOVER_WIDTH,
+        parent=None,
+        display_names: CharacterDisplayNames | None = None,
+    ):
         super().__init__(width=width, parent=parent)
-        self.setWindowTitle("Firefly Short Talk")
+        self._display_names = display_names or CharacterDisplayNames()
+        self._agent_display = dict(AGENT_DISPLAY)
+        self._agent_display["firefly"] = self._display_names.assistant_name
+        self.setWindowTitle(f"{self._display_names.brand_name} Short Talk")
         # PopoverBase binds Escape -> dismiss via a QShortcut, which intercepts
         # the key before keyPressEvent. The panel needs Escape to stop a running
         # turn, so disable the shortcut and handle Escape ourselves.
@@ -644,10 +667,10 @@ class ShortAskPanel(PopoverBase):
     # -- internals ------------------------------------------------------
 
     def _agent_title(self) -> str:
-        return f"Ask {AGENT_DISPLAY.get(self._agent, self._agent.title())}"
+        return f"Ask {self._agent_display.get(self._agent, self._agent.title())}"
 
     def _open_label(self) -> str:
-        return f"Open {AGENT_DISPLAY.get(self._agent, self._agent.title())}"
+        return f"Open {self._agent_display.get(self._agent, self._agent.title())}"
 
     def _mark_first_text(self) -> None:
         # First token arrived: the "still working" / "open agent" progress cues
@@ -783,7 +806,7 @@ class ShortAskPanel(PopoverBase):
         self._stop_timers()
         self._state = ShortTalkState.ERROR
         self._retry_active = True
-        display = AGENT_DISPLAY.get(self._agent, self._agent.title())
+        display = self._agent_display.get(self._agent, self._agent.title())
         self._status.setText(f"{display} is taking too long.")
         self._status.setToolTip("")
         self._primary_btn.setText("Retry")
@@ -840,6 +863,15 @@ class ShortAskPanel(PopoverBase):
             self.stop_requested.emit()
             self.begin_cancel()
         super().dismiss()
+
+    def set_display_names(self, display_names) -> None:
+        """Refresh character labels (live switch)."""
+        from character import CharacterDisplayNames
+
+        self._display_names = display_names or CharacterDisplayNames()
+        self.setWindowTitle(f"{self._display_names.brand_name} Short Talk")
+        if getattr(self, "_agent_display", None) is not None:
+            self._agent_display["firefly"] = self._display_names.assistant_name
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Escape:

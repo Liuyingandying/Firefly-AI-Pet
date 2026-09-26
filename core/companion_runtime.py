@@ -247,6 +247,17 @@ class CompanionRuntime:
             config=config,
         )
 
+    def update_character(self, profile) -> None:
+        """Swap the character persona for subsequent turns.
+
+        Replaces the reference held by the runtime and its context builder;
+        already-generated history keeps its original messages.
+        """
+        if not callable(getattr(profile, "to_system_messages", None)):
+            raise TypeError("character must provide to_system_messages()")
+        self.character = profile
+        setattr(self.context_builder, "character", profile)
+
     def build_messages(
         self,
         user_message: str,

@@ -31,11 +31,11 @@ class _PetState(str, Enum):
 
 # Priority: higher number = higher priority.
 _PRIORITY: dict[RuntimeActivityState, int] = {
-    RuntimeActivityState.ERROR: 6,
-    RuntimeActivityState.SUCCESS: 5,
+    RuntimeActivityState.ERROR: 7,
+    RuntimeActivityState.SUCCESS: 6,
+    RuntimeActivityState.WAITING_INPUT: 5,
     RuntimeActivityState.WORKING: 4,
     RuntimeActivityState.TOOL_RUNNING: 3,
-    RuntimeActivityState.WAITING_INPUT: 2,
     RuntimeActivityState.IDLE: 1,
 }
 
@@ -48,6 +48,16 @@ _LEGACY_MAP: dict[LifecycleState, RuntimeActivityState] = {
     LifecycleState.SUCCESS: RuntimeActivityState.SUCCESS,
     LifecycleState.ERROR: RuntimeActivityState.ERROR,
     LifecycleState.SLEEPING: RuntimeActivityState.IDLE,
+}
+
+_LEGACY_DISPLAY: dict[LifecycleState, str] = {
+    LifecycleState.IDLE: "idle",
+    LifecycleState.THINKING: "thinking",
+    LifecycleState.WORKING: "working",
+    LifecycleState.WAITING: "waiting",
+    LifecycleState.SUCCESS: "success",
+    LifecycleState.ERROR: "error",
+    LifecycleState.SLEEPING: "idle",
 }
 
 # Activity display string (from PetActivityController) → RuntimeActivityState.
@@ -69,6 +79,15 @@ _DETAIL_REVERSE: dict[str, RuntimeActivityState] = {
     "waiting_input": RuntimeActivityState.WAITING_INPUT,
     "success": RuntimeActivityState.SUCCESS,
     "error": RuntimeActivityState.ERROR,
+}
+
+_DETAIL_VISUAL: dict[str, str] = {
+    "idle": "idle",
+    "working": "working",
+    "tool_running": "working",
+    "waiting_input": "waiting",
+    "success": "success",
+    "error": "error",
 }
 
 # RuntimeActivityState → display string (same as PetActivityController).
@@ -123,12 +142,15 @@ class PetStateResolver(QObject):
         super().__init__(parent)
         self._legacy: RuntimeActivityState = RuntimeActivityState.IDLE
         self._activity: RuntimeActivityState = RuntimeActivityState.IDLE
+        self._legacy_display = "idle"
+        self._activity_display = "idle"
         self._legacy_set = False
         self._activity_set = False
         self._last_display: str | None = None
         self._last_detail: str | None = None
         self._terminal: RuntimeActivityState | None = None
         self._pre_terminal: RuntimeActivityState = RuntimeActivityState.IDLE
+        self._pre_terminal_display = "idle"
 
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -140,9 +162,15 @@ class PetStateResolver(QObject):
     def update_legacy_state(self, resolved: ResolvedState) -> None:
         """Feed from ``StateMonitor.resolved_state_changed``."""
         act = _LEGACY_MAP.get(resolved.state)
-        if act is None or (self._legacy_set and act == self._legacy):
+        display = _LEGACY_DISPLAY.get(resolved.state)
+        if act is None or display is None or (
+            self._legacy_set
+            and act == self._legacy
+            and display == self._legacy_display
+        ):
             return
         self._legacy = act
+        self._legacy_display = display
         self._legacy_set = True
         self._resolve()
 
@@ -152,6 +180,7 @@ class PetStateResolver(QObject):
         if act is None or (self._activity_set and act == self._activity):
             return
         self._activity = act
+        self._activity_display = display
         self._activity_set = True
         self._resolve()
 
@@ -166,6 +195,7 @@ class PetStateResolver(QObject):
         if act is None or (self._activity_set and act == self._activity):
             return
         self._activity = act
+        self._activity_display = _DETAIL_VISUAL[detail]
         self._activity_set = True
         self._resolve()
 
@@ -177,46 +207,58 @@ class PetStateResolver(QObject):
         # ---- 1.  pick the higher-priority source --------------------------
         legacy_prio = _PRIORITY.get(self._legacy, 0)
         activity_prio = _PRIORITY.get(self._activity, 0)
-        candidate = self._legacy if legacy_prio >= activity_prio else self._activity
+        legacy_wins = legacy_prio >= activity_prio
+        candidate = self._legacy if legacy_wins else self._activity
+        candidate_display = (
+            self._legacy_display if legacy_wins else self._activity_display
+        )
 
         # ---- 2.  terminal check -------------------------------------------
         if self._terminal is not None:
             # Terminal mode active: only another terminal state can override.
             if candidate in _TERMINAL_STATES:
                 if candidate != self._terminal:
-                    self._enter_terminal(candidate)
+                    self._enter_terminal(candidate, candidate_display)
                 # else: same terminal state — keep the existing timer.
             # else: non-terminal candidate — blocked during terminal.
             return
 
         # ---- 3.  normal (non-terminal) resolution -------------------------
         if candidate in _TERMINAL_STATES:
-            self._enter_terminal(candidate)
+            self._enter_terminal(candidate, candidate_display)
         else:
-            self._emit(candidate)
+            self._emit(candidate, candidate_display)
 
     # -- terminal lifecycle -------------------------------------------------
 
-    def _enter_terminal(self, state: RuntimeActivityState) -> None:
+    def _enter_terminal(self, state: RuntimeActivityState, display: str) -> None:
         self._terminal = state
         # Pre-terminal: the best non-terminal state from the *other* source.
         other = self._activity if state is self._legacy else self._legacy
         self._pre_terminal = (
             other if other not in _TERMINAL_STATES else RuntimeActivityState.IDLE
         )
+        if other in _TERMINAL_STATES:
+            self._pre_terminal_display = "idle"
+        elif state is self._legacy:
+            self._pre_terminal_display = self._activity_display
+        else:
+            self._pre_terminal_display = self._legacy_display
         self._timer.start()
-        self._emit(state)
+        self._emit(state, display)
 
     def _on_recovery(self) -> None:
         self._terminal = None
         target = self._pre_terminal
+        target_display = self._pre_terminal_display
         self._pre_terminal = RuntimeActivityState.IDLE
-        self._emit(target)
+        self._pre_terminal_display = "idle"
+        self._emit(target, target_display)
 
     # -- emit (with dedup; four-state display and six-state detail) --------
 
-    def _emit(self, state: RuntimeActivityState) -> None:
-        display = _DISPLAY.get(state)
+    def _emit(self, state: RuntimeActivityState, display: str | None = None) -> None:
+        display = display or _DISPLAY.get(state)
         if display is not None and display != self._last_display:
             self._last_display = display
             self.pet_display_state_changed.emit(display)

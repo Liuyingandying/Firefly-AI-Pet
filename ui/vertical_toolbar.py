@@ -5,11 +5,12 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QVBoxLayout, QWidget
 
+from character import CharacterDisplayNames
 from . import theme
 
 
 TOOLBAR_ACTIONS = (
-    ("companion", "Firefly", "star"),
+    ("companion", "", "star"),
     ("scratchpad", "临时记事本", "note"),
     ("pagelens", "PageLens", "pagelens"),
     ("workspace", "Workspace", "hexagon"),
@@ -81,9 +82,15 @@ class ToolbarItem(QFrame):
 class VerticalToolbar(QWidget):
     action_requested = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        display_names: CharacterDisplayNames | None = None,
+    ):
         super().__init__(parent, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setWindowTitle("Firefly Toolbar")
+        display_names = display_names or CharacterDisplayNames()
+        self.setWindowTitle(f"{display_names.brand_name} Toolbar")
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet(theme.transparent_window_style())
         self.setFixedSize(theme.TOOLBAR_SIZE)
@@ -105,7 +112,11 @@ class VerticalToolbar(QWidget):
 
         self._items: dict[str, ToolbarItem] = {}
         self._separators: list[QFrame] = []
-        for index, (action_id, tooltip, icon_kind) in enumerate(TOOLBAR_ACTIONS):
+        actions = (
+            ("companion", display_names.display_name, "star"),
+            *TOOLBAR_ACTIONS[1:],
+        )
+        for index, (action_id, tooltip, icon_kind) in enumerate(actions):
             if index:
                 separator = QFrame(card)
                 separator.setFixedSize(27, 1)
@@ -133,6 +144,13 @@ class VerticalToolbar(QWidget):
             item.set_selected(key == action_id)
         if emit_signal:
             self.action_requested.emit(action_id)
+
+    def set_display_names(self, display_names) -> None:
+        """Refresh character labels (live switch)."""
+        from character import CharacterDisplayNames
+
+        self._display_names = display_names or CharacterDisplayNames()
+        self.setWindowTitle(f"{self._display_names.brand_name} Toolbar")
 
     def apply_scale(self) -> None:
         self.setFixedSize(theme.scaled_px(theme.TOOLBAR_SIZE.width()), theme.scaled_px(theme.TOOLBAR_SIZE.height()))
