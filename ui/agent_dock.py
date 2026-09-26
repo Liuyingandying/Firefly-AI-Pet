@@ -8,11 +8,12 @@ console. Z Code just opens/activates the desktop app — it never uses the
 workspace as a CLI cwd. Launch failures surface a lightweight message via
 ``launch_message`` and never crash Firefly.
 
-The Qwen entry carries a small availability dot to the right of its label
-that reflects whether Firefly's configured Tianjin University ``tju-llm`` API
-is callable (``ui.tju_llm_health``). It does NOT reflect the Qwen CLI in any
-way. The dot is purely informational — clicking it does nothing; clicking
-anywhere else on the Qwen item still launches the CLI.
+Each launcher carries a small presence dot beside its label: GREEN = the
+launch target was discovered on this machine (CLI on PATH / Store app /
+desktop app), HIDDEN = not discovered (no false promise — clicking still
+surfaces the install hint via ``launch_message``).  Discovery runs in a
+daemon thread refreshed on dock show (throttled); results land through a
+queued signal.
 """
 
 from __future__ import annotations
@@ -32,7 +33,6 @@ from .agent_launcher import (
     launch_qwen_yolo,
     launch_zcode,
 )
-from .tju_llm_health import TjuApiStatus, TjuLlmHealthChecker
 
 LAUNCHERS = (
     ("claude", "Claude", "C", theme.CLAUDE_ORANGE,
@@ -51,58 +51,6 @@ _LAUNCHER_FUNCS = {
     "qwen": launch_qwen_yolo,
     "zcode": launch_zcode,
 }
-
-
-class _StatusDot(QWidget):
-    """Tiny 7px TJU ``tju-llm`` availability dot shown right of the Qwen label.
-
-    Colors: GREEN (tju-llm API callable), RED (tju-llm API clearly unusable),
-    GRAY (unknown / still checking). This has nothing to do with the Qwen CLI
-    binary or process. The dot is inert: it swallows its own mouse events so
-    clicking it never launches anything and never reaches the item.
-    """
-
-    COLORS = {
-        TjuApiStatus.UNKNOWN: theme.DOCK_STATUS_GRAY,
-        TjuApiStatus.AVAILABLE: theme.DOCK_STATUS_GREEN,
-        TjuApiStatus.UNAVAILABLE: theme.DOCK_STATUS_RED,
-    }
-    TOOLTIPS = {
-        TjuApiStatus.UNKNOWN: "TJU tju-llm API status unknown",
-        TjuApiStatus.AVAILABLE: "TJU tju-llm API available",
-        TjuApiStatus.UNAVAILABLE: "TJU tju-llm API unavailable",
-    }
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._status = TjuApiStatus.UNKNOWN
-        self.setFixedSize(theme.DOCK_STATUS_DOT_SIZE, theme.DOCK_STATUS_DOT_SIZE)
-        self.setToolTip(self.TOOLTIPS[self._status])
-        self.setAccessibleName("TJU tju-llm API status")
-
-    @property
-    def status(self) -> str:
-        return self._status
-
-    def set_status(self, status: str) -> None:
-        status = status if status in self.COLORS else TjuApiStatus.UNKNOWN
-        if status != self._status:
-            self._status = status
-            self.setToolTip(self.TOOLTIPS[status])
-            self.update()
-
-    def paintEvent(self, _event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(*self.COLORS[self._status]))
-        painter.drawEllipse(self.rect())
-
-    def mousePressEvent(self, event) -> None:
-        event.accept()  # no action on the dot; never falls through to launch
-
-    def mouseReleaseEvent(self, event) -> None:
-        event.accept()
 
 
 class _PresenceDot(QWidget):
@@ -143,7 +91,7 @@ class _LauncherItem(QFrame):
     activated = Signal(str)
 
     def __init__(self, launcher_id: str, name: str, letter: str, color, tooltip: str,
-                 *, status_dot: _StatusDot | None = None, parent=None):
+                 *, status_dot: QWidget | None = None, parent=None):
         super().__init__(parent)
         self._launcher_id = launcher_id
         self._tooltip_text = tooltip
@@ -233,7 +181,6 @@ class AgentDock(QWidget):
 
         self._items: dict[str, _LauncherItem] = {}
         self._separators: list[QFrame] = []
-        self._tju_dot: _StatusDot | None = None
         self._presence_dots: dict[str, _PresenceDot] = {}
         for index, (launcher_id, name, letter, color, tooltip) in enumerate(LAUNCHERS):
             if index:
@@ -243,10 +190,7 @@ class AgentDock(QWidget):
                 layout.addWidget(separator, 0, Qt.AlignVCenter)
                 self._separators.append(separator)
             status_dot = None
-            if launcher_id == "qwen":
-                status_dot = _StatusDot(card)
-                self._tju_dot = status_dot
-            elif launcher_id in ("codex", "zcode"):
+            if launcher_id in ("codex", "qwen", "zcode"):
                 status_dot = _PresenceDot(name, card)
                 self._presence_dots[launcher_id] = status_dot
             item = _LauncherItem(
@@ -257,19 +201,9 @@ class AgentDock(QWidget):
             layout.addWidget(item, 1)
             self._items[launcher_id] = item
 
-        # TJU tju-llm availability dot — background probe, never blocks the UI.
-        # provider_factory: 每次探测重建实例，及时感知 Provider Manager 新存的密钥。
-        from providers.tju_qwen import TJUQwenProvider
-
-        self._tju_health = TjuLlmHealthChecker(
-            parent=self, provider_factory=TJUQwenProvider
-        )
-        self._tju_health.status_changed.connect(self._on_tju_status)
-        self.destroyed.connect(self._stop_tju_health)
-
-        # Codex / Z Code presence dots — discovery runs on a daemon thread
-        # (filesystem + Appx query), results land on the main thread via a
-        # queued signal.
+        # Codex / Qwen / Z Code presence dots — discovery runs on a daemon
+        # thread (PATH + Store app + registry scan), results land on the
+        # main thread via a queued signal.
         self._presence_thread: threading.Thread | None = None
         self._last_presence_check = 0.0
         self.presence_changed.connect(self._on_presence_changed)
@@ -286,6 +220,7 @@ class AgentDock(QWidget):
         def _work() -> None:
             result = {
                 "codex": agent_launcher.codex_available(),
+                "qwen": agent_launcher.qwen_available(),
                 "zcode": agent_launcher.zcode_available(),
             }
             self.presence_changed.emit(result)
@@ -299,6 +234,7 @@ class AgentDock(QWidget):
         """同步扫描（测试/调试用）：绕过后台线程直接应用结果。"""
         result = {
             "codex": agent_launcher.codex_available(),
+            "qwen": agent_launcher.qwen_available(),
             "zcode": agent_launcher.zcode_available(),
         }
         self._on_presence_changed(result)
@@ -311,20 +247,11 @@ class AgentDock(QWidget):
     def _on_item_activated(self, launcher_id: str) -> None:
         self.launch_agent.emit(launcher_id)
 
-    def _on_tju_status(self, status: str) -> None:
-        if self._tju_dot is not None:
-            self._tju_dot.set_status(status)
-
-    def _stop_tju_health(self) -> None:
-        self._tju_health.stop()
-
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        self._tju_health.start()
         self.refresh_presence()
 
     def closeEvent(self, event) -> None:
-        self._tju_health.stop()
         super().closeEvent(event)
 
     def apply_scale(self) -> None:

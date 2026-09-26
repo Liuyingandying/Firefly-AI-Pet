@@ -1,4 +1,4 @@
-"""Codex / Z Code presence dot tests (green = discovered, hidden = absent).
+"""Launcher presence dot tests (green = discovered, hidden = absent).
 
 Deterministic: availability is stubbed BEFORE the dock is constructed, and
 tests drive presence_scan_sync() directly — no background thread races.
@@ -29,39 +29,42 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def _set_availability(monkeypatch, codex: bool, zcode: bool) -> None:
+def _set_availability(monkeypatch, *, codex: bool, qwen: bool, zcode: bool) -> None:
     monkeypatch.setattr(agent_launcher, "codex_available", lambda: codex)
+    monkeypatch.setattr(agent_launcher, "qwen_available", lambda: qwen)
     monkeypatch.setattr(agent_launcher, "zcode_available", lambda: zcode)
 
 
 def test_presence_dots_track_discovery(qapp, monkeypatch):
-    _set_availability(monkeypatch, codex=True, zcode=False)
+    _set_availability(monkeypatch, codex=True, qwen=False, zcode=True)
     dock = AgentDock()
     try:
         dock.presence_scan_sync()
+        assert set(dock._presence_dots) == {"codex", "qwen", "zcode"}
         assert not dock._presence_dots["codex"].isHidden()
-        assert dock._presence_dots["zcode"].isHidden()
+        assert dock._presence_dots["qwen"].isHidden()
+        assert not dock._presence_dots["zcode"].isHidden()
 
-        _set_availability(monkeypatch, codex=False, zcode=True)
+        _set_availability(monkeypatch, codex=False, qwen=True, zcode=False)
         dock.presence_scan_sync()
         assert dock._presence_dots["codex"].isHidden()
-        assert not dock._presence_dots["zcode"].isHidden()
+        assert not dock._presence_dots["qwen"].isHidden()
+        assert dock._presence_dots["zcode"].isHidden()
     finally:
         dock.close()
 
 
 def test_presence_hidden_when_nothing_discovered(qapp, monkeypatch):
-    _set_availability(monkeypatch, codex=False, zcode=False)
+    _set_availability(monkeypatch, codex=False, qwen=False, zcode=False)
     dock = AgentDock()
     try:
         dock.presence_scan_sync()
-        assert dock._presence_dots["codex"].isHidden()
-        assert dock._presence_dots["zcode"].isHidden()
+        assert all(dot.isHidden() for dot in dock._presence_dots.values())
     finally:
         dock.close()
 
 
 def test_real_machine_discovery_smoke(qapp):
-    """真机冒烟：本机装有 Codex（商店版）与 Z Code，两者都应被发现。"""
+    """真机冒烟：本机已发现 Codex（商店版）与 Z Code（桌面应用）。"""
     assert agent_launcher.codex_available() is True
     assert agent_launcher.zcode_available() is True
