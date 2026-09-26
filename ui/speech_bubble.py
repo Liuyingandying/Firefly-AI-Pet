@@ -133,7 +133,6 @@ class SpeechBubble(QWidget):
         else:
             self._text.setText(theme.bubble_html(self._display_names))
 
-    @staticmethod
     def set_display_names(self, display_names) -> None:
         """Refresh character labels (live switch)."""
         from character import CharacterDisplayNames
@@ -141,6 +140,7 @@ class SpeechBubble(QWidget):
         self._display_names = display_names or CharacterDisplayNames()
         self.setWindowTitle(f"{self._display_names.brand_name} Greeting")
 
+    @staticmethod
     def _message_html(title: str, message: str, accent) -> str:
         secondary = theme.css_color(theme.TEXT_SECONDARY)
         if accent is not None:
