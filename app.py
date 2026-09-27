@@ -878,6 +878,10 @@ class VisualShell(QObject):
         if self._shutting_down:
             return
         self._shutting_down = True
+        # 同步协调器标志：退出路径中不再弹「流萤已隐藏」恢复提示。
+        coordinator = getattr(self, "coordinator", None)
+        if coordinator is not None:
+            coordinator._shutting_down = True
         self.state_monitor.stop()
         # Phase 3-C: release all global hotkeys (incl. the temporary Escape)
         # so no key stays swallowed after shutdown.

@@ -64,6 +64,8 @@ class OverlayCoordinator(QObject):
         single_reading_surface=False,
     ):
         super().__init__(parent)
+        # 真正退出时由宿主置 True：hide_firefly 据此决定是否弹恢复提示。
+        self._shutting_down = False
         self.pet = pet
         self.dock = dock
         self.bubble = bubble
