@@ -353,6 +353,11 @@ class VoiceSessionController(QObject):
             rms = float(_np.sqrt(_np.mean(indata.astype("float64") ** 2))) / 32768.0
             level = min(1.0, rms * 8.0)  # 线性增益到 [0,1] 显示区间
             target = self._level_target
+            starts = level > _SPEECH_START_LEVEL and not self._speech_talking
+            # 发言缓冲必须收「所有」块——尤其响块（真正说话的部分）；
+            # 只收安静块会让 STT 拿到纯静音，识别为空、永远派发不出去。
+            if (self._speech_talking or starts) and len(self._speech_buffer) < 600:
+                self._speech_buffer.append(indata.copy())
         if target is not None:
             target(level)
         now = _now()
@@ -362,20 +367,17 @@ class VoiceSessionController(QObject):
                 if not self._speech_talking:
                     self._speech_talking = True
                     self._barge_in_sent = False
-                    self._speech_buffer = []
                     self.status_text_changed.emit(self.status_text())
             elif self._speech_talking and now - self._last_loud_at > _SPEECH_END_SILENCE_S:
                 self._speech_talking = False
                 self.status_text_changed.emit(self.status_text())
                 duration = now - self._last_loud_at
-                # 发言缓冲交给 STT（≥0.5s 才值得识别；30s 环形上限）
+                # 发言缓冲交给 STT（≥0.5s 才值得识别）
                 buffered, self._speech_buffer = self._speech_buffer, []
                 if duration >= 0.5 and buffered:
                     self._spawn(lambda: self._transcribe_buffer(buffered))
                 self._barge_in_sent = False
                 self.utterance_end.emit(max(0.0, duration))
-            elif self._speech_talking and len(self._speech_buffer) < 600:
-                self._speech_buffer.append(indata.copy())
             if (
                 self._speech_talking
                 and (self._speaking or self._queue_playing)

@@ -21,10 +21,11 @@ from __future__ import annotations
 import ctypes
 import math
 
-from PySide6.QtCore import QEvent, QPointF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
+    QPen,
     QPainter,
     QRadialGradient,
 )
@@ -234,9 +235,13 @@ class VoiceOrb(QWidget):
         super().changeEvent(event)
 
     def paintEvent(self, _event) -> None:  # noqa: N802
-        from PySide6.QtGui import QPen
-
         painter = QPainter(self)
+        try:
+            self._paint(painter)
+        finally:
+            painter.end()  # 异常也必须结束 painter，否则平台绘制系统可能卡死
+
+    def _paint(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
         state = self.derived_state()
         center = QPointF(self.width() / 2, self.height() / 2)

@@ -277,3 +277,34 @@ def test_stop_ends_session_and_stops_playback(qapp):
     assert not session._active
     assert client.stop_calls >= 1
     assert session.status_text() == ""
+
+
+def test_speech_buffer_receives_loud_blocks(qapp, monkeypatch):
+    """回归：响块（真正说话）必须进录音缓冲，否则 STT 拿到纯静音。"""
+    session = VoiceSessionController(
+        client=_FakeClient(),
+        health_probe=lambda: {"status": "ok"},
+        queue_poll=lambda: {"playing": None},
+    )
+    session._active = True
+    session._mic_stream = _FakeStream()
+    clock = {"t": 0.0}
+    monkeypatch.setattr(vs, "_now", lambda: clock["t"])
+
+    import numpy as np
+
+    loud = (np.ones((800, 1), dtype="int16") * 9000)
+
+    for _ in range(6):  # 6 个响块（300ms）→ 发言中
+        session._on_audio_block(loud, 800, None, None)
+        clock["t"] += 0.05
+    assert len(session._speech_buffer) == 6, "响块未进缓冲"
+
+    for _ in range(3):  # 3 个安静块（尾部）
+        session._on_audio_block(np.zeros((800, 1), dtype="int16"), 800, None, None)
+        clock["t"] += 0.05
+    assert len(session._speech_buffer) == 9
+
+    clock["t"] += 1.0  # 静默超时 → 一轮结束，缓冲交给 STT 并清空
+    session._on_audio_block(np.zeros((800, 1), dtype="int16"), 800, None, None)
+    assert session._speech_buffer == []
