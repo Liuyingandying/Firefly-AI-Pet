@@ -573,15 +573,18 @@ class CompanionConsole(QMainWindow):
         bar.end_requested.connect(self._end_voice_companion)
 
         def _on_utterance(_duration: float) -> None:
-            # STT 未接入（语音服务无识别路由）：一次性说明缺失环节，不伪装。
+            # 一轮发言结束的占位：文本随后由 utterance_text 送入对话链路。
+            pass
+
+        def _on_stt_unavailable(detail: str) -> None:
+            # STT 不可用（服务 501 / 网络）：一次性说明并降级为仅朗读。
             if not self._voice_stt_hinted:
                 self._voice_stt_hinted = True
-                self.chat.append_assistant(
-                    "（语音陪伴已开启：我的回复会自动朗读，你说话时圆球会随音量起伏，"
-                    "插话可以打断我。语音识别还没接入，暂时请用键盘和我聊～）"
-                )
+                self.chat.append_assistant(f"（语音识别暂时不可用：{detail}。先陪你聊文字，回复仍会自动朗读～）")
 
         session.utterance_end.connect(_on_utterance)
+        session.utterance_text.connect(self._on_voice_utterance)
+        session.stt_unavailable.connect(_on_stt_unavailable)
         self._wrap_layout.insertWidget(1, bar, 0, Qt.AlignHCenter)
         self._voice_session = session
         self._voice_bar = bar
@@ -603,6 +606,17 @@ class CompanionConsole(QMainWindow):
         if not text and attachment is None:
             return
         self.input.clear()
+        self._dispatch_outgoing(text, attachment)
+
+    def _on_voice_utterance(self, text: str) -> None:
+        """STT 识别出的用户发言 → 进入与键盘输入相同的对话链路。"""
+        text = (text or "").strip()
+        if text and self._voice_session is not None and self._voice_session.active:
+            self._dispatch_outgoing(text, None)
+
+    def _dispatch_outgoing(self, text: str, attachment=None) -> None:
+        if self._voice_session is not None and self._voice_session.active:
+            self._voice_session.notify_ask_submitted()
         # 多模态附件：直达自由对话链路（学习 loop 只拦纯文本请求）。
         # 文档走 ask_with_document，图片走 ask_with_image；空文字补默认
         # 提问（v1 同语义），发送失败保留附件供重试。
@@ -635,12 +649,8 @@ class CompanionConsole(QMainWindow):
             # 附件对象由回合管线持有，扫描版 PDF 的按需 OCR 不受影响。
             self.input.attachments.clear_for_send()
             self._turn_has_image = False
-            if self._voice_session is not None:
-                self._voice_session.notify_ask_submitted()
             return
         self.chat.append_user(text)
-        if self._voice_session is not None and self._voice_session.active:
-            self._voice_session.notify_ask_submitted()
         # Phase 6.5: when learning mode is on, the input chain is owned by the
         # LearningLoopOrchestrator — it detects the learning request, records
         # the allowed interaction facts, prepares the loop context and answers

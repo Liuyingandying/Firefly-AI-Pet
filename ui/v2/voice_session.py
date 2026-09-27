@@ -16,9 +16,10 @@
   播放并清理队列（现有语音链路支持），回到聆听；后台任务不受影响。
 - 任务状态：宿主转发 AgentEvent（STATUS=执行中，FINAL/ERROR/CANCELLED=
   结束）；可与说话并行，圆球显示说话、任务文字保留在旁。
-- 已知缺失环节（明确不伪装）：**语音识别（STT）未接入**——语音服务无
-  STT 路由，用户发言结束后没有文本可用，本层只发出 ``utterance_end``
-  信号供未来接入，聊天输入仍靠键盘。播报回复的 TTS/RVC 链路为真实能力。
+- 语音识别（STT）：发言期间缓冲原始 PCM，一轮结束后 POST 语音服务
+  ``POST /voice/stt``（faster-whisper 本机推理），识别文本经
+  ``utterance_text`` 交宿主进入对话链路；服务不可用（501/网络）时
+  经 ``stt_unavailable`` 一次性提示并降级为「仅朗读」模式。
 """
 
 from __future__ import annotations
@@ -68,8 +69,12 @@ class VoiceSessionController(QObject):
     mic_open_changed = Signal(bool)
     muted_changed = Signal(bool)
     status_text_changed = Signal(str)
-    #: 用户一轮发言结束（STT 未接入：无文本，供未来接入与提示）
+    #: 用户一轮发言结束（携带实际时长；文本经 STT 后走 utterance_text）
     utterance_end = Signal(float)
+    #: STT 识别出的用户发言文本（语音服务 /voice/stt，真实转写）
+    utterance_text = Signal(str)
+    #: STT 不可用（服务 501 / 网络失败）——一次性提示用
+    stt_unavailable = Signal(str)
 
     def __init__(
         self,
@@ -106,6 +111,8 @@ class VoiceSessionController(QObject):
         self._barge_in_sent = False
         self._lock = threading.Lock()
         self._level_target: Callable[[float], None] | None = None
+        self._speech_buffer: list[Any] = []   # 发言期间的原始 int16 块（16k 单声道）
+        self._stt_ok: bool | None = None      # None=未探测；False=服务端 501
 
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(_POLL_INTERVAL_MS)
@@ -339,7 +346,7 @@ class VoiceSessionController(QObject):
             self._barge_in_sent = False
 
     def _on_audio_block(self, indata, frames, time_info, status) -> None:
-        """声卡回调线程：真实 RMS 电平 → 圆球 + 发言/打断判定。"""
+        """声卡回调线程：真实 RMS 电平 → 圆球 + 发言缓冲/打断判定。"""
         with self._lock:
             if self._mic_stream is None or self._muted or not self._active or _np is None:
                 return
@@ -355,13 +362,20 @@ class VoiceSessionController(QObject):
                 if not self._speech_talking:
                     self._speech_talking = True
                     self._barge_in_sent = False
+                    self._speech_buffer = []
                     self.status_text_changed.emit(self.status_text())
             elif self._speech_talking and now - self._last_loud_at > _SPEECH_END_SILENCE_S:
                 self._speech_talking = False
                 self.status_text_changed.emit(self.status_text())
                 duration = now - self._last_loud_at
-                self.utterance_end.emit(max(0.0, duration))
+                # 发言缓冲交给 STT（≥0.5s 才值得识别；30s 环形上限）
+                buffered, self._speech_buffer = self._speech_buffer, []
+                if duration >= 0.5 and buffered:
+                    self._spawn(lambda: self._transcribe_buffer(buffered))
                 self._barge_in_sent = False
+                self.utterance_end.emit(max(0.0, duration))
+            elif self._speech_talking and len(self._speech_buffer) < 600:
+                self._speech_buffer.append(indata.copy())
             if (
                 self._speech_talking
                 and (self._speaking or self._queue_playing)
@@ -370,6 +384,55 @@ class VoiceSessionController(QObject):
                 # 用户插话：停止当前播放（真实服务端 stop），回到聆听。
                 self._barge_in_sent = True
                 self._spawn(self._stop_playback)
+
+    # ------------------------------------------------------------ STT
+
+    def _transcribe_buffer(self, blocks: list[Any]) -> None:
+        """发言缓冲 → WAV → POST /voice/stt（faster-whisper 本机推理）。"""
+        import io
+        import wave
+
+        import numpy as _np
+
+        audio = _np.concatenate(blocks, axis=0)  # int16 (N,1)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(_SAMPLE_RATE)
+            wf.writeframes(audio.tobytes())
+        wav = buf.getvalue()
+        url = str(getattr(self._client.config, "url", "http://127.0.0.1:8300")).rstrip("/")
+        try:
+            import httpx
+
+            resp = httpx.post(
+                f"{url}/voice/stt",
+                files={"file": ("utterance.wav", wav, "audio/wav")},
+                data={"language": "zh"},
+                timeout=30.0,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("stt request failed: %s", exc)
+            if self._stt_ok is not False:
+                self._stt_ok = False
+                self.stt_unavailable.emit(f"语音识别请求失败（{type(exc).__name__}）")
+            return
+        if resp.status_code == 501:
+            if self._stt_ok is not False:
+                self._stt_ok = False
+                detail = str(resp.json().get("detail", ""))[:120]
+                self.stt_unavailable.emit(f"语音识别未就绪：{detail}")
+            return
+        if resp.status_code != 200:
+            if self._stt_ok is not False:
+                self._stt_ok = False
+                self.stt_unavailable.emit(f"语音识别失败（HTTP {resp.status_code}）")
+            return
+        self._stt_ok = True
+        text = str(resp.json().get("text", "")).strip()
+        if text:
+            self.utterance_text.emit(text)
 
     # ------------------------------------------------------------ 基础设施
 

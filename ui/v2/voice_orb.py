@@ -21,7 +21,7 @@ from __future__ import annotations
 import ctypes
 import math
 
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPointF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -234,11 +234,13 @@ class VoiceOrb(QWidget):
         super().changeEvent(event)
 
     def paintEvent(self, _event) -> None:  # noqa: N802
+        from PySide6.QtGui import QPen
+
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         state = self.derived_state()
-        cx = self.width() / 2
-        cy = self.height() / 2
+        center = QPointF(self.width() / 2, self.height() / 2)
+        cx, cy = center.x(), center.y()
 
         breath = math.sin(self._phase * 0.055)  # 待机呼吸 ~3.8s 周期
         level = max(self._user_level if state == ST_LISTENING else 0.0,
@@ -255,8 +257,12 @@ class VoiceOrb(QWidget):
         error = state == ST_ERROR
         connecting = state in (ST_CONNECTING, ST_RECONNECTING)
 
+        # 注意：drawEllipse 的 4 浮点重载是「矩形左上角+宽高」，必须显式
+        # 传 QPointF 圆心（半径语义），否则圆被画成从圆心外扩的四分之一扇形。
+        ellipse = lambda x, y, r: painter.drawEllipse(QPointF(x, y), r, r)  # noqa: E731
+
         # --- 光晕 ------------------------------------------------------
-        halo = QRadialGradient(cx, cy, radius * 1.9)
+        halo = QRadialGradient(center, radius * 1.9)
         if error:
             halo_c = QColor(255, 120, 120, 46)
         elif connecting:
@@ -269,12 +275,12 @@ class VoiceOrb(QWidget):
         halo.setColorAt(1.0, QColor(140, 160, 255, 0))
         painter.setBrush(halo)
         painter.setPen(Qt.NoPen)
-        painter.drawEllipse(cx, cy, radius * 3.8, radius * 3.8)
+        ellipse(cx, cy, radius * 1.9)
 
         # --- 主体：上蓝紫下淡蓝的纵向渐变 -------------------------------
-        body = _BodyGradient(cx, cy, radius, dim, error)
+        body = _BodyGradient(center, radius, dim, error)
         painter.setBrush(body)
-        painter.drawEllipse(cx, cy, radius * 2, radius * 2)
+        ellipse(cx, cy, radius)
 
         # --- 白色云雾（两层柔光斑块，随相位缓漂；电平加大流动） ---------
         speed = 1.0
@@ -290,40 +296,34 @@ class VoiceOrb(QWidget):
             ang = drift + i * 2.1
             ox = cx + math.cos(ang) * radius * 0.22 * kx * 2
             oy = cy - radius * ky + math.sin(ang * 0.8) * radius * 0.06
-            blob = QRadialGradient(ox, oy, radius * kr)
+            blob = QRadialGradient(QPointF(ox, oy), radius * kr)
             blob.setColorAt(0.0, QColor(255, 255, 255, cloud_alpha))
             blob.setColorAt(1.0, QColor(255, 255, 255, 0))
             painter.setBrush(blob)
-            painter.drawEllipse(ox, oy, radius * kr * 2, radius * kr * 2)
+            ellipse(ox, oy, radius * kr)
 
         # --- 处理中：上部流动弧光；连接中：脉冲环 ----------------------
         if state == ST_PROCESSING:
-            pen = painter.pen()
-            from PySide6.QtGui import QPen
-
             arc_a = QColor(255, 255, 255, 150)
             painter.setBrush(Qt.NoBrush)
             painter.setPen(QPen(arc_a, 2.4))
+            arc_r = radius * 0.85
+            arc_rect = QRectF(cx - arc_r, cy - arc_r, arc_r * 2, arc_r * 2)
             start = int((self._phase * 7) % 360) * 16
-            painter.drawArc(cx, cy, radius * 1.7, radius * 1.7, start, 100 * 16)
+            painter.drawArc(arc_rect, start, 100 * 16)
             painter.setPen(QPen(QColor(255, 255, 255, 70), 2.4))
-            painter.drawArc(cx, cy, radius * 1.7, radius * 1.7, start + 180 * 16, 80 * 16)
-            painter.setPen(pen)
+            painter.drawArc(arc_rect, start + 180 * 16, 80 * 16)
         elif connecting:
-            from PySide6.QtGui import QPen
-
             painter.setBrush(Qt.NoBrush)
             painter.setPen(QPen(QColor(140, 160, 255, int(120 + 90 * breath)), 2.0))
-            ring = radius * (2.1 + 0.12 * breath)
-            painter.drawEllipse(cx, cy, ring, ring)
+            ring = radius * (1.05 + 0.06 * breath)
+            painter.drawEllipse(QRectF(cx - ring, cy - ring, ring * 2, ring * 2))
 
-        # --- 静音斜杠 / 异常叹号 --------------------------------------
+        # --- 静音斜杠 -------------------------------------------------
         if state == ST_MUTED:
-            from PySide6.QtGui import QPen
-
             painter.setPen(QPen(QColor(120, 128, 160, 190), 3.0))
             r = radius * 0.55
-            painter.drawLine(cx - r, cy + r, cx + r, cy - r)
+            painter.drawLine(QPointF(cx - r, cy + r), QPointF(cx + r, cy - r))
         elif error:
             painter.setPen(QColor(210, 70, 70))
             f = QFont(self.font())
@@ -336,8 +336,9 @@ class VoiceOrb(QWidget):
 class _BodyGradient(QRadialGradient):
     """上蓝紫下淡蓝的主体渐变；静音/结束降饱和，异常偏警示色。"""
 
-    def __init__(self, cx: float, cy: float, radius: float, dim: bool, error: bool) -> None:
-        super().__init__(cx, cy - radius * 0.35, radius * 1.75, cx, cy)
+    def __init__(self, center: QPointF, radius: float, dim: bool, error: bool) -> None:
+        focus = QPointF(center.x(), center.y() - radius * 0.35)
+        super().__init__(focus, radius * 1.75, center)
         if error:
             top, mid, bottom = QColor(226, 130, 130), QColor(240, 190, 190), QColor(250, 226, 226)
         elif dim:
