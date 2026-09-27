@@ -116,6 +116,7 @@ def analyze_bilibili_video(
 
     if on_progress is not None:
         on_progress("正在获取视频信息…")
+    meta = service.metadata(bvid)
     if on_progress is not None:
         on_progress("正在下载视频并转写语音（长视频可能需要几分钟）…")
     transcript = service.transcribe(bvid, on_progress=on_progress)
