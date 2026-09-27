@@ -242,6 +242,7 @@ class BridgeLearningSession(QObject):
                 "answer",
                 settings=self._settings,
                 courses_root=self._courses_root,
+                delivery_mode="embedded",
                 interactive=False,
                 answer={
                     "question_id": pending.question_id,

@@ -380,6 +380,7 @@ def _run_rollover_init(
         "action": "resume",
         "created_at": utc_now_iso(),
         "task_id": task_id,
+        "delivery_mode": "interactive",
     }
     for key, value in teach_refs.items():
         context[key] = value
@@ -433,6 +434,7 @@ def launch_learning_mode(
     prompt_extra: str = "",
     answer: dict | None = None,
     review_approved: bool = False,
+    delivery_mode: str = "interactive",
     dry_run: bool = False,
     interactive: bool = True,
     spawner=None,
@@ -535,6 +537,16 @@ def launch_learning_mode(
                 _log_gate("ZCODE_SESSION_WARNING", session_id=existing_session, context_usage=usage)
             if zcode_session_exists(existing_session, course_workspace=workspace):
                 _log_gate("ZCODE_SESSION_REUSE", course_id=course_id, session_id=existing_session)
+                # Runtime Delivery: resume 轮也重写 context（带
+                # delivery_mode=interactive），使 TUI 内的 skill 始终读到
+                # 当前交付模式，而不是上次 init 的旧文件。
+                context = build_learning_context(
+                    course_dir, action, learner_id, manifest=manifest,
+                    now=now() if callable(now) else None,
+                )
+                context["task_id"] = existing_session
+                context["delivery_mode"] = "interactive"
+                write_learning_context(course_dir, context)
                 tui_pid = None
                 if not dry_run:
                     tui_pid = open_learning_session(course_dir, existing_session)
@@ -582,6 +594,8 @@ def launch_learning_mode(
         now=now() if callable(now) else None,
     )
     context["task_id"] = task_id
+    if delivery_mode in ("interactive", "embedded"):
+        context["delivery_mode"] = delivery_mode
     context_file = write_learning_context(course_dir, context)
 
     if action == "answer":

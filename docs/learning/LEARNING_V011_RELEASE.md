@@ -83,7 +83,23 @@ PDF → `ResourceManager.import_pdf`（SHA256 去重、托管副本、manifest�
 - 真实 E2E：RC 课程全链（含用户 TUI 作答→record→mastery 推进→同 session 恢复）；THz 课程 NEW→Review→晋级→curriculum→start_learning→出题→TUI 交付（作答待用户）。
 - 状态修复：2 条 choice_judge_bug 错误记录撤销+重放（results/mastery 已一致，审计表留痕）。
 
-## 11. Technical Debt（只记录，不修）
+## 11. Post-release Hotfix（v0.1.1 增补，已验证）
+
+### Context Budget / Session Rollover
+- 官方数据源：Z Code `model_usage` 表最近一次请求的 `input_tokens`（≈当前会话上下文占用）。
+- 当前验证基准 200K（`FIREFLY_CONTEXT_LIMIT` 可配置）；70%/85% 双门限。
+- 触发 ROLLOVER：不 `--resume` 旧会话，改走 rollover init（`rollover_snapshot.json` 最小引用：old session、usage、learner/course、teach_mcp_session_id、pending_question_id、teach_refs——零 mastery/progress 文本、零历史复制）→ 新 sessionId 写 binding → 自动打开新 TUI → `resume_learning` 恢复位置（pending question 沿用，不重复计分）。用户文案："学习会话已整理，继续当前课程。"
+- 实录：old `sess_78fac740`（usage 220,870 ≈ 111%）→ new `sess_74576537`（137,821 → NORMAL）。
+
+### Question Presentation
+- `generate_question` 返回 **student-facing payload**（question_id/mode/stem/options 编号 dict/difficulty/session_id），**零 answer/explanation 泄漏**（server truth 由 evaluator 内部自取）。
+- skill 渲染契约：收到 payload 必须立即渲染题干+全部选项+作答提示；禁止只报 question_id。
+- **QUESTION_PRESENTED gate**：未渲染完整题面前禁止 evaluate/record；payload 不完整报 `QUESTION_PRESENTATION_INCOMPLETE`。
+- **needs_review 禁入正式教学**：全 needs_review 包拒绝出题并禁止模型兜底。
+- 盲答污染修复：`question_not_presented` 撤销入 `result_repairs` 审计（RC-E01 ×2）。
+- interactive/embedded 按 `delivery_mode` 互斥分流：interactive 零 result.json 写入（文件系统实测验证）。
+
+## 12. Technical Debt（只记录，不修）
 
 1. 学习 TUI 加载 11/13 MCP；ZCode 无 session 级 MCP profile——MCP schema 使新 session 起步约 136–138K tokens（baseline 即 ~69% of 200K）。
 2. standalone Z Code 为本机构建的官方 v3.14.3 runtime；官方发布 Windows CLI/TUI 后可替换。
@@ -92,7 +108,7 @@ PDF → `ResourceManager.import_pdf`（SHA256 去重、托管副本、manifest�
 5. Z Code TUI 内部 tool trace 未做 learner-friendly 隐藏。
 6. 教学节奏可优化为 micro lesson。
 
-## 12. Version Status
+## 13. Version Status
 
 **`FIREFLY_LEARNING_BRIDGE_V011_FROZEN`**
 

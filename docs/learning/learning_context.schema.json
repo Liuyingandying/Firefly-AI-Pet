@@ -31,6 +31,10 @@
       "minLength": 1,
       "description": "OPTIONAL Firefly-generated reference for THIS run (echoed by the skill into result.json). A run reference, not learning state."
     },
+    "delivery_mode": {
+      "enum": ["interactive", "embedded"],
+      "description": "OPTIONAL. interactive (default): teaching renders inside Z Code TUI, no result.json. embedded (experimental): results delivered to Firefly chat via result.json."
+    },
     "curriculum_id": {
       "type": "string",
       "minLength": 1,

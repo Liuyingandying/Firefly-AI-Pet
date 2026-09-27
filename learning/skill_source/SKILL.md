@@ -184,6 +184,47 @@ opaque 原值。出现其他键（尤其 mastery/progress 类）→ 报架构违
 
 ## 4. 教学中（teach-mcp 为唯一事实源）
 
+### 4.0 题目呈现契约（QUESTION_PRESENTED gate，P0）
+
+`generate_question` 的返回就是 **student-facing payload**
+（question_id / mode / stem / options{A,B,C,…} / difficulty）。
+**收到后必须立即在当前输出中原样渲染**：
+
+```
+诊断题：
+
+<stem 原文>
+
+A. <options.A 原文>
+B. <options.B 原文>
+C. <options.B 原文>   ← 只渲染真实存在的项
+...
+
+请回答 A/B/C：
+```
+
+- **禁止**只输出 question_id 或"已出题，等待回答"来代替题目本身；
+- **禁止**等待用户先确认"看题"再渲染——一轮内必须题干选项齐全；
+- payload 中**没有 answer/explanation 属正常**（server-side truth，
+  判分由 evaluate_answer 服务端完成），不得索要、不得臆测；
+- **QUESTION_PRESENTED gate**：本轮尚未按上述格式渲染完整题干+选项之前，
+  禁止对用户任何输入调用 evaluate_answer / record_result；
+  若 payload 缺 stem/options → 报 QUESTION_PRESENTATION_INCOMPLETE 并停止；
+- needs_review 的题目由 teach-mcp 直接拒绝出题（禁止自行出题兜底）。
+
+### 4.0.1 delivery_mode 分流（互斥，不得双跑）
+
+- **interactive（默认）**：教学/题目/讲解全部直接渲染在 Z Code 输出中，
+  **不写 bridge/result.json**、不等待 Firefly watcher。
+- **embedded（实验，仅当 Learning Context 的 delivery_mode=embedded）**：
+  按之前协议写 result.json 交 Firefly 投递。
+- 判定依据：Learning Context 的 `delivery_mode` 字段（**缺省或字段缺失
+  一律视为 interactive**）。interactive 时**即使 bridge/result.json 已存在，
+  也不得写入或更新它**——旧文件是历史遗留，不是继续写入的许可。
+  两种模式不得同时执行。
+
+## 4. 教学中（teach-mcp 为唯一事实源）
+
 - 出题必须 `generate_question`；判卷必须 `evaluate_answer` + `record_result`，
   成对在服务端执行（防答案泄漏）；不得自编题目或答案对照表。
 - 展示掌握度/进度时只能引用**当次** teach-mcp 查询返回值，不缓存、不复述旧值。

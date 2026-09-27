@@ -28,7 +28,7 @@ _REQUIRED_KEYS = (
     "created_at",
 )
 _OPTIONAL_OPAQUE_KEYS = ("curriculum_id", "pipeline_id")
-_OPTIONAL_KEYS = _OPTIONAL_OPAQUE_KEYS + ("task_id",)
+_OPTIONAL_KEYS = _OPTIONAL_OPAQUE_KEYS + ("task_id", "delivery_mode")
 
 
 class ContextError(BridgeFileError):
@@ -147,3 +147,5 @@ def _validate_context(context: object) -> None:
         raise ContextError("CONTEXT_INVALID", "course_id 不能为空")
     if not str(context["manifest_path"]).strip():
         raise ContextError("CONTEXT_INVALID", "manifest_path 不能为空")
+    if "delivery_mode" in context and context["delivery_mode"] not in ("interactive", "embedded"):
+        raise ContextError("CONTEXT_INVALID", f"delivery_mode 非法: {context['delivery_mode']!r}")
