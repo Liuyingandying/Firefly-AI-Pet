@@ -80,27 +80,30 @@ from core.lazy_pdf_ocr import (
     run_ocr_batch,
 )
 from core.pdf_processor import PdfPageStatus
-from core.video_frame_vision import analyze_video_frame
-from core.video_reader import (
-    SessionVideoContext,
-    analyze_video_message,
-    detect_bilibili_reference,
-    is_video_followup,
-    video_reading_failure_reply,
-)
-from core.video_time_parser import (
-    format_timestamp,
-    parse_video_time_expression,
-)
-from core.video_study import (
-    STUDY_ENTRY_REPLY,
-    VideoStudyContext,
-    handle_study_turn,
-    is_quiz_request,
-    is_study_entry,
-    is_study_exit,
-    study_failure_reply,
-)
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # 运行时经 _bili_modules() 懒加载（B站视频插件）
+    from core.video_reader import SessionVideoContext  # noqa: F401
+    from core.video_study import VideoStudyContext  # noqa: F401
+
+
+_BILI_REF_RE = re.compile(r"BV[0-9A-Za-z]{10}|bilibili\.com")
+
+
+def _bili_modules():
+    """懒加载 B站视频插件实现；未安装时抛 CapabilityMissingError。"""
+    from core import capabilities
+
+    if not capabilities.is_available("bili_video"):
+        raise capabilities.CapabilityMissingError(
+            "bili_video", capabilities.missing_message("bili_video")
+        )
+    import video_frame_vision
+    import video_reader
+    import video_study
+    import video_time_parser
+
+    return video_reader, video_study, video_time_parser, video_frame_vision
 
 
 logger = logging.getLogger(__name__)
@@ -1572,7 +1575,29 @@ class CharacterConversationRunner(QObject):
         with self._lock:
             history = [dict(message) for message in self._history]
 
-        video_bvid = detect_bilibili_reference(text)
+        bili_like = bool(_BILI_REF_RE.search(text))
+        if bili_like:
+            from core import capabilities as _cap
+
+            if not _cap.is_available("bili_video"):
+                hint = _cap.missing_message("bili_video")
+                return (
+                    [
+                        AgentEvent.make(
+                            self.AGENT_ID,
+                            AgentEventType.FINAL,
+                            text=hint,
+                        )
+                    ],
+                    hint,
+                )
+        vr = vs_mod = vtp_mod = vfv = None
+        if bili_like or self._session_video is not None or self._video_study is not None:
+            try:
+                vr, vs_mod, vtp_mod, vfv = _bili_modules()
+            except _cap.CapabilityMissingError:
+                vr = None  # 插件未装：链接/追问按普通聊天继续
+        video_bvid = vr.detect_bilibili_reference(text) if vr is not None else None
         if video_bvid and not self._video_analysis_enabled():
             # Capability gate: refuse BEFORE any video data is read (no
             # download, no transcript fetch, no FFmpeg, no provider call).
@@ -1614,18 +1639,18 @@ class CharacterConversationRunner(QObject):
                         )
                     )
 
-                result = analyze_video_message(text, on_progress=_emit_video_progress)
+                result = vr.analyze_video_message(text, on_progress=_emit_video_progress)
                 answer = result.to_answer()
             except Exception as exc:  # video failure must not crash the turn
-                answer = video_reading_failure_reply(exc)
+                answer = vr.video_reading_failure_reply(exc)
             else:
-                self._session_video = SessionVideoContext.from_result(result)
+                self._session_video = vr.SessionVideoContext.from_result(result)
                 answer = result.to_answer()
                 if is_study_entry(text) and self._video_analysis_enabled():
                     # "陪我学习这个视频 BVxxx": analyze, then enter study mode.
-                    self._video_study = VideoStudyContext.from_session(
+                    self._video_study = vs_mod.VideoStudyContext.from_session(
                         self._session_video)
-                    answer += f"\n\n{STUDY_ENTRY_REPLY}"
+                    answer += f"\n\n{vs_mod.STUDY_ENTRY_REPLY}"
             if event.is_set():
                 return [self._cancelled_event()], ""
             with self._lock:
@@ -1738,7 +1763,7 @@ class CharacterConversationRunner(QObject):
         # expression within its duration. Otherwise the ordinary paths run.
         frame_seconds = None
         if self._session_video is not None:
-            frame_seconds = parse_video_time_expression(
+            frame_seconds = vtp_mod.parse_video_time_expression(
                 text, duration_hint=self._session_video.duration_s or None)
             duration_s = self._session_video.duration_s or 0.0
             if frame_seconds is not None and duration_s > 0 and frame_seconds >= duration_s:
@@ -1757,7 +1782,7 @@ class CharacterConversationRunner(QObject):
                 framed_question = (
                     f"（这是视频进行到 {format_timestamp(frame_seconds)} 时的画面帧）{text}"
                 )
-                frame_analysis = analyze_video_frame(
+                frame_analysis = vfv.analyze_video_frame(
                     self._session_video.url, frame_seconds, question=framed_question)
                 answer = (
                     f"我看了一下，{format_timestamp(frame_seconds)}那里："
@@ -1766,7 +1791,7 @@ class CharacterConversationRunner(QObject):
             except Exception as exc:  # frame failure must not crash the turn
                 answer = (
                     f"抱歉，{format_timestamp(frame_seconds)}那里的画面我没能看到。"
-                    f"（{video_reading_failure_reply(exc)}）"
+                    f"（{vr.video_reading_failure_reply(exc)}）"
                 )
             if event.is_set():
                 return [self._cancelled_event()], ""
@@ -1793,11 +1818,11 @@ class CharacterConversationRunner(QObject):
             self._video_study is not None
             and self._video_analysis_enabled()
             and (self._video_study.stage == "quizzing"
-                 or is_study_exit(text) or is_quiz_request(text) or is_study_entry(text))
+                 or vs_mod.is_study_exit(text) or vs_mod.is_quiz_request(text) or vs_mod.is_study_entry(text))
         ) or (
             self._video_study is None
             and self._session_video is not None
-            and is_study_entry(text)
+            and vs_mod.is_study_entry(text)
             and self._video_analysis_enabled()
         )
         if study_intercepts and self._session_video is not None:
@@ -1809,10 +1834,10 @@ class CharacterConversationRunner(QObject):
                 )
             )
             try:
-                answer, self._video_study = handle_study_turn(
+                answer, self._video_study = vs_mod.handle_study_turn(
                     text, self._video_study, self._session_video)
             except Exception as exc:  # study failure must not crash the turn
-                answer = study_failure_reply(exc)
+                answer = vs_mod.study_failure_reply(exc)
             if event.is_set():
                 return [self._cancelled_event()], ""
             with self._lock:
@@ -1964,7 +1989,7 @@ class CharacterConversationRunner(QObject):
             turn_context = format_screen_vision_context(result)
 
         if (turn_context is None and self._session_video is not None
-                and is_video_followup(text)
+                and vs_mod.is_video_followup(text)
                 and self._video_analysis_enabled()):
             # "刚才那个视频里面…" — inject the last read video (summary +
             # transcript excerpt) through the existing single-turn

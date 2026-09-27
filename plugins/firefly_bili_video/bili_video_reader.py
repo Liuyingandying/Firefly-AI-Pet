@@ -18,7 +18,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.bili_insight_client import BiliInsightClient, BiliServiceError
+from bili_insight_client import BiliInsightClient, BiliServiceError
 
 _BV_RE = re.compile(r"BV[0-9A-Za-z]{10}")
 

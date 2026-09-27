@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from core.video_reader import SessionVideoContext
+from video_reader import SessionVideoContext
 
 _STUDY_ENTRY_MARKERS = (
     "陪我学习", "学习这个视频", "陪我看", "带我学习", "陪我看完", "陪我刷",
@@ -89,7 +89,7 @@ def is_study_exit(text: str) -> bool:
 
 
 def _transcript_excerpt(ctx: VideoStudyContext) -> str:
-    from core.bili_video_reader import _format_transcript
+    from bili_video_reader import _format_transcript
 
     segments = [{"start": start, "text": text} for start, text in ctx.segments]
     return _format_transcript(segments, _MAX_PROMPT_TRANSCRIPT_CHARS)

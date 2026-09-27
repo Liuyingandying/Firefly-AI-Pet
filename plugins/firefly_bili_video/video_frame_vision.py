@@ -16,8 +16,8 @@ import base64
 from dataclasses import dataclass
 from datetime import datetime
 
-from core.bili_insight_client import BiliInsightClient, BiliServiceError
-from core.bili_video_reader import extract_bilibili_video_id
+from bili_insight_client import BiliInsightClient, BiliServiceError
+from bili_video_reader import extract_bilibili_video_id
 from core.screen_vision.models import ScreenFrame, ScreenObservation
 
 # Reuse the frozen Phase 1-A keyframe instruction for the generic

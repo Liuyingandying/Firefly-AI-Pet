@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.agent_events import AgentEventType
+from core import capabilities
 from core.learning.orchestrator import LoopStatus
 from ui import theme
 from ui.companion_attachment import (
@@ -48,6 +49,7 @@ from ui.companion_attachment import (
 )
 from ui.v2.ability_panel import AbilityPanel
 from ui.v2.attachments import mime_has_attachment
+from ui.v2.capability_banner import CapabilityBanner
 from ui.v2.character_header import CharacterHeader
 from ui.v2.chat_view import ChatView
 from ui.v2.companion_panel import CompanionPanel
@@ -57,6 +59,9 @@ from ui.v2.video_card import VideoCard, VideoCardInfo
 from ui.v2.voice_session import VoiceCompanionBar, VoiceSessionController
 
 log = logging.getLogger(__name__)
+
+# 消息中的 B 站链接线索（能力门控用；精确解析在视频插件内）
+_BILI_TEXT_RE = re.compile(r"BV[0-9A-Za-z]{10}|bilibili\.com")
 
 # ---- v5: 无边框融合标题栏（Claude Desktop 式） -------------------------------
 # logo 探测: 调试副本(ui美化/logo.png) → 项目根 logo.png → assets/firefly.ico
@@ -392,6 +397,9 @@ class CompanionConsole(QMainWindow):
         wrap_layout = QVBoxLayout(self.chat_wrap)
         wrap_layout.setContentsMargins(0, 0, 0, 0)
         wrap_layout.setSpacing(8)
+        # 能力型插件缺失提示条（聊天区最顶部，按需短暂出现）。
+        self._cap_banner = CapabilityBanner(self.chat_wrap)
+        wrap_layout.addWidget(self._cap_banner)
         wrap_layout.addWidget(self.chat, 1)
         # 输入框四周留出渐变边缘 → 悬浮感（白卡 + 紫调阴影浮于渐变之上）
         input_row = QHBoxLayout()
@@ -563,6 +571,12 @@ class CompanionConsole(QMainWindow):
 
     # ------------------------------------------------------------- sending
 
+    def _show_capability_banner(self, capability: str) -> None:
+        """能力型插件缺失：UI 顶部横幅提示（数秒后自动收起）。"""
+        from core.capabilities import missing_message
+
+        self._cap_banner.show_missing(missing_message(capability))
+
     def _toggle_voice_companion(self) -> None:
         """「语音」胶囊：开启/结束语音陪伴模式（真实语音链路 + 状态圆球）。"""
         if self._voice_session is not None:
@@ -615,6 +629,11 @@ class CompanionConsole(QMainWindow):
             self._dispatch_outgoing(text, None)
 
     def _dispatch_outgoing(self, text: str, attachment=None) -> None:
+        # B站链接 = 视频阅读能力（能力型插件）；缺失时顶部横幅 + 对话内说明。
+        if _BILI_TEXT_RE.search(text) and not capabilities.is_available("bili_video"):
+            self._show_capability_banner("bili_video")
+            self.chat.append_assistant(capabilities.missing_message("bili_video"))
+            return
         if self._voice_session is not None and self._voice_session.active:
             self._voice_session.notify_ask_submitted()
         # 多模态附件：直达自由对话链路（学习 loop 只拦纯文本请求）。

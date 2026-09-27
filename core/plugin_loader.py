@@ -43,7 +43,20 @@ MANAGED_PLUGIN_IDS: tuple[str, ...] = (
     "learning-focus",
     "tju-info-retrieval",
     "firefly-voice",
+    # 能力型插件：宿主经典功能的能力实现（缺插件时宿主给出安装提示）。
+    "firefly-vision",
+    "firefly-learning",
+    "firefly-voice-chat",
+    "firefly-bili-video",
 )
+
+# 本轮已成功加载的插件 id（core.capabilities 据此判断功能可用性）。
+_LOADED_IDS: set[str] = set()
+
+
+def get_loaded_plugin_ids() -> frozenset[str]:
+    """本轮已成功加载（发现并注册）的插件 id 集合。"""
+    return frozenset(_LOADED_IDS)
 
 # Top-level packages extensions may not import. ``app`` is the shell singleton
 # (the real integrity boundary); ``ui`` is deliberately NOT blocked because the
@@ -191,7 +204,14 @@ class PluginLoader(QObject):
 
     def discover_roots(self) -> list[Path]:
         primary = os.environ.get(PLUGIN_ROOT_ENV, "").strip()
-        candidates = [Path(primary) if primary else DEFAULT_PLUGIN_ROOT]
+        if primary:
+            candidates = [Path(primary)]
+        else:
+            candidates = [DEFAULT_PLUGIN_ROOT]
+            # 冻结发行版：exe 同级的 plugins 为第一优先默认插件目录
+            # （用户放插件即可用）；便携用户目录作为第二根兜底。
+            if getattr(sys, "frozen", False):
+                candidates.insert(0, Path(sys.executable).resolve().parent / "plugins")
         raw = os.environ.get(PLUGIN_PATH_ENV, "")
         for part in raw.split(os.pathsep):
             part = part.strip()
@@ -277,6 +297,7 @@ class PluginLoader(QObject):
                         continue
                     self._plugins.append(plugin)
                     self._plugins_by_id[plugin.manifest.id] = plugin
+                    _LOADED_IDS.add(plugin.manifest.id)
                     loaded.append(plugin.manifest)
         finally:
             try:

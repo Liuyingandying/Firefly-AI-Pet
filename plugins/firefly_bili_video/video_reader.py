@@ -17,8 +17,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from core.bili_insight_client import BiliServiceError
-from core.bili_video_reader import analyze_bilibili_video, extract_bilibili_video_id
+from bili_insight_client import BiliServiceError
+from bili_video_reader import analyze_bilibili_video, extract_bilibili_video_id
 
 _URL_RE = re.compile(r"https?://\S+")
 
@@ -264,7 +264,7 @@ class SessionVideoContext:
 
     def to_context_block(self) -> str:
         """Render the turn_context system block (transcript capped)."""
-        from core.bili_video_reader import _format_transcript
+        from bili_video_reader import _format_transcript
 
         segments = [{"start": start, "text": text} for start, text in self.segments]
         transcript = _format_transcript(segments, _MAX_CONTEXT_TRANSCRIPT_CHARS)
