@@ -80,7 +80,6 @@ def _rounded_pixmap(image: QImage, size: int) -> QPixmap:
     return result
 
 
-from voice_client.play_button import PlayVoiceButton
 
 
 class _Avatar(QFrame):
@@ -272,7 +271,12 @@ class _MessageCard(QFrame):
         if role == "assistant" and voice_text:
             play_row = QHBoxLayout()
             play_row.addStretch(1)
-            play_row.addWidget(PlayVoiceButton(lambda t=voice_text: t))
+            try:
+                from voice_client.play_button import PlayVoiceButton
+            except ImportError:
+                PlayVoiceButton = None  # 语音对话插件未安装
+            if PlayVoiceButton is not None:
+                play_row.addWidget(PlayVoiceButton(lambda t=voice_text: t))
             body.addLayout(play_row)
 
     def set_plain_height(self) -> None:

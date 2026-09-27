@@ -454,7 +454,7 @@ class VoiceCompanionBar(QWidget):
     def __init__(self, controller: VoiceSessionController, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         from ui import theme
-        from ui.v2.voice_orb import VoiceOrb
+        from voice_ui.voice_orb import VoiceOrb
 
         self._controller = controller
         self.orb = VoiceOrb(self)

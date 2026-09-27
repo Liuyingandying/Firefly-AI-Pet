@@ -56,7 +56,6 @@ from ui.v2.companion_panel import CompanionPanel
 from ui.v2.input_area import InputArea
 from ui.v2.sidebar import Sidebar
 from ui.v2.video_card import VideoCard, VideoCardInfo
-from ui.v2.voice_session import VoiceCompanionBar, VoiceSessionController
 
 log = logging.getLogger(__name__)
 
@@ -462,7 +461,7 @@ class CompanionConsole(QMainWindow):
         # 避免其他后台回合的 FINAL 误清刚 attaching 的新附件）。
         self._turn_has_image = False
         # 语音陪伴会话（点击「语音」开启；状态圆球 + 真实事件编排）。
-        self._voice_session: VoiceSessionController | None = None
+        self._voice_session = None
         self._voice_bar: VoiceCompanionBar | None = None
         self._voice_stt_hinted = False
         # Phase UI-3A: consume RuntimeState from the bus when a host provides
@@ -579,6 +578,13 @@ class CompanionConsole(QMainWindow):
 
     def _toggle_voice_companion(self) -> None:
         """「语音」胶囊：开启/结束语音陪伴模式（真实语音链路 + 状态圆球）。"""
+        from core.capabilities import is_available, missing_message
+
+        if not is_available("voice_chat"):
+            self._show_capability_banner("voice_chat")
+            self.chat.append_assistant(missing_message("voice_chat"))
+            return
+        from voice_ui.voice_session import VoiceCompanionBar, VoiceSessionController
         if self._voice_session is not None:
             self._end_voice_companion()
             return

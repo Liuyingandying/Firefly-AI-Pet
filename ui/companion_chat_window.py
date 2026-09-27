@@ -46,7 +46,6 @@ from core.document_attachment import DocumentParseError, EncryptedPdfError, pars
 from ui import theme
 from ui.chat_markup import markdown_to_html
 from ui.character_conversation_runner import CharacterConversationRunner
-from voice_client.play_button import PlayVoiceButton
 from ui.companion_attachment import (
     LEGACY_DOCUMENT_MESSAGE,
     THUMBNAIL_SIZE,
@@ -402,7 +401,12 @@ class CompanionChatWindow(QWidget):
         row.addWidget(self.send_button)
 
         self._last_assistant_text = ""
-        self.play_voice_button = PlayVoiceButton(lambda: self._last_assistant_text)
+        try:
+            from voice_client.play_button import PlayVoiceButton
+        except ImportError:
+            PlayVoiceButton = None  # 语音对话插件未安装
+        if PlayVoiceButton is not None:
+            self.play_voice_button = PlayVoiceButton(lambda: self._last_assistant_text)
         play_row = QHBoxLayout()
         play_row.addStretch(1)
         play_row.addWidget(self.play_voice_button)

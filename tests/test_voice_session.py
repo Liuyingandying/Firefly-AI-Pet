@@ -23,9 +23,10 @@ from PySide6.QtWidgets import QApplication
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
+sys.path.insert(0, str(PROJECT_DIR / "plugins" / "firefly_voice_chat"))
 
-import ui.v2.voice_session as vs
-from ui.v2.voice_session import VoiceSessionController
+import voice_ui.voice_session as vs
+from voice_ui.voice_session import VoiceSessionController
 
 
 @pytest.fixture(scope="module")

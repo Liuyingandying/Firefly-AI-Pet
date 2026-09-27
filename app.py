@@ -74,7 +74,6 @@ from character import (
     save_current_character,
 )
 from character.character_loader import resolve_animations_dir
-from voice_client import VoiceAnnouncer  # Voice-1.2: 回复语音播报 (失败不影响聊天)
 from core.screen_vision.screen.capture import ScreenCaptureService
 from core.pdf_visual_region import (
     DEFAULT_UPSCALE,
@@ -634,9 +633,18 @@ class VisualShell(QObject):
         self.character_conversation.agent_event.connect(self.short_ask.on_agent_event)
         # Phase 3B-1: forward AgentEvents to RuntimeBus for the aggregator.
         self.character_conversation.agent_event.connect(self._publish_agent_event_from_character)
-        # Voice-1.2: FINAL 回复交给 Voice Module 朗读 (后台线程, 失败仅日志)
-        self.voice_announcer = VoiceAnnouncer()
-        self.voice_announcer.attach(self.character_conversation)
+        # Voice-1.2: FINAL 回复交给 Voice Module 朗读 (后台线程, 失败仅日志)。
+        # 语音播报属 voice-chat 插件：未安装时静默跳过（回复仍正常文字显示）。
+        try:
+            from core.capabilities import is_available as _voice_cap_ok
+
+            if _voice_cap_ok("voice_chat"):
+                from voice_client import VoiceAnnouncer
+
+                self.voice_announcer = VoiceAnnouncer()
+                self.voice_announcer.attach(self.character_conversation)
+        except Exception:  # noqa: BLE001 - 语音能力缺失不影响主程序
+            pass
         self.recommendation_card.send_requested.connect(self._on_recommendation_send)
         self.recommendation_card.open_native_requested.connect(self._on_recommendation_open_native)
         self.recommendation_card.plan_with_claude_requested.connect(

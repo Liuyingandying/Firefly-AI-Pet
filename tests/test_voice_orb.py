@@ -19,9 +19,10 @@ from PySide6.QtWidgets import QApplication
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
+sys.path.insert(0, str(PROJECT_DIR / "plugins" / "firefly_voice_chat"))
 
-from ui.v2 import voice_orb as orb_mod
-from ui.v2.voice_orb import (
+from voice_ui import voice_orb as orb_mod
+from voice_ui.voice_orb import (
     CONN_CONNECTING,
     CONN_DISCONNECTED,
     CONN_ENDED,
