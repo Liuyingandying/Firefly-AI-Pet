@@ -65,6 +65,14 @@ $Internal  = Join-Path $DistDir '_internal'
 $ExtCopied = $false
 $ExtSrc = Join-Path $RepoRoot 'extensions\pagelens_bridge'
 $ExtDst = Join-Path $DistDir 'extensions\pagelens_bridge'
+# Stage the capability/adapter plugins next to the exe (loader default
+# root for frozen builds = exe_dir\plugins).
+$PluginSrc = Join-Path $RepoRoot "plugins"
+$PluginDst = Join-Path $DistDir "plugins"
+if (Test-Path $PluginSrc) {
+    New-Item -ItemType Directory -Force -Path $PluginDst | Out-Null
+    robocopy $PluginSrc $PluginDst /E /NFL /NDL /NJH /R:2 /W:2 /XD __pycache__ | Out-Null
+}
 if ((Test-Path $ExtSrc) -and -not (Test-Path $ExtDst)) {
     New-Item -ItemType Directory -Force -Path (Join-Path $DistDir 'extensions') | Out-Null
     Copy-Item -Recurse $ExtSrc $ExtDst
