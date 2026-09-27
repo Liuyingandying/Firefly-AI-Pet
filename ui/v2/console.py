@@ -40,7 +40,12 @@ from PySide6.QtWidgets import (
 
 from core.agent_events import AgentEventType
 from core import capabilities
-from core.learning.orchestrator import LoopStatus
+try:  # learning 插件缺失时保留兼容常量（桩控制器下不会触达这些比较）
+    from core.learning.orchestrator import LoopStatus
+except ImportError:  # pragma: no cover
+    class LoopStatus:
+        ORDINARY = type("V", (), {"value": "ordinary"})
+        LEARNING_COMMAND = type("V", (), {"value": "learning_command"})
 from ui import theme
 from ui.companion_attachment import (
     DEFAULT_ATTACHMENT_QUESTION,
@@ -332,11 +337,18 @@ class CompanionConsole(QMainWindow):
         # Phase 1B: learning-mode controller. The console owns the shell
         # lifecycle (mode / course / session); the controller never talks to
         # providers and never writes mastery.
-        from core.learning.controller import LearningModeController
+        from core.capabilities import is_available as _learning_cap_ok
 
-        self.learning = LearningModeController(
-            settings=getattr(runner, "_screen_vision_settings", None)
-        )
+        if _learning_cap_ok("learning"):
+            from core.learning.controller import LearningModeController
+
+            self.learning = LearningModeController(
+                settings=getattr(runner, "_screen_vision_settings", None)
+            )
+        else:
+            from ui.v2.learning_stub import LearningStub
+
+            self.learning = LearningStub()
         if hasattr(runner, "learning_controller") and runner.learning_controller is None:
             runner.learning_controller = self.learning
         elif not hasattr(runner, "learning_controller"):
@@ -1798,6 +1810,11 @@ class CompanionConsole(QMainWindow):
             self.input.setPlaceholderText("粘贴 B站链接（如 https://www.bilibili.com/video/BV…）")
             self._hint("把 B站视频链接发给我，我就能读给你听并总结～")
         elif capability == "study":
+            # 学习模式属 learning 插件：未安装时顶部提示，不进入。
+            if not capabilities.is_available("learning"):
+                self._show_capability_banner("learning")
+                self.chat.append_assistant(capabilities.missing_message("learning"))
+                return
             # Phase 1B: learning mode is no longer bound to Video Study.
             # Entering the mode establishes a learning context (project
             # course); a Bilibili link is just one possible material later.
