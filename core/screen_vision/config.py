@@ -234,10 +234,19 @@ def _get_provider(name: str):
 
 def get_fast_direct_provider():
     """One-shot FAST vision client, reused by camera/screen/attachment and
-    visual-region turns. Uses the TJU v3 multimodal provider (tju-llm) —
-    the project's primary verified vision endpoint — instead of the
-    official DeepSeek client when the latter is out of balance."""
-    return _get_provider("qwen_vision")
+    visual-region turns.
+
+    历史上这里直接返回 TJU 单引擎（tju-llm）；TJU 校外不可达时帧视觉、
+    图片附件、PDF 视觉会随单引擎一起失败。现返回完整 failover 链
+    （TJU -> DeepSeek -> GLM），接口不变（inspect(frame, instruction)），
+    调用方零改动。"""
+    from core.screen_vision.failover import FailoverVisionProvider
+
+    return FailoverVisionProvider(
+        primary=_get_provider("qwen_vision"),
+        fallbacks=(_get_provider("deepseek_vision"), _get_provider("glm_vision")),
+        breaker=_shared_vision_breaker(),
+    )
 
 
 def get_vision_provider_order(mode: str) -> tuple:
