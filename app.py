@@ -2450,9 +2450,45 @@ def main() -> int:
 
     set_updated_publisher(_publish_providers_updated)
 
+    _install_gui_watchdog()
+
     app.aboutToQuit.connect(shell.shutdown)
     shell.start()
     return app.exec()
+
+
+def _install_gui_watchdog() -> None:
+    """GUI 线程看门狗：主线程 >15s 无心跳 → 全部线程栈落盘（卡死现场取证）。
+
+    只写证据不改行为；文件在 %LOCALAPPDATA%\FireflyAI\logs\gui_watchdog.log。
+    """
+    import faulthandler
+
+    try:
+        log_path = USER_PATHS.logs / "gui_watchdog.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        sink = open(log_path, "ab", buffering=0)
+        faulthandler.enable(sink)  # 崩溃类退出也自动转储
+    except OSError:
+        return
+
+    state = {"beat": True}
+
+    def _beat() -> None:
+        state["beat"] = True
+        QTimer.singleShot(2000, _beat)  # 主线程回调 = 心跳
+
+    QTimer.singleShot(2000, _beat)
+
+    def _watch() -> None:
+        while True:
+            time.sleep(15)
+            if not state["beat"]:
+                sink.write(b"\n=== GUI STALL >15s detected ===\n")
+                faulthandler.dump_traceback(file=sink)
+            state["beat"] = False
+
+    threading.Thread(target=_watch, daemon=True, name="firefly-gui-watchdog").start()
 
 
 if __name__ == "__main__":
