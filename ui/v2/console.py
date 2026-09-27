@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
 from core.agent_events import AgentEventType
 from core import capabilities
 try:  # learning 插件缺失时保留兼容常量（桩控制器下不会触达这些比较）
-    from core.learning.orchestrator import LoopStatus
+    from learning.orchestrator import LoopStatus
 except ImportError:  # pragma: no cover
     class LoopStatus:
         ORDINARY = type("V", (), {"value": "ordinary"})
@@ -340,7 +340,7 @@ class CompanionConsole(QMainWindow):
         from core.capabilities import is_available as _learning_cap_ok
 
         if _learning_cap_ok("learning"):
-            from core.learning.controller import LearningModeController
+            from learning.controller import LearningModeController
 
             self.learning = LearningModeController(
                 settings=getattr(runner, "_screen_vision_settings", None)
@@ -885,7 +885,14 @@ class CompanionConsole(QMainWindow):
             self._update_context_status()
 
     def _learning_status_card(self):
-        from core.learning.ui import build_status_card
+        from core.capabilities import is_available as _learning_cap_ok
+
+        if not _learning_cap_ok("learning"):
+            return None
+        try:
+            from learning.ui import build_status_card
+        except ImportError:  # learning 插件未安装：状态卡留空
+            return None
 
         try:
             context = self.learning.learning_context()
@@ -909,7 +916,7 @@ class CompanionConsole(QMainWindow):
 
     def _show_learning_entry(self) -> None:
         """Render the learning-mode welcome surface (Phase 2-UX §三)."""
-        from core.learning.ui import build_entry_card
+        from learning.ui import build_entry_card
         from ui.v2.course_picker import LearningEntryCardView
 
         try:
@@ -928,7 +935,7 @@ class CompanionConsole(QMainWindow):
 
     def _show_project_picker(self) -> None:
         """Render the LearningProjectPicker (Phase 2-UX §四)."""
-        from core.learning.ui import build_project_cards
+        from learning.ui import build_project_cards
         from ui.v2.course_picker import LearningProjectPicker
 
         try:
@@ -997,7 +1004,7 @@ class CompanionConsole(QMainWindow):
         """Parse the PDF and produce a saved-ready draft + review service."""
         from pathlib import Path as _Path
 
-        from core.learning.curriculum.adapters import PageLensCurriculumAdapter
+        from learning.curriculum.adapters import PageLensCurriculumAdapter
         from core.pdf_processor import build_pdf_lazy_index
 
         pdf = _Path(path)
@@ -1137,7 +1144,7 @@ class CompanionConsole(QMainWindow):
         from dataclasses import replace
         from pathlib import Path as _Path
 
-        from core.learning.curriculum.adapters import PageLensCurriculumAdapter
+        from learning.curriculum.adapters import PageLensCurriculumAdapter
         from core.pdf_processor import build_pdf_lazy_index
 
         path = self._textbook_import_paths.get(draft.id) or self._textbook_import_path

@@ -417,7 +417,7 @@ class LearningEntryCardView(QFrame):
         row = QHBoxLayout()
         row.setSpacing(8)
         for action_id, label in card.actions:
-            from core.learning.ui.entry import (
+            from learning.ui.entry import (
                 ACTION_CHOOSE_OTHER,
                 ACTION_CONTINUE,
                 ACTION_CREATE,

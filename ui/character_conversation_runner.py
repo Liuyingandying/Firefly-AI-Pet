@@ -2043,7 +2043,7 @@ class CharacterConversationRunner(QObject):
             # the runner uses them directly — NO recomputation. The response
             # contract (course / chapter / next step / required elements)
             # constrains the final answer.
-            from core.learning.orchestrator import build_response_contract
+            from learning.orchestrator import build_response_contract
 
             contract = build_response_contract(learning_result)
             blocks = []
