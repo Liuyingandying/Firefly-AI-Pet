@@ -138,8 +138,11 @@ class QwenVisionProvider(VisionProvider):
         raw_text = message.get("content") or ""
         try:
             parsed = extract_json(raw_text)
-        except ValueError as exc:
-            raise ProviderSchemaError(str(exc))
+        except ValueError:
+            # 模型用自然语言描述画面（未遵守 JSON 契约）——描述本身有效，
+            # 降级为纯文本场景摘要；把有效描述当 Schema 错误丢弃会让
+            # 时间点问答等场景明明"看见了"却报失败。
+            parsed = {"scene_summary": raw_text.strip()}
         return to_observation(parsed, raw_model_text=raw_text)
 
     def answer_direct(
