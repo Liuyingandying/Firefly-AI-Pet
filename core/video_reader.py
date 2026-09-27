@@ -173,9 +173,10 @@ def analyze(
     question: str | None = None,
     *,
     client=None,
+    on_progress=None,
 ) -> VideoReadingResult:
     """Read one Bilibili video: metadata + transcript + AI Router summary."""
-    analysis = analyze_bilibili_video(url_or_text, question, client=client)
+    analysis = analyze_bilibili_video(url_or_text, question, client=client, on_progress=on_progress)
     return VideoReadingResult(
         bvid=analysis.bvid,
         url=analysis.url,
@@ -192,13 +193,13 @@ def analyze(
     )
 
 
-def analyze_video_message(text: str, *, client=None) -> VideoReadingResult:
+def analyze_video_message(text: str, *, client=None, on_progress=None) -> VideoReadingResult:
     """Chat-entry wrapper: detect the reference in the message and analyze it."""
     bvid = detect_bilibili_reference(text)
     if not bvid:
         raise BiliServiceError("invalid_args", "message contains no Bilibili video reference",
                                "metadata")
-    return analyze(text, extract_video_question(text, bvid), client=client)
+    return analyze(text, extract_video_question(text, bvid), client=client, on_progress=on_progress)
 
 
 def video_reading_failure_reply(exc: Exception) -> str:

@@ -1363,7 +1363,9 @@ class CompanionConsole(QMainWindow):
             if state:
                 self.header.set_state(state)
                 self.companion.set_runtime_state(state)
-            self.chat.set_status(_STATUS_TEXT.get(status, ""))
+            # 长任务（视频阅读等）的 STATUS 会携带真实阶段文本，优先显示。
+            hint = getattr(event, "text", "") or ""
+            self.chat.set_status(hint or _STATUS_TEXT.get(status, ""))
         elif event_type == AgentEventType.FINAL:
             text = getattr(event, "text", "") or ""
             self.chat.set_status("")

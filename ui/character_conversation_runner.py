@@ -1603,7 +1603,18 @@ class CharacterConversationRunner(QObject):
                 )
             )
             try:
-                result = analyze_video_message(text)
+                def _emit_video_progress(message: str) -> None:
+                    # 真实解析阶段（服务端 progress 行）→ STATUS 事件 → 状态条。
+                    self.agent_event.emit(
+                        AgentEvent.make(
+                            self.AGENT_ID,
+                            AgentEventType.STATUS,
+                            status=STATUS_READING,
+                            text=message,
+                        )
+                    )
+
+                result = analyze_video_message(text, on_progress=_emit_video_progress)
                 answer = result.to_answer()
             except Exception as exc:  # video failure must not crash the turn
                 answer = video_reading_failure_reply(exc)

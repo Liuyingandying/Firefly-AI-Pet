@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -91,13 +92,14 @@ class BiliInsightClient:
         *,
         start_time: float | None = None,
         end_time: float | None = None,
+        on_progress=None,
     ) -> dict:
         payload: dict[str, object] = {"video_id": video_id}
         if start_time is not None:
             payload["start_time"] = float(start_time)
         if end_time is not None:
             payload["end_time"] = float(end_time)
-        return self.call("transcribe", payload)
+        return self.call("transcribe", payload, on_progress=on_progress)
 
     def frame(self, video_id: str, timestamp: str | float, *, include_base64: bool = False) -> dict:
         return self.call("frame", {
@@ -112,8 +114,14 @@ class BiliInsightClient:
         payload: dict | None = None,
         *,
         timeout: float | None = None,
+        on_progress=None,
     ) -> dict:
-        """Run one JSONL action and return ``data``; raise BiliServiceError otherwise."""
+        """Run one JSONL action and return ``data``; raise BiliServiceError otherwise.
+
+        ``on_progress(dict)``：服务在最终响应前输出的
+        ``{"event": "progress", ...}`` 行会逐条转发（视频转写可能耗时数
+        分钟，宿主用它把解析阶段显示给用户）。
+        """
         directory = _service_dir(self.service_dir)
         script = directory / "service.py"
         python = Path(self.python_exe) if self.python_exe else _python_exe(directory)
@@ -134,32 +142,62 @@ class BiliInsightClient:
         child_env = dict(os.environ)
         child_env["PYTHONUTF8"] = "1"
         child_env["PYTHONIOENCODING"] = "utf-8"
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
         try:
-            completed = subprocess.run(
+            proc = subprocess.Popen(
                 [str(python), "-X", "utf8", str(script)],
-                input=json.dumps(request, ensure_ascii=False) + "\n",
-                capture_output=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 encoding="utf-8",
                 errors="replace",
-                timeout=effective_timeout,
                 env=child_env,
                 cwd=str(directory),
+                creationflags=creationflags,
             )
-        except subprocess.TimeoutExpired as exc:
-            raise BiliServiceError(
-                "timeout",
-                f"no response within {effective_timeout:.0f}s",
-                action,
-            ) from exc
         except OSError as exc:
             raise BiliServiceError("env_dependency", f"failed to launch service: {exc}", action)
 
-        envelope = self._parse_envelope(action, completed.stdout)
+        # 超时兜底：到点强杀子进程，读循环随 EOF 退出。
+        killer = threading.Timer(effective_timeout, proc.kill)
+        killer.daemon = True
+        killer.start()
+
+        stdout_chunks: list[str] = []
+        try:
+            proc.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
+            proc.stdin.flush()
+            proc.stdin.close()
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                line = line.strip()
+                if not line.startswith("{"):
+                    stdout_chunks.append(line)
+                    continue
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    stdout_chunks.append(line)
+                    continue
+                if isinstance(obj, dict) and obj.get("event") == "progress":
+                    if on_progress is not None:
+                        try:
+                            on_progress(obj)
+                        except Exception:  # noqa: BLE001 — 进度回调绝不影响结果
+                            pass
+                    continue
+                stdout_chunks.append(line)
+            returncode = proc.wait(timeout=10.0)
+        finally:
+            killer.cancel()
+
+        stdout = "\n".join(stdout_chunks)
+        envelope = self._parse_envelope(action, stdout)
         if envelope is None:
-            stderr_tail = (completed.stderr or "")[-_ERROR_TAIL_CHARS:].strip()
+            stderr_tail = (proc.stderr.read() or "")[-_ERROR_TAIL_CHARS:].strip() if proc.stderr else ""
             raise BiliServiceError(
                 "crashed",
-                f"exit={completed.returncode}, no JSONL response"
+                f"exit={returncode}, no JSONL response"
                 + (f"; stderr: {stderr_tail}" if stderr_tail else ""),
                 action,
             )

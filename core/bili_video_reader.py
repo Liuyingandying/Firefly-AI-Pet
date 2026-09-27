@@ -102,6 +102,7 @@ def analyze_bilibili_video(
     question: str | None = None,
     *,
     client: BiliInsightClient | None = None,
+    on_progress=None,
 ) -> BiliVideoAnalysis:
     """Fetch metadata + transcript through BiliInsight, summarize via AI Router.
 
@@ -113,8 +114,11 @@ def analyze_bilibili_video(
         raise BiliServiceError("invalid_args", f"no BV id found in: {source!r}", "metadata")
     service = client or BiliInsightClient()
 
-    meta = service.metadata(bvid)
-    transcript = service.transcribe(bvid)
+    if on_progress is not None:
+        on_progress("正在获取视频信息…")
+    if on_progress is not None:
+        on_progress("正在下载视频并转写语音（长视频可能需要几分钟）…")
+    transcript = service.transcribe(bvid, on_progress=on_progress)
     segments = transcript.get("segments") or []
     transcript_text = _format_transcript(segments)
 
@@ -127,6 +131,8 @@ def analyze_bilibili_video(
         f"语音转录（带时间戳）：\n{transcript_text}\n\n"
         f"{_build_summary_question(question)}"
     )
+    if on_progress is not None:
+        on_progress("正在总结视频内容…")
     completion = ai_chat(
         [
             {"role": "system", "content": _SUMMARY_SYSTEM_PROMPT},
