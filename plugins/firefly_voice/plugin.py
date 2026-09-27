@@ -12,6 +12,13 @@
 
 from __future__ import annotations
 
+# 依赖同仓库 voice-chat 插件包提供的 voice_client（跨插件导入）。
+import sys as _sys
+from pathlib import Path as _Path
+_VCHAT = _Path(__file__).resolve().parent.parent / "firefly_voice_chat"
+if _VCHAT.is_dir() and str(_VCHAT) not in _sys.path:
+    _sys.path.insert(0, str(_VCHAT))
+
 import logging
 
 from core.extension_api import FireflyExtension
