@@ -169,38 +169,66 @@ def get_shared_vision_breaker():
     return _shared_vision_breaker()
 
 
+class _UnconfiguredProvider:
+    """构造期缺密钥的哨兵引擎：调用时抛标准不可用错误，让 failover 链
+    正常滑向下一个引擎，而不是让单个引擎的配置缺失炸穿整条视觉/推理链。"""
+
+    def __init__(self, provider_name: str, reason: str) -> None:
+        self.name = provider_name
+        self._reason = reason
+
+    def _raise(self) -> None:
+        from providers.base import ProviderUnavailableError
+
+        raise ProviderUnavailableError(f"{self.name} 未配置: {self._reason}")
+
+    def inspect(self, frame, instruction=None):
+        self._raise()
+
+    def answer(self, question, observation):
+        self._raise()
+
+
 def _get_provider(name: str):
     """Lazily build each provider once; instances are REUSED across modes so
-    switching routing never duplicates providers or resets their state."""
+    switching routing never duplicates providers or resets their state.
+
+    构造期缺密钥（RuntimeError）不再外抛：缓存哨兵实例，调用时按标准
+    不可用错误参与 failover——否则链上任一引擎缺配置会炸穿整条链
+    （删除 TJU 密钥后屏幕视觉永远 RuntimeError 的根因）。
+    """
     if name not in _provider_instances:
-        if name == "qwen_vision":
-            from core.screen_vision.vision.qwen_vision import QwenVisionProvider
+        try:
+            if name == "qwen_vision":
+                from core.screen_vision.vision.qwen_vision import QwenVisionProvider
 
-            _provider_instances[name] = QwenVisionProvider()
-        elif name == "glm_vision":
-            from core.screen_vision.vision.glm_vision import GlmVisionProvider
+                _provider_instances[name] = QwenVisionProvider()
+            elif name == "glm_vision":
+                from core.screen_vision.vision.glm_vision import GlmVisionProvider
 
-            _provider_instances[name] = GlmVisionProvider()
-        elif name == "deepseek_vision":
-            from core.screen_vision.vision.deepseek_vision import DeepSeekVisionProvider
+                _provider_instances[name] = GlmVisionProvider()
+            elif name == "deepseek_vision":
+                from core.screen_vision.vision.deepseek_vision import DeepSeekVisionProvider
 
-            _provider_instances[name] = DeepSeekVisionProvider()
-        elif name == "tju_reasoning":
-            from core.screen_vision.brain.deepseek_brain import DeepSeekV4FlashProvider
+                _provider_instances[name] = DeepSeekVisionProvider()
+            elif name == "tju_reasoning":
+                from core.screen_vision.brain.deepseek_brain import DeepSeekV4FlashProvider
 
-            _provider_instances[name] = DeepSeekV4FlashProvider()
-        elif name == "glm_reasoning":
-            from core.screen_vision.brain.glm_reasoning import GlmReasoningProvider
+                _provider_instances[name] = DeepSeekV4FlashProvider()
+            elif name == "glm_reasoning":
+                from core.screen_vision.brain.glm_reasoning import GlmReasoningProvider
 
-            _provider_instances[name] = GlmReasoningProvider()
-        elif name == "deepseek_reasoning":
-            from core.screen_vision.brain.official_deepseek import (
-                OfficialDeepSeekReasoningProvider,
-            )
+                _provider_instances[name] = GlmReasoningProvider()
+            elif name == "deepseek_reasoning":
+                from core.screen_vision.brain.official_deepseek import (
+                    OfficialDeepSeekReasoningProvider,
+                )
 
-            _provider_instances[name] = OfficialDeepSeekReasoningProvider()
-        else:
-            raise RuntimeError(f"unknown screen vision provider {name!r}")
+                _provider_instances[name] = OfficialDeepSeekReasoningProvider()
+            else:
+                raise RuntimeError(f"unknown screen vision provider {name!r}")
+        except Exception as exc:  # noqa: BLE001 — 构造失败 ≠ 整链失败
+            _provider_instances[name] = _UnconfiguredProvider(name, str(exc))
     return _provider_instances[name]
 
 

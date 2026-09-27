@@ -100,14 +100,24 @@ def test_h_no_qwencode_settings_dependency_in_production_code():
 
 
 def test_e_glm_vision_requires_zhipu_credential(monkeypatch, isolated_env_file):
-    # Missing ZHIPU_API_KEY makes building the chain fail cleanly (glm
-    # vision cannot be constructed), never a silent skip.
+    # Missing ZHIPU_API_KEY: the chain still builds — glm becomes a sentinel
+    # whose use raises ProviderUnavailableError, so one optional engine's
+    # missing credential can never blow up the whole failover chain.
     monkeypatch.delenv("ZHIPU_API_KEY", raising=False)
     monkeypatch.delenv("GLM_API_KEY", raising=False)
     monkeypatch.setenv("TJULLM_API_KEY", "k")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "d")
-    with pytest.raises(ProviderError):
-        sv_config.build_vision_provider()
+    from providers.base import ProviderUnavailableError
+
+    provider = sv_config.build_vision_provider()
+    sentinels = [
+        p for p in _flatten_chain(provider)
+        if isinstance(p, sv_config._UnconfiguredProvider)
+    ]
+    assert sentinels, "缺 Zhipu 凭据时应生成哨兵引擎"
+    for sentinel in sentinels:
+        with pytest.raises(ProviderUnavailableError):
+            sentinel.inspect(None, None)
 
 
 def test_e2_glm_vision_default_model_is_4_6v_flash(monkeypatch, isolated_env_file):

@@ -2458,7 +2458,7 @@ def main() -> int:
 
 
 def _install_gui_watchdog() -> None:
-    """GUI 线程看门狗：主线程 >15s 无心跳 → 全部线程栈落盘（卡死现场取证）。
+    r"""GUI 线程看门狗：主线程 >15s 无心跳 → 全部线程栈落盘（卡死现场取证）。
 
     只写证据不改行为；文件在 %LOCALAPPDATA%\FireflyAI\logs\gui_watchdog.log。
     """
