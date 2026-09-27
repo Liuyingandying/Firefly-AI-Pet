@@ -409,7 +409,8 @@ class CompanionChatWindow(QWidget):
             self.play_voice_button = PlayVoiceButton(lambda: self._last_assistant_text)
         play_row = QHBoxLayout()
         play_row.addStretch(1)
-        play_row.addWidget(self.play_voice_button)
+        if getattr(self, "play_voice_button", None) is not None:
+            play_row.addWidget(self.play_voice_button)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.log, 1)
