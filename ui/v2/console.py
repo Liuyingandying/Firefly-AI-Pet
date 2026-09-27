@@ -89,6 +89,23 @@ class CompanionConsole(QMainWindow):
     # A host (app.py) may connect these to open existing popovers.
     settings_requested = Signal()
     research_requested = Signal()
+    # Learning bridge v0.1: the 学习模式 ability button asks the app shell to
+    # open LearningBridgeDialog (managed courses -> Z Code). Legacy
+    # core/learning stays available via its own paths (trigger word, video
+    # study) but is no longer this button's route.
+    learning_bridge_requested = Signal()
+
+    def set_learning_bridge_session(self, session) -> None:
+        """Attach the app-level BridgeLearningSession (answer routing gate)."""
+        self._learning_bridge_session = session
+
+    def show_learning_result(self, text: str) -> None:
+        """Display a bridge agent result verbatim (never rewritten by chat LLM)."""
+        if text:
+            from learning.diagnostics import log_marker
+
+            log_marker("LEARNING_MESSAGE_DISPLAYED", chars=len(text))
+            self.chat.append_assistant(text)
 
     def __init__(
         self,
@@ -134,6 +151,18 @@ class CompanionConsole(QMainWindow):
             runner.learning_controller = self.learning
         elif not hasattr(runner, "learning_controller"):
             runner.learning_controller = self.learning
+
+        # M4.5: tutor session executor (host-owned lifecycle; in-memory only).
+        # M4.10: inject LearnerProfileBuilder for profile-aware diagnostics.
+        from core.learning.tutor import TutorSessionExecutor
+        from core.learning.profile import LearnerProfileBuilder
+        from ui.v2.tutor_chat import TutorChatRouter
+
+        self.tutor = TutorSessionExecutor()
+        self._profile_builder = LearnerProfileBuilder()
+        self.tutor_chat = TutorChatRouter(
+            self.tutor, profile_builder=self._profile_builder,
+        )
 
         # Phase UI-2-B: AI Terminal composer (drop-in for the old QLineEdit —
         # text()/setText()/clear()/setPlaceholderText()/setFocus() delegates).
@@ -242,12 +271,57 @@ class CompanionConsole(QMainWindow):
 
     # ------------------------------------------------------------- sending
 
+    def _route_tutor_turn(self, text: str) -> str | None:
+        """M4.5: route one chat turn through the tutor executor.
+
+        Returns the assistant bubble text for tutor-owned turns, or None when
+        the turn belongs to the existing pipeline (run_learning_loop/runner).
+        """
+        try:
+            decision = self.tutor_chat.route(text)
+        except Exception:  # noqa: BLE001 - 接线层永不崩溃聊天
+            log.exception("tutor chat routing failed")
+            return None
+        if decision.action != "render":
+            return None
+        # M4.10: diagnostic queries return bubble_text directly (no state)
+        if decision.kind == "diagnostic" and decision.bubble_text:
+            return decision.bubble_text
+        if decision.state is None:
+            return None
+        return self._render_tutor_state(decision.state)
+
+    def _render_tutor_state(self, state) -> str:
+        """TutorSessionState → 聊天气泡文本（渲染逻辑在 tutor_chat, 纯函数）。"""
+        from ui.v2.tutor_chat import render_tutor_state
+
+        return render_tutor_state(state)
+
     def _send(self) -> None:
         text = self.input.text().strip()
         if not text:
             return
         self.input.clear()
         self.chat.append_user(text)
+        # Learning Bridge return channel (v0.1): while a bridge course has a
+        # pending question, the user's raw message IS the answer — it goes to
+        # the headless firefly-learning/teach-mcp judge, never to the normal
+        # chat LLM. "退出学习"/"结束学习" restores normal routing.
+        bridge = getattr(self, "_learning_bridge_session", None)
+        if bridge is not None:
+            handled = bridge.handle_incoming_text(text)
+            if handled is not None:
+                if handled:
+                    self.chat.append_assistant(handled)
+                return
+        # M4.5: tutor chat routing has top priority — while a tutor session is
+        # waiting_answer the raw user text IS the answer; otherwise an explicit
+        # quiz intent starts a tutor session. Everything else falls through to
+        # the existing pipeline untouched.
+        tutor_bubble = self._route_tutor_turn(text)
+        if tutor_bubble is not None:
+            self.chat.append_assistant(tutor_bubble)
+            return
         # Phase 6.5: when learning mode is on, the input chain is owned by the
         # LearningLoopOrchestrator — it detects the learning request, records
         # the allowed interaction facts, prepares the loop context and answers
@@ -1313,20 +1387,18 @@ class CompanionConsole(QMainWindow):
             self.input.setPlaceholderText("粘贴 B站链接（如 https://www.bilibili.com/video/BV…）")
             self._hint("把 B站视频链接发给我，我就能读给你听并总结～")
         elif capability == "study":
-            # Phase 1B: learning mode is no longer bound to Video Study.
-            # Entering the mode establishes a learning context (project
-            # course); a Bilibili link is just one possible material later.
-            if self.learning.state.enabled:
-                reply = self.learning.exit_mode()
-            else:
-                reply = self.learning.enter_mode()
-            self.chat.append_assistant(reply)
-            self._apply_learning_state()
-            # Phase 2-UX: entering the mode shows the learning entry surface
-            # (welcome + 继续/选择其他课程/新建) instead of bare chips. Nothing
-            # is activated until the user picks a project.
-            if self.learning.state.enabled:
-                self._show_learning_entry()
+            # Learning bridge v0.1 (entry wiring fix): the main-UI 学习模式
+            # button opens LearningBridgeDialog via the app shell instead of
+            # silently entering legacy core/learning in the chat. Legacy
+            # remains reachable through its own entries (trigger word
+            # 考考我, video study continue button).
+            from learning.diagnostics import log_marker
+
+            log_marker("LEARNING_CLICK", console_id=id(self))
+            log_marker("LEARNING_ENTRY", source="ability_panel")
+            log_marker("LEARNING_ROUTE", route="learning_bridge")
+            log_marker("LEARNING_SIGNAL_EMIT", console_id=id(self))
+            self.learning_bridge_requested.emit()
         elif capability == "screen_vision":
             self.chat.append_user("看一下我的屏幕")
             self.runner.ask("看一下我的屏幕")
@@ -1444,6 +1516,56 @@ class CompanionConsole(QMainWindow):
 # traceback. Mirrors the legacy CompanionChatWindow._instance pattern.
 _console_instance: CompanionConsole | None = None
 
+# Learning bridge v0.1 (dialog runtime fix): the shell registers its opener
+# here ONCE at startup, and open_singleton binds it to EVERY console instance
+# it returns. Wiring in a single call site (_ensure_companion_console) broke
+# silently when the console was opened through another path (Short Ask) —
+# the button emitted into the void. Module-level registration makes the
+# binding independent of which entry opened the window.
+_learning_bridge_opener: Any | None = None
+_console_bridge_binder: Any | None = None
+
+
+def set_learning_bridge_opener(opener: Any) -> None:
+    """Register the app-shell callback that opens LearningBridgeDialog."""
+    global _learning_bridge_opener
+    _learning_bridge_opener = opener
+
+
+def set_console_bridge_binder(binder: Any) -> None:
+    """Register the app-shell binder for session→console wiring.
+
+    Runtime Delivery fix: attaching the BridgeLearningSession (answer gate +
+    result display) at MODULE level means EVERY console instance gets bound
+    no matter which entry opened it — wiring inside a single open path left
+    Short-Ask-opened consoles without result delivery.
+    """
+    global _console_bridge_binder
+    _console_bridge_binder = binder
+
+
+def _bind_console_bridge(console: "CompanionConsole") -> None:
+    if _console_bridge_binder is None:
+        return
+    _console_bridge_binder(console)
+
+
+def _bind_learning_bridge_opener(console: "CompanionConsole") -> None:
+    """(Re)bind the registered opener to this console instance, idempotently."""
+    if _learning_bridge_opener is None:
+        return
+    import warnings
+
+    with warnings.catch_warnings():
+        # a never-connected signal legitimately raises RuntimeError here and
+        # libpyside additionally warns; both are expected and suppressed.
+        warnings.filterwarnings("ignore", message="Failed to disconnect")
+        try:
+            console.learning_bridge_requested.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+    console.learning_bridge_requested.connect(_learning_bridge_opener)
+
 
 def open_singleton(
     runner: Any,
@@ -1465,6 +1587,8 @@ def open_singleton(
     global _console_instance
     window = _console_instance
     if window is not None:
+        _bind_learning_bridge_opener(window)
+        _bind_console_bridge(window)
         window.show()
         window.raise_()
         window.activateWindow()
@@ -1476,6 +1600,8 @@ def open_singleton(
         display_names=display_names,
     )
     _console_instance = console
+    _bind_learning_bridge_opener(console)
+    _bind_console_bridge(console)
     console.show()
     console.raise_()
     console.activateWindow()

@@ -165,3 +165,7 @@ tools/firefly_memory_importer/data/
 
 Firefly_AI_Pet_v0.1.bundle
 *.bundle
+
+# Learning Bridge local run artifacts (never commit)
+.tmp_*/
+.pytest_tmp*/

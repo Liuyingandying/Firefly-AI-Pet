@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://firefly-ai-pet/schemas/learning/learning_result.schema.json",
+  "title": "Firefly Learning Bridge Result v1",
+  "description": "ONE-SHOT output of a single headless learning task, written by the firefly-learning skill to <course>/bridge/result.json. It is a delivery envelope, NOT learning state: mastery/progress/quiz authority stays in teach-mcp. Any progress figure shown here is a display snapshot and must carry source=teach-mcp.",
+  "type": "object",
+  "properties": {
+    "schema_version": { "const": 1 },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Echo of the task_id Firefly assigned to this run (from Learning Context)."
+    },
+    "course_id": { "type": "string", "minLength": 1 },
+    "action": { "enum": ["new", "review", "resume", "answer"] },
+    "status": { "enum": ["ok", "waiting_review", "error"] },
+    "message_type": { "enum": ["lesson", "question", "review", "info", "error"] },
+    "display_text": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Agent-finalized teaching text. Firefly displays it verbatim; the ordinary chat LLM must NOT rewrite it."
+    },
+    "question": {
+      "description": "Present when message_type=question. Values come verbatim from teach-mcp generate_question; never invented.",
+      "type": "object",
+      "properties": {
+        "question_id": { "type": "string", "minLength": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "options": {
+          "type": "array",
+          "items": { "type": ["string", "object"] }
+        }
+      },
+      "required": ["question_id", "text"],
+      "additionalProperties": false
+    },
+    "opaque_refs": {
+      "description": "teach-mcp-returned identifiers echoed verbatim (session_id today). Never invented, never treated as state.",
+      "type": "object",
+      "properties": {
+        "session_id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "progress_snapshot": {
+      "description": "OPTIONAL display-only snapshot. Must carry source=teach-mcp; consumers must not persist it as state.",
+      "type": "object",
+      "properties": {
+        "source": { "const": "teach-mcp" },
+        "text": { "type": "string" }
+      },
+      "required": ["source", "text"],
+      "additionalProperties": false
+    },
+    "created_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+    }
+  },
+  "required": [
+    "schema_version",
+    "task_id",
+    "course_id",
+    "action",
+    "status",
+    "message_type",
+    "display_text",
+    "created_at"
+  ],
+  "additionalProperties": false
+}

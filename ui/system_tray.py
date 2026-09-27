@@ -78,6 +78,9 @@ class FireflySystemTray(QSystemTrayIcon):
         settings_action = self._menu.addAction("设置")
         settings_action.triggered.connect(lambda: self._controller.show_settings())
 
+        learning_action = self._menu.addAction("学习模式")
+        learning_action.triggered.connect(self._open_learning_bridge)
+
         self._menu.addMenu(self._plugins_menu)
         import_action = self._menu.addAction("导入角色卡")
         import_action.triggered.connect(
@@ -87,6 +90,10 @@ class FireflySystemTray(QSystemTrayIcon):
         manage_action.triggered.connect(
             lambda: self._controller.open_character_manager()
         )
+        avatar_manage_action = self._menu.addAction("视觉角色管理")
+        avatar_manage_action.triggered.connect(
+            lambda: self._controller.open_avatar_manager()
+        )
 
         if self._characters:
             self._character_menu = self._menu.addMenu("切换角色")
@@ -95,6 +102,17 @@ class FireflySystemTray(QSystemTrayIcon):
 
         quit_action = self._menu.addAction("退出")
         quit_action.triggered.connect(lambda: self._controller.exit_application())
+
+    # ------------------------------------------------------------ learning
+
+    def _open_learning_bridge(self) -> None:
+        """学习模式（Z Code 桥）入口；旧 controller 缺方法时静默忽略。"""
+        from learning.diagnostics import log_marker
+
+        log_marker("LEARNING_ENTRY", source="tray")
+        controller = self._controller
+        if hasattr(controller, "open_learning_bridge"):
+            controller.open_learning_bridge()
 
     # -------------------------------------------------------- character
 

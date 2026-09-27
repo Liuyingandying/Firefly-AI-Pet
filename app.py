@@ -51,6 +51,7 @@ from core.session_manager import SessionManager
 from core.session_store import SessionStore
 from core.settings_manager import SettingsManager
 from core.pet_state_resolver import PetStateResolver
+from core.avatar import AvatarService, CharacterManager
 from core.visual_state_filter import VisualStateFilter
 from core.runtime_bus import RuntimeBus, RuntimeEvent, RuntimeState
 from core.ai_router import ProvidersUpdated, reload_default_routers, set_updated_publisher
@@ -259,6 +260,7 @@ class VisualShell(QObject):
             max_dimension=theme.PET_MAX_DIMENSION,
             display_names=self.character_profile.display_names,
         )
+        self.avatar_service = AvatarService(self.pet)
         self.dock = AgentDock(display_names=self.character_profile.display_names)
         self.bubble = SpeechBubble(display_names=self.character_profile.display_names)
         self.toolbar = VerticalToolbar(
@@ -274,6 +276,9 @@ class VisualShell(QObject):
         else:
             self.session_manager = SessionManager()
         self.settings = SettingsManager()
+        self.visual_character_manager = CharacterManager(
+            self.avatar_service, self.settings, user_paths=USER_PATHS
+        )
         self.workspace_popover = WorkspacePopover(self.workspace_manager)
         # Resident Windows tray: left-click toggle, dynamic plugin submenu, the
         # only 退出 path. Created with the shell; removed in shutdown().
@@ -564,15 +569,17 @@ class VisualShell(QObject):
         # path below stays intact.
         self._activity_controller = PetActivityController(self.runtime_bus, parent=self)
         # Phase 2C resolver: arbitrates between old StateMonitor and new
-        # RuntimeActivity paths. The resolver's output is the single source
-        # of truth for pet.apply_state.
+        # RuntimeActivity paths. AvatarService preserves the built-in path
+        # when no external visual character is active.
         self._state_resolver = PetStateResolver(parent=self)
         # Detailed six-state feed (Phase 4): carries TOOL_RUNNING /
         # WAITING_INPUT to the resolver so the LED detail output sees the
         # true activity; the four-state display path is unchanged.
         self._activity_controller.pet_detail_state_changed.connect(self._state_resolver.update_detail_state)
         self._activity_controller.pet_state_changed.connect(self._state_resolver.update_activity_state)
-        self._state_resolver.pet_display_state_changed.connect(self.pet.apply_state)
+        self._state_resolver.pet_display_state_changed.connect(
+            self.avatar_service.apply_state
+        )
         # Hardware display (ESP32 Prism HUD): write resolver's final state
         # to runtime/hardware_state.json for the serial bridge to consume.
         self._state_resolver.pet_display_state_changed.connect(self._write_hardware_state)
@@ -674,11 +681,32 @@ class VisualShell(QObject):
         self.settings_popover.memory_requested.connect(self._open_memory_from_settings)
         # Provider Manager Phase 3B: settings entry opens the AI model window.
         self._provider_manager_window = None
+        self._avatar_manager_window = None
+        self._learning_bridge_dialog = None
         self.settings_popover.provider_manager_requested.connect(
             self._open_provider_manager
         )
         # UI V2 CompanionConsole — toolbar "console" action opens the singleton.
         self.coordinator.console_requested.connect(self._ensure_companion_console)
+        # Learning bridge v0.1 (dialog runtime fix): register the bridge
+        # opener at the MODULE level so every console instance binds it when
+        # opened — regardless of which entry (toolbar console, Short Ask,
+        # legacy fallback) created the window. Wiring only inside
+        # _ensure_companion_console left the Short-Ask-opened console
+        # unconnected and the 学习模式 button dead.
+        from ui.v2.console import set_learning_bridge_opener, set_console_bridge_binder
+
+        set_learning_bridge_opener(self.open_learning_bridge)
+        # Learning Return Channel v0.1: app-level session owns the result
+        # watcher + pending-question routing (answer channel).
+        from learning.bridge_session import BridgeLearningSession
+
+        self._learning_bridge_session = BridgeLearningSession(
+            self.settings, parent=self
+        )
+        # Runtime Delivery fix: bind session→console at MODULE level so every
+        # console instance (toolbar / Short Ask / fallback) receives results.
+        set_console_bridge_binder(self._bind_learning_console)
 
     def _ensure_companion_console(self) -> None:
         """Open (or focus) the AI Pet console bound to the character runner."""
@@ -696,8 +724,41 @@ class VisualShell(QObject):
             console.research_requested.disconnect()
         except (RuntimeError, TypeError):
             pass
+        try:
+            console.learning_bridge_requested.disconnect()
+        except (RuntimeError, TypeError):
+            pass
         console.settings_requested.connect(self._on_console_settings)
         console.research_requested.connect(self._on_console_research)
+        # Learning bridge v0.1: the console 学习模式 button asks the shell to
+        # open LearningBridgeDialog (same entry as the tray menu item).
+        console.learning_bridge_requested.connect(self.open_learning_bridge)
+        # Return Channel v0.1: one shared binder keeps answer-routing gate +
+        # result display attached (also applied by open_singleton itself).
+        self._bind_learning_console(console)
+
+    def _bind_learning_console(self, console) -> None:
+        """Attach the BridgeLearningSession to this console instance.
+
+        Idempotent; called from the module-level console binder (every open
+        path) and from _ensure_companion_console.
+        """
+        console.set_learning_bridge_session(self._learning_bridge_session)
+        session = self._learning_bridge_session
+        try:
+            session.result_ready.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            session.agent_timeout.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        session.result_ready.connect(console.show_learning_result)
+        session.agent_timeout.connect(
+            lambda _task_id: console.show_learning_result(
+                "学习代理仍在处理中，请稍候……（完成后结果会自动出现在这里）"
+            )
+        )
 
     def _on_console_settings(self) -> None:
         self.coordinator._toggle_settings()
@@ -709,6 +770,19 @@ class VisualShell(QObject):
 
     def start(self) -> None:
         self._write_pid()
+        self.visual_character_manager.scan_characters()
+        active_avatar_id = self.settings.active_avatar_id
+        if active_avatar_id:
+            try:
+                if self.visual_character_manager.get_character(active_avatar_id) is None:
+                    raise ValueError("saved visual character is unavailable")
+                self.visual_character_manager.set_active_character(active_avatar_id)
+            except Exception as exc:
+                log.warning("visual character restore failed: %s", exc)
+                try:
+                    self.settings.set_active_avatar_id("")
+                except OSError:
+                    log.warning("could not clear unavailable visual character selection")
         # Restore persisted native sessions so Short Talk resumes across a
         # Firefly restart. Safe even before the UI is shown.
         self.session_manager.load()
@@ -738,6 +812,105 @@ class VisualShell(QObject):
         from character.character_manager import open_character_manager
 
         open_character_manager()
+
+    def open_avatar_manager(self) -> None:
+        """Open the singleton visual .character package manager."""
+        from ui.avatar_manager import AvatarManagerWindow
+
+        if self._avatar_manager_window is None:
+            self._avatar_manager_window = AvatarManagerWindow(self.visual_character_manager)
+        else:
+            self._avatar_manager_window.refresh()
+        self._avatar_manager_window.show()
+        self._avatar_manager_window.raise_()
+        self._avatar_manager_window.activateWindow()
+
+    def open_learning_bridge(self) -> None:
+        """打开学习模式（Z Code 桥）最小入口（单例，无 parent——本类是 QObject）。
+
+        学习状态的唯一权威是 teach-mcp；此对话框只做托管资源导入与
+        launch_learning_mode 调度（learning bridge v0.1 Phase 11）。
+        """
+        from learning.bridge_dialog import LearningBridgeDialog
+        from learning.diagnostics import log_marker
+
+        log_marker("LEARNING_ROUTE", route="learning_bridge")
+        sender = getattr(self, "sender", None)
+        sender_console = sender() if callable(sender) else None
+        log_marker(
+            "LEARNING_SIGNAL_RECEIVE",
+            shell_id=id(self),
+            console_id=id(sender_console) if sender_console is not None else None,
+        )
+        try:
+            if self._learning_bridge_dialog is None:
+                dialog = LearningBridgeDialog()
+                log_marker("LEARNING_DIALOG_CREATE", dialog_id=id(dialog))
+                # Return Channel: launched courses are watched by the session
+                # (absent in minimal hosts — skip silently there).
+                bridge_session = getattr(
+                    self, "_learning_bridge_session", None
+                )
+                if bridge_session is not None:
+                    dialog.course_launched.connect(bridge_session.attach_launch)
+                # Keep a strong reference for the dialog's whole life; clear
+                # it when the widget is destroyed so a closed bridge window
+                # is recreated (never leaked, never GC'd while visible).
+                dialog.destroyed.connect(
+                    lambda _=None, owner=self: setattr(
+                        owner, "_learning_bridge_dialog", None
+                    )
+                )
+                self._learning_bridge_dialog = dialog
+            else:
+                dialog = self._learning_bridge_dialog
+                dialog.refresh()
+            log_marker("LEARNING_DIALOG_SHOW", dialog_id=id(dialog))
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            # One event-loop tick so show() settles, then verify visibility
+            # and (defensively) on-screen geometry.
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtGui import QGuiApplication
+
+            QApplication.processEvents()
+            visible = dialog.isVisible()
+            if visible:
+                screen = QGuiApplication.primaryScreen()
+                screen_geo = screen.availableGeometry() if screen is not None else None
+                if screen_geo is not None:
+                    geo = dialog.frameGeometry()
+                    if not screen_geo.intersects(geo):
+                        dialog.move(screen_geo.center() - geo.center())
+                        dialog.show()
+                        dialog.raise_()
+                        dialog.activateWindow()
+                        QApplication.processEvents()
+                        visible = dialog.isVisible()
+            log_marker(
+                "LEARNING_DIALOG_STATE",
+                dialog_id=id(dialog),
+                visible=visible,
+                active=dialog.isActiveWindow(),
+            )
+            if not visible:
+                raise RuntimeError("LearningBridgeDialog show() 后仍不可见")
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "[App] LearningBridgeDialog 打开失败"
+            )
+            log_marker("LEARNING_DIALOG_STATE", visible=False, error=True)
+            try:
+                from PySide6.QtWidgets import QMessageBox
+
+                QMessageBox.critical(
+                    None, "学习模式", "学习模式窗口打开失败（详见 Firefly 日志）"
+                )
+            except Exception:  # noqa: BLE001 — last-resort, never raise from UI
+                pass
 
     def import_character_card(self) -> dict:
         """Import a character card (.character folder or zip) via GUI.
@@ -873,6 +1046,12 @@ class VisualShell(QObject):
         self.implement_executor.reset()
         self.plugin_loader.shutdown()
         self.coordinator.close_overlays()
+        if self._avatar_manager_window is not None:
+            self._avatar_manager_window.close()
+            self._avatar_manager_window = None
+        if self._learning_bridge_dialog is not None:
+            self._learning_bridge_dialog.close()
+            self._learning_bridge_dialog = None
         if getattr(self, "ambient_status", None) is not None:
             self.ambient_status.close()
         # Stop PageLens bridge before closing overlays (panel needs it)
@@ -880,6 +1059,9 @@ class VisualShell(QObject):
         # Unregister global hotkey
         if hasattr(self, "hotkey_manager"):
             self.hotkey_manager.unregister()
+        avatar_service = getattr(self, "avatar_service", None)
+        if avatar_service is not None:
+            avatar_service.close()
         self.pet.shutdown()
         # Remove the tray icon so it disappears from the notification area.
         if self.system_tray is not None:
@@ -2333,6 +2515,23 @@ def _acquire_single_instance() -> bool:
 
 def main() -> int:
     app = QApplication(sys.argv)
+    # Learning bridge diagnostics: prove WHICH source files this live process
+    # loaded (guards against "running an old copy / another clone" confusion).
+    import os as _os
+
+    try:
+        from learning.diagnostics import log_marker as _lm
+
+        _lm(
+            "BUILD_RUNTIME",
+            source_file=str(Path(__file__).resolve()),
+            bridge_module=str(
+                Path(__file__).resolve().parent / "learning" / "bridge_dialog.py"
+            ),
+            pid=_os.getpid(),
+        )
+    except Exception:  # noqa: BLE001 — diagnostics must never block startup
+        pass
     app.setApplicationName(
         CharacterLoader(CHARACTER_DIR, character_id=ACTIVE_CHARACTER_ID)
         .load()

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://firefly-ai-pet/schemas/learning/learning_action.schema.json",
+  "title": "Firefly Learning Action Payload v1",
+  "description": "Per-launch answer payload for action=answer, written by Firefly to <course>/bridge/learning_action.json before the headless task starts. Firefly only records WHAT the user answered; teach-mcp alone decides what it means (evaluate_answer + record_result).",
+  "type": "object",
+  "properties": {
+    "schema_version": { "const": 1 },
+    "task_id": { "type": "string", "minLength": 1 },
+    "course_id": { "type": "string", "minLength": 1 },
+    "action": { "const": "answer" },
+    "question_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Verbatim from teach-mcp (echoed through the previous result.json). Never invented by Firefly or the model."
+    },
+    "student_answer": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Raw user text. Verbatim; no judging, no normalization beyond trim."
+    },
+    "created_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+    }
+  },
+  "required": [
+    "schema_version",
+    "task_id",
+    "course_id",
+    "action",
+    "question_id",
+    "student_answer",
+    "created_at"
+  ],
+  "additionalProperties": false
+}

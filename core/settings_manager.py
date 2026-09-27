@@ -157,6 +157,45 @@ class SettingsManager:
         self._preferences["learning.last_course_id"] = course_id
         self.save()
 
+    @property
+    def learning_learner_id(self) -> str:
+        """Stable bridge learner_id (learning bridge v0.1, Phase 9).
+
+        Generated exactly once by learning.identity and persisted here for
+        the lifetime of the installation. teach-mcp owns all derived learning
+        state; this id only names the learner.
+        """
+        return str(self._preferences.get("learning.learner_id") or "")
+
+    def set_learning_learner_id(self, learner_id: str) -> None:
+        learner_id = (learner_id or "").strip()
+        if self._preferences.get("learning.learner_id") == learner_id:
+            return
+        self._preferences["learning.learner_id"] = learner_id
+        self.save()
+
+    @property
+    def active_avatar_id(self) -> str:
+        """Selected visual package ID, independent of the YAML persona."""
+        value = self._preferences.get("avatar.active_character_id")
+        return value if isinstance(value, str) else ""
+
+    def set_active_avatar_id(self, character_id: str) -> None:
+        """Persist a visual selection without leaving memory changed on write failure."""
+        if not isinstance(character_id, str):
+            raise TypeError("character_id must be a string")
+        character_id = character_id.strip()
+        key = "avatar.active_character_id"
+        if self.active_avatar_id == character_id:
+            return
+        previous = self._preferences.get(key, "")
+        self._preferences[key] = character_id
+        try:
+            self.save()
+        except Exception:
+            self._preferences[key] = previous
+            raise
+
     # -- plugin enablement (Quick Tools Plugin Management P0) ------------
 
     def plugin_enabled(self, plugin_id: str) -> bool:
