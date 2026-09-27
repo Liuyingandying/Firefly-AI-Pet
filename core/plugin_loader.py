@@ -208,10 +208,14 @@ class PluginLoader(QObject):
             candidates = [Path(primary)]
         else:
             candidates = [DEFAULT_PLUGIN_ROOT]
-            # 冻结发行版：exe 同级的 plugins 为第一优先默认插件目录
-            # （用户放插件即可用）；便携用户目录作为第二根兜底。
+            repo_plugins = Path(__file__).resolve().parent.parent / "plugins"
             if getattr(sys, "frozen", False):
+                # 冻结发行版：exe 同级的 plugins 为第一优先默认插件目录
+                # （用户放插件即可用）；便携用户目录作为第二根兜底。
                 candidates.insert(0, Path(sys.executable).resolve().parent / "plugins")
+            elif repo_plugins.is_dir():
+                # 开发环境：优先加载仓库自带的 plugins（与发行版同构）。
+                candidates.insert(0, repo_plugins)
         raw = os.environ.get(PLUGIN_PATH_ENV, "")
         for part in raw.split(os.pathsep):
             part = part.strip()

@@ -7,6 +7,13 @@
 """
 from __future__ import annotations
 
+# 本插件目录进 sys.path：宿主/其他插件经它导入 voice_client 与 voice_ui。
+import sys as _sys
+from pathlib import Path as _Path
+_SELF = _Path(__file__).resolve().parent
+if str(_SELF) not in _sys.path:
+    _sys.path.insert(0, str(_SELF))
+
 from core.plugin_api import QuickToolPlugin
 from core.quick_tools import QuickToolManifest
 
