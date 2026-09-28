@@ -75,7 +75,7 @@ from character import (
 )
 from character.character_loader import resolve_animations_dir
 try:  # 视觉插件未安装时降级：截屏服务不可用，相关入口给出安装提示
-    from core.screen_vision.screen.capture import ScreenCaptureService
+    from screen_vision.screen.capture import ScreenCaptureService
 except ImportError:
     ScreenCaptureService = None
 
@@ -1470,7 +1470,7 @@ class VisualShell(QObject):
         and capture exactly that window. Raises when the window cannot be
         identified (wrong active tab, viewer closed) — never falls back to a
         full-screen capture that would include Firefly's own windows."""
-        from core.screen_vision.foreground_tracker import find_window_hwnd
+        from screen_vision.foreground_tracker import find_window_hwnd
 
         needles = _pdf_window_needles(self.paper_context.pdf)
         hwnd = find_window_hwnd(needles)
@@ -1835,9 +1835,12 @@ class VisualShell(QObject):
         # never captures the screen or calls a provider by itself. The legacy
         # CompanionChatWindow stays intact and is the fallback if the console
         # ever fails to open.
-        from core.screen_vision.foreground_tracker import foreground_tracker
+        try:  # 窗口记忆属视觉插件：缺失时 Ask 照常打开控制台
+            from screen_vision.foreground_tracker import foreground_tracker
 
-        foreground_tracker.remember_current_external_window()
+            foreground_tracker.remember_current_external_window()
+        except ImportError:
+            pass
         try:
             from ui.v2.console import open_singleton as open_console
 

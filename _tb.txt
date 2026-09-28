@@ -1,0 +1,96 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.4, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Users\LENOVO\Desktop\流萤\Firefly-AI-Pet（2）
+plugins: anyio-4.15.1, platformdirs-4.12.0
+collected 1 item
+
+tests\test_screen_vision_failover.py F                                   [100%]
+
+================================== FAILURES ===================================
+_____________________ test_b_primary_500_falls_back_once ______________________
+
+    def test_b_primary_500_falls_back_once():
+        primary, fallback = FakeVision(ProviderHTTPError(500, "boom")), FallbackVision()
+        provider = FailoverVisionProvider(primary=primary, fallback=fallback)
+>       result = provider.inspect(_frame())
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_screen_vision_failover.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <core.screen_vision.failover.FailoverVisionProvider object at 0x000001BB4EAA9F40>
+frame = <test_screen_vision_failover.FakeFrameSource object at 0x000001BB4EAAAAB0>
+instruction = '你是视觉感知模块。\n只描述屏幕上真实可见的信息。\n不要给操作建议。\n不要猜测看不清的内容。\n尽量识别：\n- 当前应用/窗口\n- 页面大致结构\n- 可见文本\n- 错误/警告\n- UI 控件\n- 代码/终端状态\n- ..._title": "...",\n  "visible_text": [],\n  "ui_elements": [],\n  "warnings": [],\n  "errors": [],\n  "uncertain": []\n}'
+exclude_providers = ()
+
+    def inspect(self, frame, instruction=None, exclude_providers=()):
+        from screen_vision.vision.base import DEFAULT_VISION_INSTRUCTION
+    
+        instruction = instruction or DEFAULT_VISION_INSTRUCTION
+    
+        def call_primary():
+            return self._primary.inspect(frame, instruction)
+    
+        def call_fallbacks(index, fallback):
+            return fallback.inspect(frame, instruction)
+    
+>       return self._run_with_failover(
+            call_primary, call_fallbacks, exclude_providers=exclude_providers
+        )
+
+plugins\firefly_vision\screen_vision\failover.py:154: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <core.screen_vision.failover.FailoverVisionProvider object at 0x000001BB4EAA9F40>
+call_primary = <function FailoverVisionProvider.inspect.<locals>.call_primary at 0x000001BB4EAAE660>
+call_fallbacks = <function FailoverVisionProvider.inspect.<locals>.call_fallbacks at 0x000001BB4EAAE020>
+exclude_providers = ()
+
+    def _run_with_failover(self, call_primary, call_fallbacks, exclude_providers=()):
+        """Primary once (breaker permitting), then each fallback once, in order.
+    
+        exists, a transient primary failure (or an open breaker) surfaces as
+        VisionTemporarilyUnavailable without further waiting.
+        """
+        excluded = frozenset(exclude_providers)
+        available_fallbacks = tuple(
+            (index, fallback)
+            for index, fallback in enumerate(self._fallbacks)
+            if getattr(fallback, "name", "") not in excluded
+        )
+        has_fallback = bool(available_fallbacks)
+        primary_excluded = getattr(self._primary, "name", "") in excluded
+        skip_primary = primary_excluded or (has_fallback and not self._breaker.allow_primary())
+        failure_type = None
+        attempts = 0
+    
+        if not skip_primary:
+            try:
+                attempts += 1
+>               result = call_primary()
+                         ^^^^^^^^^^^^^^
+
+plugins\firefly_vision\screen_vision\failover.py:92: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def call_primary():
+>       return self._primary.inspect(frame, instruction)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+plugins\firefly_vision\screen_vision\failover.py:149: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test_screen_vision_failover.FakeVision object at 0x000001BB4EAAA5D0>
+frame = <test_screen_vision_failover.FakeFrameSource object at 0x000001BB4EAAAAB0>
+instruction = '你是视觉感知模块。\n只描述屏幕上真实可见的信息。\n不要给操作建议。\n不要猜测看不清的内容。\n尽量识别：\n- 当前应用/窗口\n- 页面大致结构\n- 可见文本\n- 错误/警告\n- UI 控件\n- 代码/终端状态\n- ..._title": "...",\n  "visible_text": [],\n  "ui_elements": [],\n  "warnings": [],\n  "errors": [],\n  "uncertain": []\n}'
+
+    def inspect(self, frame, instruction=None):
+        self.calls += 1
+        if self._error is not None:
+>           raise self._error
+E           core.screen_vision.provider_errors.ProviderHTTPError: provider returned HTTP 500: boom
+
+tests\test_screen_vision_failover.py:60: ProviderHTTPError
+=========================== short test summary info ===========================
+FAILED tests/test_screen_vision_failover.py::test_b_primary_500_falls_back_once
+============================== 1 failed in 0.43s ==============================

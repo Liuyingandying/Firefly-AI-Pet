@@ -15,11 +15,11 @@ import pytest
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
-from core.screen_vision import foreground_tracker as ft_module
-from core.screen_vision.foreground_tracker import ForegroundContextTracker
-from core.screen_vision.models import ScreenFrame, ScreenObservation
-from core.screen_vision.service import ScreenVisionService
-from core.screen_vision.trigger import (
+from screen_vision import foreground_tracker as ft_module
+from screen_vision.foreground_tracker import ForegroundContextTracker
+from screen_vision.models import ScreenFrame, ScreenObservation
+from screen_vision.service import ScreenVisionService
+from screen_vision.trigger import (
     CAPTURE_FIREFLY_COMPANION,
     CAPTURE_LAST_NON_FIREFLY_WINDOW,
     CAPTURE_PRIMARY_SCREEN,
@@ -284,7 +284,7 @@ def test_p2_unknown_mode_rejected():
 def test_j_stale_hwnd_falls_back_gracefully(monkeypatch):
     """A recorded window that no longer exists degrades to the current
     foreground (if external) or the primary screen - never a crash."""
-    from core.screen_vision.screen import capture as capture_module
+    from screen_vision.screen import capture as capture_module
 
     tracker = ForegroundContextTracker(query_foreground=FakeForeground([4321]))
     tracker.remember_current_external_window()
@@ -315,7 +315,7 @@ def test_j_stale_hwnd_falls_back_gracefully(monkeypatch):
 
 
 def test_j2_stale_hwnd_uses_current_external_foreground(monkeypatch):
-    from core.screen_vision.screen import capture as capture_module
+    from screen_vision.screen import capture as capture_module
 
     tracker = ForegroundContextTracker(query_foreground=FakeForeground([4321]))
     tracker.remember_current_external_window()
@@ -354,7 +354,7 @@ def test_j2_stale_hwnd_uses_current_external_foreground(monkeypatch):
 
 
 def test_companion_target_falls_back_to_primary_when_no_hwnd(monkeypatch):
-    from core.screen_vision.screen import capture as capture_module
+    from screen_vision.screen import capture as capture_module
 
     tracker = ForegroundContextTracker(query_foreground=FakeForeground([0]))
     monkeypatch.setattr(capture_module, "_fg_tracker", tracker)  # no companion hwnd

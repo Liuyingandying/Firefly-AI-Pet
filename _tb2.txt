@@ -1,0 +1,43 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.4, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Users\LENOVO\Desktop\流萤\Firefly-AI-Pet（2）
+plugins: anyio-4.15.1, platformdirs-4.12.0
+collected 1 item
+
+tests\test_screen_vision_failover.py F                                   [100%]
+
+================================== FAILURES ===================================
+_____________________ test_b_primary_500_falls_back_once ______________________
+
+    def test_b_primary_500_falls_back_once():
+        primary, fallback = FakeVision(ProviderHTTPError(500, "boom")), FallbackVision()
+        provider = FailoverVisionProvider(primary=primary, fallback=fallback)
+>       result = provider.inspect(_frame())
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_screen_vision_failover.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+plugins\firefly_vision\screen_vision\failover.py:154: in inspect
+    return self._run_with_failover(
+plugins\firefly_vision\screen_vision\failover.py:92: in _run_with_failover
+    result = call_primary()
+             ^^^^^^^^^^^^^^
+plugins\firefly_vision\screen_vision\failover.py:149: in call_primary
+    return self._primary.inspect(frame, instruction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test_screen_vision_failover.FakeVision object at 0x00000224A89EAFF0>
+frame = <test_screen_vision_failover.FakeFrameSource object at 0x00000224A8CE5850>
+instruction = '你是视觉感知模块。\n只描述屏幕上真实可见的信息。\n不要给操作建议。\n不要猜测看不清的内容。\n尽量识别：\n- 当前应用/窗口\n- 页面大致结构\n- 可见文本\n- 错误/警告\n- UI 控件\n- 代码/终端状态\n- ..._title": "...",\n  "visible_text": [],\n  "ui_elements": [],\n  "warnings": [],\n  "errors": [],\n  "uncertain": []\n}'
+
+    def inspect(self, frame, instruction=None):
+        self.calls += 1
+        if self._error is not None:
+>           raise self._error
+E           core.screen_vision.provider_errors.ProviderHTTPError: provider returned HTTP 500: boom
+
+tests\test_screen_vision_failover.py:60: ProviderHTTPError
+=========================== short test summary info ===========================
+FAILED tests/test_screen_vision_failover.py::test_b_primary_500_falls_back_once
+============================== 1 failed in 0.45s ==============================

@@ -6,21 +6,21 @@ Provider-level fakes; the real GLM round-trip lives in the reasoning probe
 
 import pytest
 
-from core.screen_vision.brain.glm_reasoning import GlmReasoningProvider
-from core.screen_vision.circuit_breaker import CircuitBreaker
-from core.screen_vision.config import (
+from screen_vision.brain.glm_reasoning import GlmReasoningProvider
+from screen_vision.circuit_breaker import CircuitBreaker
+from screen_vision.config import (
     ROUTING_FAST,
     ROUTING_RESILIENT,
     build_reasoning_provider,
 )
-from core.screen_vision.failover import FailoverReasoningProvider
-from core.screen_vision.provider_errors import (
+from screen_vision.failover import FailoverReasoningProvider
+from screen_vision.provider_errors import (
     ProviderHTTPError,
     ProviderNetworkError,
     ReasoningTemporarilyUnavailable,
     is_transient,
 )
-from core.screen_vision.service import ScreenVisionService
+from screen_vision.service import ScreenVisionService
 
 
 class FakePrimaryReasoning:
@@ -266,7 +266,7 @@ class _OkVision:
     model = "tju-llm"
 
     def inspect(self, frame, instruction=None):
-        from core.screen_vision.models import ScreenObservation
+        from screen_vision.models import ScreenObservation
 
         return ScreenObservation(scene_summary="s")
 
@@ -278,7 +278,7 @@ class _SpyCapture:
     def capture_primary_screen(self, **kwargs):
         from datetime import datetime
 
-        from core.screen_vision.models import ScreenFrame
+        from screen_vision.models import ScreenFrame
 
         self.calls += 1
         return ScreenFrame(8, 8, "image/jpeg", b"\xff\xd8x", datetime.now())
@@ -296,7 +296,7 @@ class _SpyCapture:
 
 
 def test_n_service_exactly_one_capture_per_look():
-    from core.screen_vision.models import ScreenObservation
+    from screen_vision.models import ScreenObservation
 
     class DownReasoning:
         name = "tju-deepseek"
@@ -311,7 +311,7 @@ def test_n_service_exactly_one_capture_per_look():
         def answer(self, question, observation):
             return "glm answer"
 
-    from core.screen_vision.failover import FailoverReasoningProvider as FRP
+    from screen_vision.failover import FailoverReasoningProvider as FRP
 
     capture = _SpyCapture()
     service = ScreenVisionService(

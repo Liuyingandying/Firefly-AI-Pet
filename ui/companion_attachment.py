@@ -29,7 +29,7 @@ from core.document_attachment import (
     DocumentParseError,
     parse_document_bytes,
 )
-from core.screen_vision.models import ScreenFrame
+from screen_vision.models import ScreenFrame
 
 MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024     # image entry limit (Layer 1)
 MAX_IMAGE_PIXELS = 40_000_000               # ~40MP decoded pixel budget (Layer 2)
@@ -369,7 +369,7 @@ def attachment_to_frame(attachment: AttachmentImage) -> ScreenFrame:
     JPEG quality 85 — all in memory, never upscaling small images, never
     touching disk.
     """
-    from core.screen_vision.screen.capture import _encode_pixmap
+    from screen_vision.screen.capture import _encode_pixmap
 
     pixmap = QPixmap.fromImage(attachment.image)
     if pixmap.isNull():

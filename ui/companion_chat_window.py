@@ -297,15 +297,22 @@ class CompanionChatWindow(QWidget):
         # Record the user's own window BEFORE a Firefly window takes
         # focus, so "看看我在做什么" later captures what they were doing
         # (not the Companion). Reads the HWND only; no capture, no provider.
-        from core.screen_vision.foreground_tracker import foreground_tracker
+        try:  # 视觉插件缺失时跳过窗口记忆，不影响回退窗口打开
+            from screen_vision.foreground_tracker import foreground_tracker
 
-        foreground_tracker.remember_current_external_window()
+            foreground_tracker.remember_current_external_window()
+        except ImportError:
+            pass
+
         window = cls._instance
         if window is None:
             window = cls(runner=runner, display_names=display_names)
             cls._instance = window
         window.show()
-        foreground_tracker.remember_firefly_window(int(window.winId()))
+        try:
+            foreground_tracker.remember_firefly_window(int(window.winId()))
+        except (ImportError, RuntimeError):
+            pass
         window.raise_()
         window.activateWindow()
         window.input.setFocus()
@@ -321,11 +328,11 @@ class CompanionChatWindow(QWidget):
             if cancel is not None:
                 cancel()  # stop in-flight OCR workers
         try:
-            from core.screen_vision.foreground_tracker import foreground_tracker
+            from screen_vision.foreground_tracker import foreground_tracker
 
             foreground_tracker.forget_firefly_window(int(self.winId()))
-        except RuntimeError:
-            pass  # window already destroyed
+        except (ImportError, RuntimeError):
+            pass  # 视觉插件缺失或窗口已销毁
         super().closeEvent(event)
 
     def __init__(

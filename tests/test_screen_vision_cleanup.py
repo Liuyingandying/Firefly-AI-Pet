@@ -12,17 +12,17 @@ from pathlib import Path
 import pytest
 
 from providers.base import validate_messages
-from core.screen_vision import config as sv_config
-from core.screen_vision.circuit_breaker import CircuitBreaker
-from core.screen_vision.failover import FailoverVisionProvider
-from core.screen_vision.provider_errors import (
+from screen_vision import config as sv_config
+from screen_vision.circuit_breaker import CircuitBreaker
+from screen_vision.failover import FailoverVisionProvider
+from screen_vision.provider_errors import (
     ProviderError,
     ProviderHTTPError,
     ProviderSchemaError,
     VisionTemporarilyUnavailable,
     is_transient,
 )
-from core.screen_vision.safety import sanitize_error_text
+from screen_vision.safety import sanitize_error_text
 
 
 SCREEN_VISION_DIR = Path(__file__).resolve().parents[1] / "core" / "screen_vision"
@@ -135,7 +135,7 @@ def test_e2_glm_vision_default_model_is_4_6v_flash(monkeypatch, isolated_env_fil
     assert glm[0].name == "zhipu-glm-4.6v-flash"
 
     # and the TEXT_ONLY model is hard-guarded even if someone configures it
-    from core.screen_vision.vision.glm_vision import (
+    from screen_vision.vision.glm_vision import (
         FORBIDDEN_VISION_MODELS,
         GlmVisionProvider,
     )

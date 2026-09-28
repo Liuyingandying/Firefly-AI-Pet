@@ -11,21 +11,21 @@ from datetime import datetime
 
 import pytest
 
-from core.screen_vision.failover import FailoverReasoningProvider, FailoverVisionProvider
-from core.screen_vision.models import ScreenFrame, ScreenObservation
-from core.screen_vision.provider_errors import (
+from screen_vision.failover import FailoverReasoningProvider, FailoverVisionProvider
+from screen_vision.models import ScreenFrame, ScreenObservation
+from screen_vision.provider_errors import (
     ProviderHTTPError,
     ReasoningTemporarilyUnavailable,
     VisionTemporarilyUnavailable,
 )
-from core.screen_vision.vision import deepseek_vision as ds_vision
-from core.screen_vision.vision.deepseek_vision import (
+from screen_vision.vision import deepseek_vision as ds_vision
+from screen_vision.vision.deepseek_vision import (
     DEEPSEEK_VISION_MODEL,
     DeepSeekVisionProvider,
     build_vision_messages,
 )
-from core.screen_vision.vision.glm_vision import GlmVisionProvider
-from core.screen_vision.vision.qwen_vision import QwenVisionProvider, to_observation
+from screen_vision.vision.glm_vision import GlmVisionProvider
+from screen_vision.vision.qwen_vision import QwenVisionProvider, to_observation
 
 
 def _frame():

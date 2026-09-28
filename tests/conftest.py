@@ -12,8 +12,25 @@ for _plug in ("firefly_vision", "firefly_learning", "firefly_voice_chat", "firef
     _plug_dir = str(PROJECT_DIR / "plugins" / _plug)
     if Path(_plug_dir).is_dir() and _plug_dir not in sys.path:
         sys.path.insert(0, _plug_dir)
+
 from urllib.parse import urlparse
 import urllib.request
+
+# 插件实现缺失时（如 classic 空 plugins），跳过依赖这些实现的测试，
+# 而不是让收集阶段报 ImportError——插件缺失只是功能缺失。
+collect_ignore_glob: list[str] = []
+if not (PROJECT_DIR / "plugins" / "firefly_voice_chat").is_dir():
+    collect_ignore_glob += ["test_voice_*.py"]
+if not (PROJECT_DIR / "plugins" / "firefly_vision" / "screen_vision").is_dir():
+    collect_ignore_glob += [
+        "test_screen_vision_*.py", "test_glm_vision_error_regression.py",
+        "test_document_vision.py", "test_document_summary_v2.py",
+        "test_companion_image_attachment.py", "test_companion_attachment_limits_v2.py",
+        "test_companion_document_attachment.py",
+    ]
+if not (PROJECT_DIR / "plugins" / "firefly_bili_video").is_dir():
+    collect_ignore_glob += ["test_document_router.py", "test_ask_button_companion.py"]
+    collect_ignore_glob += ["test_capture_semantics.py", "test_companion_attachment.py"]
 
 import pytest
 import requests

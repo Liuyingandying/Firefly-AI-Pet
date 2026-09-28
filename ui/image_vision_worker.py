@@ -89,7 +89,7 @@ class ImageVisionWorker(QObject):
 
     @staticmethod
     def _default_provider():
-        from core.screen_vision.config import get_fast_direct_provider
+        from screen_vision.config import get_fast_direct_provider
 
         return get_fast_direct_provider()
 

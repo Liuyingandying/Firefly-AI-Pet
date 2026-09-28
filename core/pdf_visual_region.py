@@ -27,7 +27,7 @@ from datetime import datetime
 from PIL import Image
 
 from core.pdf_text_hit_test import line_rect
-from core.screen_vision.models import ScreenFrame
+from screen_vision.models import ScreenFrame
 
 Rect = tuple[float, float, float, float]
 

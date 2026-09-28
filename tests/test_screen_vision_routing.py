@@ -9,8 +9,8 @@ from datetime import datetime
 
 import pytest
 
-from core.screen_vision import config as sv_config
-from core.screen_vision.config import (
+from screen_vision import config as sv_config
+from screen_vision.config import (
     ROUTING_FAST,
     ROUTING_RESILIENT,
     build_reasoning_provider,
@@ -19,13 +19,13 @@ from core.screen_vision.config import (
     get_vision_provider_order,
     normalize_routing_mode,
 )
-from core.screen_vision.failover import FailoverReasoningProvider, FailoverVisionProvider
-from core.screen_vision.models import ScreenFrame, ScreenObservation
-from core.screen_vision.provider_errors import (
+from screen_vision.failover import FailoverReasoningProvider, FailoverVisionProvider
+from screen_vision.models import ScreenFrame, ScreenObservation
+from screen_vision.provider_errors import (
     ProviderHTTPError,
     VisionTemporarilyUnavailable,
 )
-from core.screen_vision.service import ScreenVisionService
+from screen_vision.service import ScreenVisionService
 
 
 def _frame():
@@ -208,7 +208,7 @@ def test_l_non_transient_does_not_fallback():
 
 
 def test_m_open_breaker_skips_primary():
-    from core.screen_vision.circuit_breaker import CircuitBreaker
+    from screen_vision.circuit_breaker import CircuitBreaker
 
     class Clock:
         def __init__(self):
@@ -231,7 +231,7 @@ def test_m_open_breaker_skips_primary():
 
 def test_n_switching_mode_keeps_breaker():
     """Switching routing reuses the shared breaker (no reset)."""
-    from core.screen_vision.circuit_breaker import CircuitBreaker
+    from screen_vision.circuit_breaker import CircuitBreaker
 
     class Clock:
         def __init__(self):
@@ -266,14 +266,14 @@ def test_n_switching_mode_keeps_breaker():
 
 
 def test_o_ordinary_chat_zero_capture():
-    from core.screen_vision.trigger import is_explicit_screen_vision_request
+    from screen_vision.trigger import is_explicit_screen_vision_request
 
     assert not is_explicit_screen_vision_request("今天怎么样")
 
 
 def test_p_reasoning_text_only():
     """Both modes keep reasoning text-only; no image data."""
-    from core.screen_vision.brain.base import assert_text_only_payload
+    from screen_vision.brain.base import assert_text_only_payload
 
     with pytest.raises(ValueError):
         assert_text_only_payload({"scene_summary": "s", "image_bytes": b"x"})

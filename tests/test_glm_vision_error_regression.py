@@ -17,17 +17,17 @@ import providers.base as pbase
 import providers.base
 from providers.zhipu_glm import ZhipuGLMProvider
 
-from core.screen_vision import foreground_tracker as ft_module
-from core.screen_vision.foreground_tracker import ForegroundContextTracker
-from core.screen_vision.failover import FailoverVisionProvider
-from core.screen_vision.models import ScreenFrame, ScreenObservation
-from core.screen_vision.provider_errors import (
+from screen_vision import foreground_tracker as ft_module
+from screen_vision.foreground_tracker import ForegroundContextTracker
+from screen_vision.failover import FailoverVisionProvider
+from screen_vision.models import ScreenFrame, ScreenObservation
+from screen_vision.provider_errors import (
     ProviderHTTPError,
     VisionTemporarilyUnavailable,
 )
-from core.screen_vision.vision import glm_vision
-from core.screen_vision.vision.glm_vision import GlmVisionProvider
-from core.screen_vision.vision.qwen_vision import QwenVisionProvider
+from screen_vision.vision import glm_vision
+from screen_vision.vision.glm_vision import GlmVisionProvider
+from screen_vision.vision.qwen_vision import QwenVisionProvider
 
 
 def _frame():
@@ -140,7 +140,7 @@ def test_companion_phrases_pass_the_explicit_gate():
     """Second real gap found during reproduction: "看看这个聊天框" passed the
     target resolver but was rejected by the explicit-look gate, so scenario 3
     never captured anything."""
-    from core.screen_vision.trigger import (
+    from screen_vision.trigger import (
     is_explicit_screen_vision_request,
     resolve_capture_target,
 )
@@ -153,7 +153,7 @@ def test_companion_phrases_pass_the_explicit_gate():
 def test_degenerate_sliver_crop_is_rejected():
     """Third real gap: an 8x1080 crop sliver of an off-screen window was
     returned as a "screenshot". Degenerate crops must fall back instead."""
-    from core.screen_vision.screen.capture import _crop_rect_for_rect
+    from screen_vision.screen.capture import _crop_rect_for_rect
 
     class Screen:
         devicePixelRatio = lambda self: 1.0  # noqa: E731

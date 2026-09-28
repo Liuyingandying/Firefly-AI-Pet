@@ -14,7 +14,7 @@ import logging
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from core.screen_vision.models import ScreenFrame
+from screen_vision.models import ScreenFrame
 
 log = logging.getLogger("firefly.pdf_visual_region")
 
@@ -65,7 +65,7 @@ class PdfVisualRegionWorker(QObject):
 
     @staticmethod
     def _default_provider():
-        from core.screen_vision.config import get_fast_direct_provider
+        from screen_vision.config import get_fast_direct_provider
 
         return get_fast_direct_provider()
 

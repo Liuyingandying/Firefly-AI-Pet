@@ -20,7 +20,7 @@ from PySide6.QtCore import Qt, QObject, QTimer, Signal
 
 from core.pdf_viewport_context import PdfViewportContextBuilder, frame_fingerprint
 try:  # 视觉插件未安装时降级：窗口追踪退化为仅标题判断
-    from core.screen_vision.foreground_tracker import (
+    from screen_vision.foreground_tracker import (
         get_foreground_hwnd,
         is_firefly_hwnd,
     )
@@ -109,7 +109,7 @@ class PdfViewportWatcher(QObject):
 
     @staticmethod
     def _default_capture():
-        from core.screen_vision.screen.capture import ScreenCaptureService
+        from screen_vision.screen.capture import ScreenCaptureService
 
         return ScreenCaptureService().capture_last_non_firefly_window()
 

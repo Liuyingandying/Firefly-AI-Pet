@@ -19,12 +19,12 @@ from datetime import datetime
 
 import pytest
 
-from core.screen_vision.models import (
+from screen_vision.models import (
     ScreenFrame,
     ScreenObservation,
     ScreenVisionResult,
 )
-from core.screen_vision.trigger import (
+from screen_vision.trigger import (
     format_screen_vision_context,
     is_explicit_screen_vision_request,
     is_look_command,
@@ -114,7 +114,7 @@ def _make_runner(capture, service=None) -> tuple[CharacterConversationRunner, Fa
     runtime = FakeRuntime()
     vision = FakeVision()
     reasoning = FakeReasoning()
-    from core.screen_vision.service import ScreenVisionService
+    from screen_vision.service import ScreenVisionService
 
     svc = service or ScreenVisionService(vision, reasoning, capture)
     runner = CharacterConversationRunner(runtime=runtime, screen_vision_service=svc)

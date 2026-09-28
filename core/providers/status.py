@@ -114,7 +114,7 @@ class ProviderStatusService:
             statuses.append(self._api_status(spec, ROLE_PRIMARY if rank == 0 else ROLE_FALLBACK, rank))
 
         # Vision: order comes from the screen-vision config.
-        from core.screen_vision.config import get_vision_provider_order
+        from screen_vision.config import get_vision_provider_order
 
         for rank, registry_name in enumerate(get_vision_provider_order("fast")):
             spec_id = _REGISTRY_TO_CATALOG[registry_name]
@@ -124,7 +124,7 @@ class ProviderStatusService:
             statuses.append(self._api_status(spec, ROLE_PRIMARY if rank == 0 else ROLE_FALLBACK, rank))
 
         # Reasoning: same source as vision config.
-        from core.screen_vision.config import get_reasoning_provider_order
+        from screen_vision.config import get_reasoning_provider_order
 
         for rank, registry_name in enumerate(get_reasoning_provider_order("fast")):
             spec_id = _REGISTRY_TO_CATALOG[registry_name]

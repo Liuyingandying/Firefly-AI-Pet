@@ -24,8 +24,8 @@ from __future__ import annotations
 import struct
 from datetime import datetime
 
-from core.screen_vision.models import ScreenFrame
-from core.screen_vision.vision.base import VisionProvider
+from screen_vision.models import ScreenFrame
+from screen_vision.vision.base import VisionProvider
 
 VIDEO_VISION_INSTRUCTION = """你是视频关键帧视觉描述模块。
 只描述这一帧画面中真实可见的内容，不要猜测看不清的部分。

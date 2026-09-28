@@ -150,7 +150,7 @@ def test_focus_requested_on_input(qapp, monkeypatch):
 
 
 def test_ask_triggers_zero_looks(qapp, monkeypatch):
-    from core.screen_vision.service import ScreenVisionService
+    from screen_vision.service import ScreenVisionService
     from ui.companion_chat_window import CompanionChatWindow
 
     def forbid(self, *args, **kwargs):

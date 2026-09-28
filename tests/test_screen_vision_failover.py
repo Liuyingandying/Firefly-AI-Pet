@@ -7,12 +7,12 @@ for real once GLM credentials are configured).
 
 import pytest
 
-from core.screen_vision.circuit_breaker import CircuitBreaker
-from core.screen_vision.failover import (
+from screen_vision.circuit_breaker import CircuitBreaker
+from screen_vision.failover import (
     FailoverReasoningProvider,
     FailoverVisionProvider,
 )
-from core.screen_vision.provider_errors import (
+from screen_vision.provider_errors import (
     ProviderError,
     ProviderHTTPError,
     VisionTemporarilyUnavailable,
@@ -20,7 +20,7 @@ from core.screen_vision.provider_errors import (
     ProviderSchemaError,
     is_transient,
 )
-from core.screen_vision.service import ScreenVisionService
+from screen_vision.service import ScreenVisionService
 
 
 class FakeFrameSource:
@@ -36,7 +36,7 @@ class FakeCapture:
         self.calls = []
 
     def capture_primary_screen(self, **kwargs):
-        from core.screen_vision.models import ScreenFrame
+        from screen_vision.models import ScreenFrame
         from datetime import datetime
 
         self.calls.append("primary")
@@ -58,7 +58,7 @@ class FakeVision:
         self.calls += 1
         if self._error is not None:
             raise self._error
-        from core.screen_vision.models import ScreenObservation
+        from screen_vision.models import ScreenObservation
 
         return ScreenObservation(scene_summary="primary scene")
 
@@ -90,7 +90,7 @@ class FallbackVision:
         self.calls += 1
         if self._error is not None:
             raise self._error
-        from core.screen_vision.models import ScreenObservation
+        from screen_vision.models import ScreenObservation
 
         return ScreenObservation(scene_summary="fallback scene")
 
@@ -276,7 +276,7 @@ def test_j_breaker_allows_probe_after_cooldown():
     clock.now += 61.0
     assert provider.inspect(_frame()) == "primary scene" or True
     result = provider.inspect(_frame())
-    from core.screen_vision.models import ScreenObservation
+    from screen_vision.models import ScreenObservation
 
     assert isinstance(result, ScreenObservation)
     assert not breaker.is_open
@@ -313,7 +313,7 @@ def test_j2_no_fallback_short_circuits_without_waiting():
 
 def test_k_service_no_capture_without_look(monkeypatch):
     captured = []
-    from core.screen_vision.screen import capture as capture_module
+    from screen_vision.screen import capture as capture_module
 
     original = capture_module.ScreenCaptureService.capture_primary_screen
 

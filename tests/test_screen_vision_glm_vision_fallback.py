@@ -7,9 +7,9 @@ credential source, image transport, schema compatibility, and privacy.
 
 import pytest
 
-from core.screen_vision.models import ScreenFrame, ScreenObservation
-from core.screen_vision.vision import glm_vision
-from core.screen_vision.vision.glm_vision import (
+from screen_vision.models import ScreenFrame, ScreenObservation
+from screen_vision.vision import glm_vision
+from screen_vision.vision.glm_vision import (
     DEFAULT_GLM_VISION_MODEL,
     FORBIDDEN_VISION_MODELS,
     GlmVisionProvider,
@@ -111,7 +111,7 @@ def test_j_glm_vision_never_writes_to_disk(monkeypatch):
 def test_tj_u_and_glm_observations_share_schema():
     """TJU and GLM paths both funnel through to_observation -> identical
     ScreenObservation field set, so downstream layers are model-agnostic."""
-    from core.screen_vision.vision.qwen_vision import to_observation
+    from screen_vision.vision.qwen_vision import to_observation
 
     via_tju = to_observation({"scene_summary": "s", "visible_text": ["a"]})
     via_glm = to_observation({"scene_summary": "s", "visible_text": ["a"]})
@@ -121,7 +121,7 @@ def test_tj_u_and_glm_observations_share_schema():
 
 def test_reasoning_route_untouched():
     """The reasoning fallback stays glm-4.7-flash TEXT_ONLY."""
-    from core.screen_vision.brain.glm_reasoning import GlmReasoningProvider
+    from screen_vision.brain.glm_reasoning import GlmReasoningProvider
 
     provider = GlmReasoningProvider(provider=ZhipuGLMProvider(api_key="k"))
     assert provider.model == "glm-4.7-flash"  # unchanged by the vision work

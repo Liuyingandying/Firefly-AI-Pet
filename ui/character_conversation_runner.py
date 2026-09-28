@@ -26,7 +26,7 @@ def _vision_mod(name: str):
     try:
         from importlib import import_module
 
-        return import_module(f"core.screen_vision.{name}")
+        return import_module(f"screen_vision.{name}")
     except ImportError:
         return None
 
@@ -477,7 +477,7 @@ class CharacterConversationRunner(QObject):
         configuration must not break Firefly startup, only the look request.
         """
         if self._screen_vision_service is None:
-            from core.screen_vision.service import ScreenVisionService
+            from screen_vision.service import ScreenVisionService
 
             self._screen_vision_service = ScreenVisionService(
                 settings=self._screen_vision_settings
@@ -802,7 +802,7 @@ class CharacterConversationRunner(QObject):
         """The shared FAST one-shot vision provider — TJU-Qwen (lazily;
         injectable)."""
         if self._attachment_vision_provider is None:
-            from core.screen_vision.config import get_fast_direct_provider
+            from screen_vision.config import get_fast_direct_provider
 
             self._attachment_vision_provider = get_fast_direct_provider()
         return self._attachment_vision_provider
@@ -1901,12 +1901,12 @@ class CharacterConversationRunner(QObject):
                     capture_mode=capture_mode,
                 )
             except Exception as exc:  # vision failure must not crash the turn
-                from core.screen_vision.provider_errors import (
+                from screen_vision.provider_errors import (
                     ReasoningTemporarilyUnavailable,
                     VisionTemporarilyUnavailable,
                 )
 
-                from core.screen_vision.safety import sanitize_error_text
+                from screen_vision.safety import sanitize_error_text
 
                 logger.warning(
                     "%s vision look failed: %s: %s",
@@ -1915,7 +1915,7 @@ class CharacterConversationRunner(QObject):
                     sanitize_error_text(str(exc)),
                 )
                 if is_camera:
-                    from core.screen_vision.screen.camera import CameraUnavailableError
+                    from screen_vision.screen.camera import CameraUnavailableError
 
                     if isinstance(exc, CameraUnavailableError):
                         answer = CAMERA_VISION_UNAVAILABLE_REPLY
@@ -2230,7 +2230,7 @@ def _chat_answer(response: Any) -> str:
 def _attachment_failure_label(exc: Exception) -> str:
     """Secret-free failure label for the user-facing attachment error."""
     try:
-        from core.screen_vision.provider_errors import classify_provider_exception
+        from screen_vision.provider_errors import classify_provider_exception
 
         classified = classify_provider_exception(exc)
         return getattr(classified, "failure_type", type(exc).__name__)

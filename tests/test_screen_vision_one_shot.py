@@ -9,17 +9,17 @@ import pytest
 import requests
 from PySide6.QtGui import QImage
 
-from core.screen_vision.circuit_breaker import CircuitBreaker
-from core.screen_vision.failover import FailoverReasoningProvider, FailoverVisionProvider
-from core.screen_vision.models import ScreenFrame, ScreenObservation, ScreenVisionResult
-from core.screen_vision.provider_errors import (
+from screen_vision.circuit_breaker import CircuitBreaker
+from screen_vision.failover import FailoverReasoningProvider, FailoverVisionProvider
+from screen_vision.models import ScreenFrame, ScreenObservation, ScreenVisionResult
+from screen_vision.provider_errors import (
     EmptyProviderResponse,
     ProviderHTTPError,
     ProviderNetworkError,
 )
-from core.screen_vision.screen.capture import _encode_pixmap
-from core.screen_vision.service import ScreenVisionService
-from core.screen_vision.vision.deepseek_vision import (
+from screen_vision.screen.capture import _encode_pixmap
+from screen_vision.service import ScreenVisionService
+from screen_vision.vision.deepseek_vision import (
     DEFAULT_DIRECT_STYLE_CONTEXT,
     DeepSeekVisionProvider,
     build_direct_messages,
