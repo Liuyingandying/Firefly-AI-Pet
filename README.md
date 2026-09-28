@@ -121,16 +121,19 @@ flowchart TB
 
 ## Demo 展示
 
-以下截图来自既有演示材料，具体运行前提见 [DESIGN.md](DESIGN.md)。
+这些是项目已有的界面截图，用于展示交互入口；它们不代表本轮已完成新目录运行或外部服务验收。模型、摄像头和校园检索的使用条件见 [技术设计](DESIGN.md)。
 
-| 场景 | 截图 |
-|---|---|
-| 桌面宠物 + 控制台 | [查看](screenshots/01-main-interface.png) |
-| AI 模型管理窗口 | [查看](screenshots/08-model-settings.png) |
-| 屏幕视觉 | [查看](screenshots/03-screen-vision.png) |
-| 信息检索 | [查看](screenshots/09-information-retrieval.png) |
-| Memory 边界（显式记忆 vs 普通聊天） | *待补充* |
-| 文档阅读 + OCR | *待补充* |
+| 桌面伙伴与对话 | 模型设置 |
+|:---:|:---:|
+| ![桌宠与对话控制台](screenshots/01-main-interface.png) | ![AI 模型管理窗口](screenshots/08-model-settings.png) |
+| 从桌宠、托盘和控制台进入对话。 | 在本机配置可用 Provider；截图不展示密钥明文。 |
+
+| 视频阅读入口 | 屏幕视觉入口 |
+|:---:|:---:|
+| ![视频阅读界面](screenshots/02-video-reading.png) | ![屏幕视觉界面](screenshots/03-screen-vision.png) |
+| 本地视频和 B站服务有各自的安装前提。 | 画面处理需要用户触发及可用视觉 Provider。 |
+
+[查看全部 12 张既有演示截图](screenshots/)。
 
 ## 快速开始
 
@@ -183,26 +186,17 @@ python -m venv .venv
 
 ## 项目结构
 
-```text
-Firefly_AI_Pet/
-├── app.py                 # 应用入口与组合根
-├── core/                  # 运行时核心（会话/路由/凭据/学习/文档/视觉）
-│   ├── ai_router.py       #   Provider 回退路由
-│   ├── credential_store.py#   本机凭据库
-│   ├── provider_manager.py#   模型状态查询层
-│   ├── learning/          #   学习模式子系统
-│   └── screen_vision/     #   屏幕/摄像头视觉
-├── ui/                    # PySide6 界面（控制台/托盘/弹窗/管理窗口）
-├── memory/                # 记忆系统（服务/存储/建议/边界守卫）
-├── providers/             # 模型适配器（TJU/智谱/DeepSeek）
-├── character/             # 流萤角色设定
-├── voice_client/          # 语音播报客户端（可选）
-├── packaging/             # 打包定义与发布验证脚本
-├── extensions/            # 浏览器扩展（PageLens）
-├── config/                # 默认配置模板
-├── tests/                 # 测试套件
-└── docs/                  # 设计与发布文档
-```
+从入口到可选能力，代码分为四层：
+
+| 层次 | 主要位置 | 评委可以看到什么 |
+|---|---|---|
+| 交互入口 | `app.py`、`ui/`、`character/` | 桌宠、托盘、对话、角色与状态界面 |
+| 核心运行 | `core/`、`memory/`、`providers/` | 会话与上下文、任务分流、记忆边界、模型路由 |
+| 可选能力 | `plugins/`、`extensions/pagelens_bridge/`、`voice_client/` | 九个受管插件入口、浏览器桥接与语音客户端 |
+| 独立服务 | `optional_services/` | B站 JSONL 服务、语音 HTTP 服务的补充源码；部署与权重另配 |
+| 交付与证据 | `packaging/`、`tests/`、`docs/`、`screenshots/` | 构建、测试、设计记录与演示画面 |
+
+详细模块关系和调用链见 [DESIGN.md](DESIGN.md)。
 
 ## Roadmap
 
