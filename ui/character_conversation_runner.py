@@ -21,17 +21,21 @@ from core.agent_events import (
 from core.runtime_bus import CameraObservedEvent, RuntimeEvent
 from core.conversation_runtime import ConversationRuntime
 from core.conversation_store import ConversationStore
-from core.screen_vision.trigger import (
-    format_screen_vision_context,
-    is_camera_vision_request,
-    is_explicit_screen_vision_request,
-    is_look_command,
-    resolve_capture_target,
-    screen_vision_question,
-)
-from core.screen_vision.vision.deepseek_vision import (
-    DEFAULT_DIRECT_STYLE_CONTEXT as DEFAULT_ATTACHMENT_STYLE_CONTEXT,
-)
+def _vision_mod(name: str):
+    """按需导入 vision 插件子模块；未安装返回 None（零插件可启动）。"""
+    try:
+        from importlib import import_module
+
+        return import_module(f"core.screen_vision.{name}")
+    except ImportError:
+        return None
+
+
+def _vision_style_context():
+    """附件视觉的语气上下文；vision 插件缺失时返回 None。"""
+    m = _vision_mod("vision.deepseek_vision")
+    return getattr(m, "DEFAULT_DIRECT_STYLE_CONTEXT", None)
+_DEFAULT_ATTACHMENT_STYLE_CONTEXT_GONE = True  # 附件语气上下文经 _vision_style_context() 惰性获取
 from ui.companion_attachment import (
     DEFAULT_ATTACHMENT_QUESTION,
     DEFAULT_DOCUMENT_QUESTION,
@@ -722,7 +726,7 @@ class CharacterConversationRunner(QObject):
             answer = provider.answer_direct(
                 frame,
                 effective_question,
-                style_context=DEFAULT_ATTACHMENT_STYLE_CONTEXT,
+                style_context=_vision_style_context(),
             )
         except Exception as exc:
             vision_ms = (time.perf_counter() - vision_started) * 1000
@@ -1873,8 +1877,12 @@ class CharacterConversationRunner(QObject):
                 AgentEventType.FINAL,
                 text=answer,
             )], answer
-        if (is_look_command(text) or is_explicit_screen_vision_request(text)
-                or camera_request):
+        _vision_trigger = _vision_mod("trigger")
+        _vision_gate = (bool(_vision_trigger) and
+                        (_vision_trigger.is_look_command(text)
+                         or _vision_trigger.is_explicit_screen_vision_request(text))
+                        or camera_request)
+        if _vision_gate:
             self.agent_event.emit(
                 AgentEvent.make(
                     self.AGENT_ID,
@@ -1882,12 +1890,13 @@ class CharacterConversationRunner(QObject):
                     status=STATUS_READING,
                 )
             )
-            capture_mode = resolve_capture_target(screen_vision_question(text))
+            capture_mode = _vision_trigger.resolve_capture_target(
+                _vision_trigger.screen_vision_question(text))
             is_camera = capture_mode == "camera"
             try:
                 self._camera_trace("T1_worker_entering_vision_look", f"mode={capture_mode}")
                 result = self._get_screen_vision_service().look(
-                    screen_vision_question(text),
+                    _vision_trigger.screen_vision_question(text),
                     capture_mode=capture_mode,
                 )
             except Exception as exc:  # vision failure must not crash the turn
@@ -1986,7 +1995,8 @@ class CharacterConversationRunner(QObject):
                     AgentEventType.FINAL,
                     text=answer,
                 )], answer
-            turn_context = format_screen_vision_context(result)
+            _trigger_m = _vision_mod("trigger")
+            turn_context = _trigger_m.format_screen_vision_context(result) if _trigger_m else None
 
         if (turn_context is None and self._session_video is not None
                 and vs_mod.is_video_followup(text)
