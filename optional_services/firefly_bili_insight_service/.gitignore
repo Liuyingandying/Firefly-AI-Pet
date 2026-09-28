@@ -1,0 +1,9 @@
+# 登录态与本地数据——绝不提交
+.env
+data/
+*.log
+
+# Python
+__pycache__/
+.venv/
+venv/

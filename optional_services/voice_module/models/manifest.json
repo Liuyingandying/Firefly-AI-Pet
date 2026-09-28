@@ -1,0 +1,65 @@
+{
+  "_comment": "Model asset manifest - the model binaries are NOT in this repository (license gate). Place each file at its target_path (relative to the voice_module root) and verify sha256 before first start. If a required model is missing the service refuses to start loudly (see README Troubleshooting); it never degrades silently.",
+  "models": [
+    {
+      "name": "firefly-chinese.pth",
+      "type": "rvc_voice_model",
+      "target_path": "models/firefly/firefly-chinese.pth",
+      "size_bytes": 55227813,
+      "sha256": "f59e5cb51343c84a412bc9f82397563e9c33380c5372d1f0b4b1b84579ae8ca3",
+      "required": true,
+      "source": "https://huggingface.co/Waterwzy/RVC-firefly-finetuning",
+      "license": "AGPL-3.0",
+      "redistributable": "UNKNOWN_DO_NOT_PUBLISH",
+      "acquisition": "Download from https://huggingface.co/Waterwzy/RVC-firefly-finetuning (pth + index must come from the same repo). The character voice is (c) HoYoverse / miHoYo - AGPL-3.0 applies to the weights and the voice derives from a copyrighted game character: do NOT re-upload to any git hosting."
+    },
+    {
+      "name": "firefly-chinese_v2.index",
+      "type": "rvc_feature_index",
+      "target_path": "models/firefly/firefly-chinese_v2.index",
+      "size_bytes": 31588619,
+      "sha256": "4b708b783ebbf1aae24a138e778387982fa02946c7460e0b7820079405c501fd",
+      "required": true,
+      "source": "https://huggingface.co/Waterwzy/RVC-firefly-finetuning",
+      "license": "AGPL-3.0",
+      "redistributable": "UNKNOWN_DO_NOT_PUBLISH",
+      "acquisition": "Same repository as the .pth - always fetch the pair together."
+    },
+    {
+      "name": "hubert_base.pt",
+      "type": "hubert_feature_extractor",
+      "target_path": "models/hubert_base.pt",
+      "size_bytes": 189507909,
+      "sha256": "f54b40fd2802423a5643779c4861af1e9ee9c1564dc9d32f54f20b5ffba7db96",
+      "required": true,
+      "source": "https://huggingface.co/lj1995/VoiceConversionWebUI",
+      "license": "weights distributed with the RVC project (code MIT); no standalone weight license",
+      "redistributable": "DOWNLOAD_ONLY",
+      "acquisition": "Download hubert_base.pt from the official RVC assets at https://huggingface.co/lj1995/VoiceConversionWebUI."
+    },
+    {
+      "name": "rmvpe.pt",
+      "type": "f0_extractor",
+      "target_path": "models/rmvpe.pt",
+      "size_bytes": 181184272,
+      "sha256": "6d62215f4306e3ca278246188607209f09af3dc77ed4232efdd069798c4ec193",
+      "required": true,
+      "source": "https://huggingface.co/lj1995/VoiceConversionWebUI",
+      "license": "weights distributed with the RVC project (code MIT); no standalone weight license",
+      "redistributable": "DOWNLOAD_ONLY",
+      "acquisition": "Download rmvpe.pt from the official RVC assets at https://huggingface.co/lj1995/VoiceConversionWebUI."
+    },
+    {
+      "name": "reference_audio (examples/*.wav)",
+      "type": "private_reference_audio",
+      "target_path": "(not shipped - demo corpus only)",
+      "size_bytes": 4427712,
+      "sha256": null,
+      "required": false,
+      "source": "author-provided private audio",
+      "license": "private asset",
+      "redistributable": "UNKNOWN_DO_NOT_PUBLISH",
+      "acquisition": "Not required to run the service. The inference pipeline never reads these files."
+    }
+  ]
+}

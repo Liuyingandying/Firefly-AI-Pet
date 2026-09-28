@@ -1,0 +1,38 @@
+# ============================================================
+# Firefly 情绪语音参数表 (v1.1)
+# Emotion → TTS参数(speed/volume) → RVC(pitch) → 后处理(energy)
+#
+# speed : TTS 语速倍率 (edge-tts rate = ±N%)
+# pitch : RVC 变调半音 (流萤输出音高偏移, 正=更高)
+# energy: 输出能量增益 (峰值限幅保护, 1.0=不变)
+# volume: edge-tts 音量 (dB 增减, 可省略)
+# ============================================================
+
+neutral:
+  speed: 1.0
+  pitch: 0
+  energy: 1.0
+
+happy:
+  speed: 1.1
+  pitch: 3
+  energy: 1.1
+  volume: "+0%"
+
+excited:
+  speed: 1.15
+  pitch: 4
+  energy: 1.2
+  volume: "+10%"
+
+comfort:
+  speed: 0.95
+  pitch: 1
+  energy: 0.8
+  volume: "-5%"
+
+sad:
+  speed: 0.85
+  pitch: -2
+  energy: 0.7
+  volume: "-10%"

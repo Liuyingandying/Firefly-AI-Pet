@@ -1,0 +1,32 @@
+# ============================================================
+# Firefly Voice Module 配置
+# 当前引擎: RVC (Retrieval-based Voice Conversion, MIT)
+# ============================================================
+
+engine:
+  # 推理设备: "auto" (有GPU用cuda:0/fp16, 否则CPU/fp32) | "cuda:0" | "cpu"
+  device: auto
+  # RVC 推理引擎目录 (官方仓库快照, MIT License)
+  engine_root: vendor/Retrieval-based-Voice-Conversion-WebUI-main
+  # rmvpe.pt 所在目录 (F0 提取模型)
+  rmvpe_root: models
+  # 响音高方法: rmvpe (推荐, GPU) | pm (parsemouth, CPU快但糙)
+  f0_method: rmvpe
+
+# 说话人注册表: convert_voice(speaker_model=<name>) 中的 name 在这里定义
+speakers:
+  firefly:
+    display_name: "流萤 (Firefly)"
+    model: models/firefly/firefly-chinese.pth
+    index: models/firefly/firefly-chinese_v2.index
+    # 检索特征混合比例 (0=不用index, 0.75=官方推荐)
+    index_rate: 0.75
+    # 默认变调(半音). 流萤音高较高, 男声→流萤 可试 +12
+    f0_up_key: 0
+    rms_mix_rate: 1.0
+    protect: 0.33
+    resample_sr: 0        # 0=跟随模型采样率(40kHz)
+
+service:
+  host: 127.0.0.1
+  port: 8300

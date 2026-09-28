@@ -6,9 +6,10 @@
 ![Platform](https://img.shields.io/badge/Windows-10%2F11%20x64-0078D6?logo=windows&logoColor=white)
 [![Release](https://img.shields.io/badge/Release-v1.0--rc2-0064D6)](../../releases)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
-![CI](https://img.shields.io/badge/CI-Python%20Tests-passing-2EA44F)
 
 > 天津大学 AI Agent 创新赛参赛项目 · agent2026-firefly-agent
+
+技术赛道材料：[技术设计](DESIGN.md) · [演示截图](screenshots/) · [版权合规承诺书](版权合规承诺书.docx)。`plugins/` 是当前宿主纳管的插件源码；`optional_services/` 收录可选的语音与 B站服务源码。演示截图来自既有材料，本轮尚未完成独立新目录 GUI 验收。
 
 ---
 
@@ -120,17 +121,16 @@ flowchart TB
 
 ## Demo 展示
 
-> 以下截图位（对应 `docs/screenshots/`，随版本提交更新）
+以下截图来自既有演示材料，具体运行前提见 [DESIGN.md](DESIGN.md)。
 
-| 场景 | 截图位 |
+| 场景 | 截图 |
 |---|---|
-| 桌面宠物 + 控制台 | `docs/screenshots/desktop-companion.png` |
-| AI 模型管理窗口（密钥增删改） | `docs/screenshots/provider_manager_window_rc2.png` |
-| 设置入口（AI STATUS 状态总览） | `docs/screenshots/provider_settings_entry_rc2.png` |
+| 桌面宠物 + 控制台 | [查看](screenshots/01-main-interface.png) |
+| AI 模型管理窗口 | [查看](screenshots/08-model-settings.png) |
+| 屏幕视觉 | [查看](screenshots/03-screen-vision.png) |
+| 信息检索 | [查看](screenshots/09-information-retrieval.png) |
 | Memory 边界（显式记忆 vs 普通聊天） | *待补充* |
 | 文档阅读 + OCR | *待补充* |
-
-<!-- 截图文件随版本提交后自动显示；未提交前此处为占位说明 -->
 
 ## 快速开始
 

@@ -1,0 +1,61 @@
+# ============================================================
+# Firefly Voice Module dependencies (Python 3.10, Windows)
+#
+# Versions = exact pins from the verified golden environment
+# (end-to-end validated 2026-09-26: edge-tts -> RVC -> sounddevice).
+#
+# TWO-STEP INSTALL - do NOT skip step 1:
+#
+#   Step 1 - GPU torch (special CUDA wheel index; torch==2.5.1 alone from
+#            PyPI would give you the CPU build):
+#     pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+#     (cu121 ships the CUDA 12.1 runtime inside the wheel; NVIDIA driver
+#      >= 531.14 is enough - no separate CUDA Toolkit install needed)
+#
+#   Step 2 - everything else:
+#     pip install -r requirements.txt
+#
+# torch/torchaudio are INTENTIONALLY commented out below so that step 2
+# can never downgrade/replace your cu121 wheels (PyPI has no +cu121 local
+# versions - an uncommented line would hard-fail or silently swap builds).
+# ============================================================
+
+# ---- deep learning core (installed by step 1; pinned here for reference) ----
+# torch==2.5.1+cu121            # step 1
+# torchaudio==2.5.1+cu121       # step 1
+transformers==4.49.0          # RVC loads HuBERT in transformers format (no fairseq)
+
+# ---- numeric / audio ----
+numpy==1.26.4                 # do NOT use numpy>=2 (torch 2.5.1 binaries are incompatible)
+scipy==1.15.3
+librosa==0.10.2.post1
+soundfile==0.14.0
+sounddevice==0.5.6            # AudioQueue 真实播放
+praat-parselmouth==0.4.7      # f0-method=pm 时使用 (rmvpe 为主方法)
+
+# ---- RVC 检索/引擎 ----
+faiss-cpu==1.15.0
+einops==0.8.2                 # 审计: 当前代码零引用, 保留仅因上游快照文档要求; 可注释省装
+scikit-learn==1.7.2           # 仅 vendor train/train_index.py (重建 index) 需要, 推理不需要
+
+# ---- 服务层 ----
+fastapi==0.141.1
+uvicorn==0.53.0
+python-multipart==0.0.32      # /voice/convert、/voice/tts_convert 的 UploadFile/Form 必需
+httpx==0.28.1
+pydantic==2.13.5
+
+# ---- TTS ----
+edge-tts==7.2.8               # speak 管道云端 TTS (免 key, 依赖微软服务可达性)
+
+# ---- 音频解码 (RVC infer/audio.py 依赖) ----
+ffmpeg-python==0.2.0          # 需要 PATH 上有 ffmpeg/ffprobe 可执行文件 (winget install Gyan.FFmpeg)
+av==17.1.0
+
+# ============================================================
+# 审计结论（import AST 扫描, 2026-09-26）:
+# - gradio / matplotlib: 仅 vendor webui.py / train/utils.py 引用,
+#   服务运行路径 (api→core→infer.vc) 不触及, Golden 环境也未安装 → 不列入。
+# - einops: 全仓零 import, 原 requirements 列表冗余, 保留可选。
+# - requests: 零 import (客户端走 httpx) → 不列入。
+# ============================================================

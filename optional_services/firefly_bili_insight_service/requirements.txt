@@ -1,0 +1,11 @@
+# 最小直接依赖：服务层（metadata / transcribe / frame）所需。
+# 刻意不包含上游 BiliInsight 的其余依赖：
+#   claude-agent-sdk / chromadb / openai / anthropic / litellm / sqlalchemy 等。
+# 实测组合：Python 3.13.9（2026-09-26 四 action 全过）。
+bilibili-api-python==17.4.2
+faster-whisper>=1.2.1
+httpx>=0.27.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+pyyaml>=6.0.0

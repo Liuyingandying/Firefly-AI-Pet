@@ -1,0 +1,65 @@
+# ============================================================
+# Firefly Emotion Expression Layer (v1.4) — 角色语气模板
+#
+# 输入: LLM 回复携带 emotion / intensity / speaking_style
+# 输出: ExpressionPlan → sentence pause / punctuation / speed / pitch / energy
+#
+# intensity: 0.0~1.0, 缩放各参数的偏移量 (0.5=标准, 越大越夸张)
+# speaking_style: 说话风格系数 (firefly=默认, 可扩展)
+#
+# 原则: 只动表达, 不动内容 —— 标点仅映射句尾终止符, 不改词。
+# ============================================================
+
+# intensity → 偏移缩放系数 (线性: 0.5 为模板原值, 0/1 为收紧/放大)
+intensity_scale:
+  min: 0.55
+  max: 1.45
+
+# speaking_style 说话风格系数 (与模板参数相乘)
+styles:
+  firefly:
+    speed: 1.0
+    pitch: 0
+    energy: 1.0
+  gentle:            # 更轻更柔 (适合安慰/害羞的收敛表达)
+    speed: 0.97
+    pitch: -1
+    energy: 0.95
+
+templates:
+  # 温柔安抚: 慢、微升调、能量收敛、句尾拉长、句间长停顿
+  comfort:
+    speed: 0.95
+    pitch: 1
+    energy: 0.8
+    volume: "-5%"
+    pause_ms: 420
+    tail_punct: { "。": "……", "！": "……", "？": "……？" }
+    mid_pause_punct: "，"
+
+  # 开心明亮: 快、升调、能量足、句尾有力、句间短停顿
+  happy:
+    speed: 1.1
+    pitch: 3
+    energy: 1.1
+    volume: "+0%"
+    pause_ms: 90
+    tail_punct: { "。": "！", "？": "！", "…": "！" }
+
+  # 担忧: 低、慢、能量弱、句尾迟疑拖音、句间长停顿
+  worried:
+    speed: 0.9
+    pitch: -2
+    energy: 0.75
+    volume: "-8%"
+    pause_ms: 400
+    tail_punct: { "。": "……", "！": "……", "？": "……？" }
+
+  # 害羞: 慢、音高偏高但能量小、停顿琐碎 (欲言又止)、句尾拖音
+  shy:
+    speed: 0.92
+    pitch: 2
+    energy: 0.7
+    volume: "-8%"
+    pause_ms: 300
+    tail_punct: { "。": "……", "！": "……啦", "？": "……？" }

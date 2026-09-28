@@ -1,0 +1,9 @@
+# Firefly_BiliInsight_Service 配置（仅服务实际用到的部分）
+providers:
+  transcription:
+    type: local
+    model: small
+    extra:
+      device: cpu
+      compute_type: int8
+      language: zh
