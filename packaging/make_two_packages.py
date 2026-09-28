@@ -5,7 +5,7 @@ import shutil
 import zipfile
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent
+REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "dist" / "Firefly_AI_Pet_rc2"
 OUT = Path(r"C:\Users\LENOVO\Desktop\流萤")
 
@@ -31,15 +31,18 @@ NOTES = """【Plus 版插件说明】
 
 
 def copy_tree(src: Path, dst: Path, skip_dirs=("plugins",)):
+    """复制目录树；skip_dirs 只匹配**顶层**目录名。
+
+    绝不能按任意层级匹配：_internal\\PySide6\\plugins\\platforms\\ 是 Qt
+    平台插件本体，若按深层同名目录误跳过，经典版会直接
+    「no Qt platform plugin could be initialized」。
+    """
     dst.mkdir(parents=True, exist_ok=True)
     for root, dirs, files in os.walk(src):
         rel = Path(root).relative_to(src)
-        if any(part in skip_dirs for part in rel.parts):
+        if rel.parts and rel.parts[0] in skip_dirs:
             dirs[:] = []
             continue
-        for d in list(dirs):
-            if d in skip_dirs:
-                dirs.remove(d)
         (dst / rel).mkdir(parents=True, exist_ok=True)
         for f in files:
             shutil.copy2(Path(root) / f, dst / rel / f)
