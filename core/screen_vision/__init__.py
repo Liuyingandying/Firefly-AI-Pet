@@ -19,6 +19,12 @@ from pathlib import Path
 _SELF = Path(__file__).resolve().parent
 _IMPL = _SELF.parent.parent / "plugins" / "firefly_vision" / "screen_vision"
 __path__ = [str(_SELF)] + ([str(_IMPL)] if _IMPL.is_dir() else [])
+# 插件实现包的内部导入（from screen_vision.xxx import …）需要它的根目录
+# 在 sys.path 上——必须在任何子模块被导入前注册（app 启动早期的模块级
+# 导入就会触达这里）。
+_IMPL_ROOT = str(_IMPL.parent)
+if _IMPL.is_dir() and _IMPL_ROOT not in sys.path:
+    sys.path.insert(0, _IMPL_ROOT)
 
 
 def _available() -> bool:
