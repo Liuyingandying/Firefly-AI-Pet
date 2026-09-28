@@ -177,3 +177,5 @@ _fix_*.bat
 _diag_*.bat
 start_dev_log.ps1
 packaging/build_report.json
+_pkg_classic/
+_pkg_plus/
