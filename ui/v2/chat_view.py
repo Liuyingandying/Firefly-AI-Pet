@@ -508,9 +508,17 @@ class ChatView(QFrame):
         self._mode_chip.setText(text or "自由对话")
         self._mode_chip.setVisible(bool(text))
 
-    def set_status(self, text: str) -> None:
-        """AI 实时状态: 非空时显示三个跳动紫光点 + 文字提示."""
-        text = (text or "").strip()
+    def set_status(self, text) -> None:
+        """AI 实时状态: 非空时显示三个跳动紫光点 + 文字提示.
+
+        text 容错：宿主某些 STATUS 事件携带结构化 payload（dict），
+        只取可读字符串，绝不因状态更新崩掉 UI。
+        """
+        if isinstance(text, dict):
+            text = str(text.get("message") or text.get("text") or "")
+        elif not isinstance(text, str):
+            text = str(text or "")
+        text = text.strip()
         self._status_chip.setText(text)
         self._status_chip.setVisible(bool(text))
         self._thinking_dots.setVisible(bool(text))

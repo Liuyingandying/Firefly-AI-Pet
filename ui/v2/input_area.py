@@ -45,6 +45,7 @@ class InputArea(QWidget):
     voice_requested = Signal()
     quick_command_requested = Signal()
     deep_think_toggled = Signal(bool)
+    stop_requested = Signal()
 
     _QUICK_ACTIONS = (
         ("file", "文件", "folder", "file_requested"),
@@ -171,6 +172,13 @@ class InputArea(QWidget):
         self.send_button.clicked.connect(self._emit_send)
         motion.attach_hover_glow(self.send_button)
         tools_row.addWidget(self.send_button)
+
+        # -- 停止生成: 发送后由宿主显示，点击发 stop_requested -------------
+        from ui.v2.stop_button import StopButton
+
+        self.stop_button = StopButton(self)
+        self.stop_button.clicked.connect(self.stop_requested.emit)
+        tools_row.addWidget(self.stop_button)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 10, 14, 10)  # 大留白

@@ -1646,7 +1646,7 @@ class CharacterConversationRunner(QObject):
             else:
                 self._session_video = vr.SessionVideoContext.from_result(result)
                 answer = result.to_answer()
-                if is_study_entry(text) and self._video_analysis_enabled():
+                if vs_mod.is_study_entry(text) and self._video_analysis_enabled():
                     # "陪我学习这个视频 BVxxx": analyze, then enter study mode.
                     self._video_study = vs_mod.VideoStudyContext.from_session(
                         self._session_video)

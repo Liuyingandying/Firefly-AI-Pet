@@ -451,6 +451,8 @@ class CompanionConsole(QMainWindow):
 
         # Wiring
         self.input.send_requested.connect(self._send)
+        # 手动停止：取消当前回合（按钮显隐随思考状态）。
+        self.input.stop_requested.connect(self._stop_generation)
         self.input.voice_requested.connect(self._toggle_voice_companion)
         self.ability.requested.connect(self._on_ability)
         self.sidebar.action_requested.connect(self._on_sidebar_action)
@@ -582,6 +584,18 @@ class CompanionConsole(QMainWindow):
 
     # ------------------------------------------------------------- sending
 
+    def _set_thinking(self, active: bool) -> None:
+        """思考态：显示/收起「停止生成」按钮（提示条由 chat.set_status 管）。"""
+        self.input.stop_button.setVisible(active)
+
+    def _stop_generation(self) -> None:
+        """手动停止当前回合：真实取消（CANCELLED 事件会收起提示与按钮）。"""
+        stop = getattr(self.runner, "stop", None)
+        if callable(stop):
+            stop()
+        if self._voice_session is not None:
+            self._voice_session.interrupt_playback()
+
     def _show_capability_banner(self, capability: str) -> None:
         """能力型插件缺失：UI 顶部横幅提示（数秒后自动收起）。"""
         from core.capabilities import missing_message
@@ -647,6 +661,9 @@ class CompanionConsole(QMainWindow):
             self._dispatch_outgoing(text, None)
 
     def _dispatch_outgoing(self, text: str, attachment=None) -> None:
+        # 发出即反馈：思考提示 + 可手动停止（回复到达时自动收起）。
+        self.chat.set_status("正在思考…")
+        self._set_thinking(True)
         # B站链接 = 视频阅读能力（能力型插件）；缺失时顶部横幅 + 对话内说明。
         if _BILI_TEXT_RE.search(text) and not capabilities.is_available("bili_video"):
             self._show_capability_banner("bili_video")
@@ -1409,8 +1426,12 @@ class CompanionConsole(QMainWindow):
                 self.companion.set_runtime_state(state)
             # 长任务（视频阅读等）的 STATUS 会携带真实阶段文本，优先显示。
             hint = getattr(event, "text", "") or ""
+            if isinstance(hint, dict):
+                hint = str(hint.get("message") or hint.get("text") or "")
             self.chat.set_status(hint or _STATUS_TEXT.get(status, ""))
+            self._set_thinking(True)
         elif event_type == AgentEventType.FINAL:
+            self._set_thinking(False)
             text = getattr(event, "text", "") or ""
             self.chat.set_status("")
             self.header.set_task(text)
@@ -1428,6 +1449,7 @@ class CompanionConsole(QMainWindow):
             # 消息完成后刷新右侧上下文状态卡（focus 可能已变化）。
             self._update_context_status()
         elif event_type == AgentEventType.ERROR:
+            self._set_thinking(False)
             text = getattr(event, "text", "") or "出错了"
             self.chat.set_status("")
             self.header.set_state("error")
@@ -1436,6 +1458,7 @@ class CompanionConsole(QMainWindow):
             # 失败：保留附件让用户直接重发（图片回合标记复位）。
             self._turn_has_image = False
         elif event_type == AgentEventType.CANCELLED:
+            self._set_thinking(False)
             self.chat.set_status("已取消")
             self.header.set_state("idle")
             self.companion.set_runtime_state("idle")
