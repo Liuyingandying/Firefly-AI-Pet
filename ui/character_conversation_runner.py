@@ -1860,7 +1860,8 @@ class CharacterConversationRunner(QObject):
             ], answer
 
         turn_context = None
-        camera_request = is_camera_vision_request(text)
+        _trigger_now = _vision_mod("trigger")
+        camera_request = bool(_trigger_now and _trigger_now.is_camera_vision_request(text))
         if camera_request:
             self._camera_trace("T0_user_trigger_camera")
         if camera_request and not bool(self._camera_vision_enabled()):
@@ -2143,12 +2144,19 @@ class CharacterConversationRunner(QObject):
 
     def _run(self, prompt: str, cancel_event: threading.Event,
              learning_result: Any | None = None) -> None:
-        events, _ = self.perform(prompt, cancel_event,
-                                 learning_result=learning_result)
-        with self._lock:
-            self._busy = False
-            self._cancel_event = None
-            self._thread = None
+        try:
+            events, _ = self.perform(prompt, cancel_event,
+                                     learning_result=learning_result)
+        except Exception:  # noqa: BLE001 - 线程崩溃也必须复位忙碌态，
+            # 否则 _busy 永久为 True，后续一切请求被误判「正忙着」、
+            # 停止按钮也随之失效（历史教训：漏网引用 NameError）。
+            log.exception("turn thread crashed; resetting busy state")
+            events = [self._error_event("处理这条消息时出了点问题，请重试", ErrorCategory.UNKNOWN)]
+        finally:
+            with self._lock:
+                self._busy = False
+                self._cancel_event = None
+                self._thread = None
         for event in events:
             self.agent_event.emit(event)
 
