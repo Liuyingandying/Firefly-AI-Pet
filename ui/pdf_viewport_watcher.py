@@ -19,10 +19,14 @@ import threading
 from PySide6.QtCore import Qt, QObject, QTimer, Signal
 
 from core.pdf_viewport_context import PdfViewportContextBuilder, frame_fingerprint
-from core.screen_vision.foreground_tracker import (
-    get_foreground_hwnd,
-    is_firefly_hwnd,
-)
+try:  # 视觉插件未安装时降级：窗口追踪退化为仅标题判断
+    from core.screen_vision.foreground_tracker import (
+        get_foreground_hwnd,
+        is_firefly_hwnd,
+    )
+except ImportError:
+    get_foreground_hwnd = None
+    is_firefly_hwnd = None
 
 log = logging.getLogger("firefly.paperlens2.viewport")
 
@@ -32,7 +36,7 @@ _user32 = ctypes.windll.user32 if hasattr(ctypes, "windll") else None
 def _foreground_window_title() -> str:
     if _user32 is None:
         return ""
-    hwnd = get_foreground_hwnd()
+    hwnd = get_foreground_hwnd() if get_foreground_hwnd is not None else None
     if not hwnd:
         return ""
     buffer = ctypes.create_unicode_buffer(512)
@@ -44,7 +48,7 @@ def _foreground_process_name() -> str:
     """Image file name of the foreground window's process ("" when unknown)."""
     if _user32 is None:
         return ""
-    hwnd = get_foreground_hwnd()
+    hwnd = get_foreground_hwnd() if get_foreground_hwnd is not None else None
     pid = 0
     _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(ctypes.c_uint32(pid)))
     if not pid:

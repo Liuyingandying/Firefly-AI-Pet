@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 import os
+import sys
 import uuid
 from pathlib import Path
+
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+for _plug in ("firefly_vision", "firefly_learning", "firefly_voice_chat", "firefly_bili_video"):
+    _plug_dir = str(PROJECT_DIR / "plugins" / _plug)
+    if Path(_plug_dir).is_dir() and _plug_dir not in sys.path:
+        sys.path.insert(0, _plug_dir)
 from urllib.parse import urlparse
 import urllib.request
 

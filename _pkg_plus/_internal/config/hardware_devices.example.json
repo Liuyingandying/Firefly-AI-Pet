@@ -1,0 +1,18 @@
+{
+  "prism": {
+    "port": "",
+    "match": {
+      "vid_pid": "",
+      "serial": ""
+    },
+    "note": "Optional Prism device configuration"
+  },
+  "led": {
+    "port": "",
+    "match": {
+      "vid_pid": "",
+      "serial": ""
+    },
+    "note": "Optional LED device configuration"
+  }
+}

@@ -74,7 +74,11 @@ from character import (
     save_current_character,
 )
 from character.character_loader import resolve_animations_dir
-from core.screen_vision.screen.capture import ScreenCaptureService
+try:  # 视觉插件未安装时降级：截屏服务不可用，相关入口给出安装提示
+    from core.screen_vision.screen.capture import ScreenCaptureService
+except ImportError:
+    ScreenCaptureService = None
+
 from core.pdf_visual_region import (
     DEFAULT_UPSCALE,
     build_visual_prompt,
@@ -362,7 +366,7 @@ class VisualShell(QObject):
         # browser PDF viewer; its fresh capture→OCR snapshot feeds the same
         # ExplainBox entry the OCR concept chips use.
         self.pdf_selection_overlay = PdfSelectionOverlay()
-        self._pdf_capture_service = ScreenCaptureService()
+        self._pdf_capture_service = (ScreenCaptureService() if ScreenCaptureService is not None else None)
         # Phase 3-C: minimal global hotkeys (RegisterHotKey + Qt native
         # event filter). "PDF 划词" entry shortcut; Escape is registered only
         # while the overlay mode is active and unregistered on exit.
@@ -1472,7 +1476,10 @@ class VisualShell(QObject):
         hwnd = find_window_hwnd(needles)
         if not hwnd:
             raise RuntimeError("未找到 PDF 浏览器窗口（论文标签页未激活或已关闭）")
-        return self._pdf_capture_service.capture_window_hwnd(hwnd)
+        if self._pdf_capture_service is None:
+            from core.capabilities import missing_message
+
+            raise RuntimeError(missing_message("vision"))
 
     def _run_pdf_overlay_ocr(self, image_bytes: bytes):
         from core.pdf_processor import _get_shared_ocr_backend

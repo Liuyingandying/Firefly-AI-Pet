@@ -1,0 +1,22 @@
+# Firefly 语音播报配置 (Voice Module v1.1 接入)
+# 缺文件/字段损坏时按默认值运行, 不影响主程序启动。
+
+voice:
+  # 总开关: false 时全部短路, 恢复纯文字模式
+  enabled: false
+
+  # 自动播放: true=回复完成立即朗读; false(默认)=仅显示播放按钮, 用户点击才朗读
+  auto_play: false
+
+  server:
+    # Voice Module 服务地址（服务启动方式见发行文档）
+    url: "http://127.0.0.1:8300"
+    connect_timeout_s: 2.0
+    read_timeout_s: 30.0
+
+  # 情绪参数: false 时固定以 neutral 语气合成
+  emotion:
+    enabled: true
+
+  # 超过该长度的回复截断朗读开头 (0/负数=不限制; 检索类长回答只读前段)
+  max_speak_chars: 1600
