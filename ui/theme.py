@@ -661,6 +661,8 @@ class VectorIcon(QWidget):
             VectorIcon._draw_bolt(painter, radius)
         elif kind == "send":
             VectorIcon._draw_send(painter, radius)
+        elif kind == "stop":
+            VectorIcon._draw_stop(painter, radius)
         elif kind == "chat":
             VectorIcon._draw_chat(painter, radius)
         elif kind == "user":
@@ -816,6 +818,14 @@ class VectorIcon(QWidget):
         path.lineTo(-radius * 0.55, 0)
         path.closeSubpath()
         painter.drawPath(path)
+
+    @staticmethod
+    def _draw_stop(painter: QPainter, radius: float) -> None:
+        """停止生成: 圆角方块（仿主流 AI 界面的停止键）。"""
+        s = radius * 0.62
+        painter.drawRoundedRect(
+            QRectF(-s, -s, s * 2, s * 2), s * 0.28, s * 0.28
+        )
 
     @staticmethod
     def _draw_chat(painter: QPainter, radius: float) -> None:

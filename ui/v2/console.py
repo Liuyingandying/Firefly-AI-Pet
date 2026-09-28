@@ -585,8 +585,8 @@ class CompanionConsole(QMainWindow):
     # ------------------------------------------------------------- sending
 
     def _set_thinking(self, active: bool) -> None:
-        """思考态：显示/收起「停止生成」按钮（提示条由 chat.set_status 管）。"""
-        self.input.stop_button.setVisible(active)
+        """思考态：发送键复用为停止键（提示由 chat.set_status 驱动消息流指示器）。"""
+        self.input.set_busy(active)
 
     def _stop_generation(self) -> None:
         """手动停止当前回合：真实取消（CANCELLED 事件会收起提示与按钮）。"""

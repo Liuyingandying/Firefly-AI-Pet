@@ -374,6 +374,9 @@ class ChatView(QFrame):
         self._column.addWidget(self._empty_hint)
         self._column.addStretch(1)      # 底部弹簧（消息从其上方插入）
         self._message_count = 0
+        # 消息流内的思考指示器（发送后出现，回复到达时移除）
+        self._thinking_widget: QWidget | None = None
+        self._thinking_label: QLabel | None = None
 
         container = QWidget()
         container.setLayout(self._column)
@@ -415,9 +418,48 @@ class ChatView(QFrame):
 
     def append_user(self, text: str) -> None:
         self._append_card(text, role="user")
+        self.show_thinking("正在思考…") if self._thinking_widget is None else None
+
+    def show_thinking(self, text: str = "正在思考…") -> None:
+        """消息流内的思考指示器（AI 侧三跳点 + 阶段文本）。
+
+        重复调用刷新文本（阶段推进）；回复到达时调 hide_thinking()。
+        """
+        if self._thinking_widget is None:
+            from ui.v2.motion import ThinkingDots
+
+            row = QHBoxLayout()
+            row.setContentsMargins(8, 0, 0, 0)
+            row.setSpacing(8)
+            dots = ThinkingDots()
+            label = QLabel(text)
+            label.setStyleSheet(
+                f"color: rgba{theme.V2.CHAT_TEXT_SOFT}; background: transparent;"
+                f"font-size: {theme.V2.FONT_CAPTION}pt;"
+                f"font-family: {theme.V2_FONT_STACK};"
+            )
+            row.addWidget(dots, 0, Qt.AlignVCenter)
+            row.addWidget(label, 0, Qt.AlignVCenter)
+            row.addStretch(1)
+            wrap = QWidget()
+            wrap.setLayout(row)
+            self._thinking_label = label
+            self._thinking_widget = wrap
+            self._insert_message(wrap)
+        else:
+            self._thinking_label.setText(text)
+
+    def hide_thinking(self) -> None:
+        """移除思考指示器（回复/错误/取消时调用）。"""
+        w, self._thinking_widget = self._thinking_widget, None
+        self._thinking_label = None
+        if w is not None:
+            w.setParent(None)
+            w.deleteLater()
 
     def append_assistant(self, text: str, voice_text: str | None = None) -> None:
         """voice_text: 传入时在卡片底部渲染 🔊 播放按钮 (v1.3 语音播放)。"""
+        self.hide_thinking()  # 回复到达：先移除思考指示器再输出内容
         self._append_card(text, role="assistant", voice_text=voice_text)
 
     def _append_card(self, text: str, *, role: str, voice_text: str | None = None) -> None:
@@ -479,6 +521,8 @@ class ChatView(QFrame):
             if item.widget() is not None:
                 item.widget().deleteLater()
         self._message_count = 0
+        self._thinking_widget = None
+        self._thinking_label = None
         self._empty_hint.setVisible(True)
 
     def paintEvent(self, event) -> None:  # noqa: N802
@@ -509,7 +553,7 @@ class ChatView(QFrame):
         self._mode_chip.setVisible(bool(text))
 
     def set_status(self, text) -> None:
-        """AI 实时状态: 非空时显示三个跳动紫光点 + 文字提示.
+        """AI 实时状态：转发到消息流内的思考指示器（顶部条不再占用）.
 
         text 容错：宿主某些 STATUS 事件携带结构化 payload（dict），
         只取可读字符串，绝不因状态更新崩掉 UI。
@@ -519,9 +563,10 @@ class ChatView(QFrame):
         elif not isinstance(text, str):
             text = str(text or "")
         text = text.strip()
-        self._status_chip.setText(text)
-        self._status_chip.setVisible(bool(text))
-        self._thinking_dots.setVisible(bool(text))
+        if text:
+            self.show_thinking(text)
+        else:
+            self.hide_thinking()
 
     def _scroll_to_bottom(self) -> None:
         """主动滚到底（新消息请求时调用）: 恢复跟随并延迟一轮执行,

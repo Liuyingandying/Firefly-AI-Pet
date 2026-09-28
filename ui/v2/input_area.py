@@ -172,13 +172,11 @@ class InputArea(QWidget):
         self.send_button.clicked.connect(self._emit_send)
         motion.attach_hover_glow(self.send_button)
         tools_row.addWidget(self.send_button)
-
-        # -- 停止生成: 发送后由宿主显示，点击发 stop_requested -------------
-        from ui.v2.stop_button import StopButton
-
-        self.stop_button = StopButton(self)
-        self.stop_button.clicked.connect(self.stop_requested.emit)
-        tools_row.addWidget(self.stop_button)
+        # 停止与发送复用同一位置：思考中 send_button 变为停止键
+        # （set_busy(True)），回复到达后 set_busy(False) 还原为发送键。
+        self._SEND_ICON = theme.vector_icon("send", theme.V2.ON_PRIMARY_TEXT, 15)
+        self._STOP_ICON = theme.vector_icon("stop", theme.V2.ON_PRIMARY_TEXT, 15)
+        self.send_button._idle_icon = self._SEND_ICON
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 10, 14, 10)  # 大留白
@@ -287,16 +285,36 @@ class InputArea(QWidget):
             self.text_edit.setFixedHeight(target)
 
     def _emit_send(self) -> None:
+        # 发送/停止复用：思考中该按钮已变为「停止」，点击即取消而非发送。
+        if self.busy:
+            self.stop_requested.emit()
+            return
         text = self.text().strip()
         if not text and self.attachments.pending is None:
             return
         self.send_requested.emit(text)
 
+    def set_busy(self, busy: bool) -> None:
+        """思考态切换：发送键 ⇄ 停止键（同位置同尺寸，仅图标/语义互换）."""
+        self._busy = bool(busy)
+        self.send_button.setIcon(self._STOP_ICON if busy else self._SEND_ICON)
+        self.send_button.setToolTip("停止生成" if busy else "发送")
+        self.send_button.setAccessibleName("停止生成" if busy else "发送")
+
+    @property
+    def busy(self) -> bool:
+        return getattr(self, "_busy", False)
+
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
-        """Enter（无 Shift）发送并清空输入框；Shift+Enter 插入换行。"""
+        """Enter（无 Shift）发送并清空输入框；Shift+Enter 插入换行."""
         if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not (
             event.modifiers() & Qt.ShiftModifier
         ):
+            # 思考中 Enter = 停止（与按钮语义一致）。
+            if self.busy:
+                self.stop_requested.emit()
+                event.accept()
+                return
             # 先 emit 后清空（console._send 同步读输入框文本）。
             # 只带附件（无文字）也允许发送，问题文本由宿主补默认值。
             text = self.text().strip()
