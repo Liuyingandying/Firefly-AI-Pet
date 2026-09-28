@@ -23,6 +23,7 @@ import json
 import os
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -93,13 +94,14 @@ class BiliInsightClient:
         start_time: float | None = None,
         end_time: float | None = None,
         on_progress=None,
+        cancel_event=None,
     ) -> dict:
         payload: dict[str, object] = {"video_id": video_id}
         if start_time is not None:
             payload["start_time"] = float(start_time)
         if end_time is not None:
             payload["end_time"] = float(end_time)
-        return self.call("transcribe", payload, on_progress=on_progress)
+        return self.call("transcribe", payload, on_progress=on_progress, cancel_event=cancel_event)
 
     def frame(self, video_id: str, timestamp: str | float, *, include_base64: bool = False) -> dict:
         return self.call("frame", {
@@ -115,6 +117,7 @@ class BiliInsightClient:
         *,
         timeout: float | None = None,
         on_progress=None,
+        cancel_event=None,
     ) -> dict:
         """Run one JSONL action and return ``data``; raise BiliServiceError otherwise.
 
@@ -164,32 +167,64 @@ class BiliInsightClient:
         killer.start()
 
         stdout_chunks: list[str] = []
+
+        def _pump() -> None:
+            # 后台线程泵 stdout（行级实时），主流程轮询取消/超时。
+            try:
+                for line in proc.stdout:
+                    stdout_chunks.append(line)
+            except Exception:  # noqa: BLE001
+                pass
+
+        pump = threading.Thread(target=_pump, daemon=True)
+        pump.start()
         try:
             proc.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
             proc.stdin.flush()
             proc.stdin.close()
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                line = line.strip()
-                if not line.startswith("{"):
-                    stdout_chunks.append(line)
-                    continue
+        except Exception as exc:  # noqa: BLE001
+            raise BiliServiceError("crashed", f"stdin write failed: {exc}", action)
+
+        deadline = time.monotonic() + effective_timeout
+        cancelled = False
+        while proc.poll() is None:
+            if cancel_event is not None and cancel_event.is_set():
+                proc.kill()
+                cancelled = True
+                break
+            if time.monotonic() > deadline:
+                proc.kill()
+                raise BiliServiceError(
+                    "timeout", f"no response within {effective_timeout:.0f}s", action
+                )
+            time.sleep(0.2)
+        pump.join(timeout=5)
+        stdout = "".join(stdout_chunks)
+        if cancelled:
+            raise BiliServiceError("cancelled", "用户停止", action)
+
+        envelope = self._parse_envelope(action, stdout)
+        if envelope is None:
+            stderr_tail = ""
+            if proc.stderr is not None:
                 try:
-                    obj = json.loads(line)
-                except ValueError:
-                    stdout_chunks.append(line)
-                    continue
-                if isinstance(obj, dict) and obj.get("event") == "progress":
-                    if on_progress is not None:
-                        try:
-                            on_progress(obj)
-                        except Exception:  # noqa: BLE001 — 进度回调绝不影响结果
-                            pass
-                    continue
-                stdout_chunks.append(line)
-            returncode = proc.wait(timeout=10.0)
-        finally:
-            killer.cancel()
+                    stderr_tail = (proc.stderr.read() or "")[-_ERROR_TAIL_CHARS:].strip()
+                except Exception:  # noqa: BLE001
+                    pass
+            raise BiliServiceError(
+                "crashed",
+                f"exit={proc.returncode}, no JSONL response"
+                + (f"; stderr: {stderr_tail}" if stderr_tail else ""),
+                action,
+            )
+        if not envelope.get("ok"):
+            error = envelope.get("error") or {}
+            raise BiliServiceError(
+                str(error.get("type") or "internal"),
+                str(error.get("message") or "unknown service error"),
+                action,
+            )
+        return envelope.get("data") or {}
 
         stdout = "\n".join(stdout_chunks)
         envelope = self._parse_envelope(action, stdout)

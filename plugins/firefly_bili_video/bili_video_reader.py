@@ -103,6 +103,7 @@ def analyze_bilibili_video(
     *,
     client: BiliInsightClient | None = None,
     on_progress=None,
+    cancel_event=None,
 ) -> BiliVideoAnalysis:
     """Fetch metadata + transcript through BiliInsight, summarize via AI Router.
 
@@ -119,7 +120,7 @@ def analyze_bilibili_video(
     meta = service.metadata(bvid)
     if on_progress is not None:
         on_progress("正在下载视频并转写语音（长视频可能需要几分钟）…")
-    transcript = service.transcribe(bvid, on_progress=on_progress)
+    transcript = service.transcribe(bvid, on_progress=on_progress, cancel_event=cancel_event)
     segments = transcript.get("segments") or []
     transcript_text = _format_transcript(segments)
 

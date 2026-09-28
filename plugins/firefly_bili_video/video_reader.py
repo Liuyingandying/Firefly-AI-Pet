@@ -174,9 +174,10 @@ def analyze(
     *,
     client=None,
     on_progress=None,
+    cancel_event=None,
 ) -> VideoReadingResult:
     """Read one Bilibili video: metadata + transcript + AI Router summary."""
-    analysis = analyze_bilibili_video(url_or_text, question, client=client, on_progress=on_progress)
+    analysis = analyze_bilibili_video(url_or_text, question, client=client, on_progress=on_progress, cancel_event=cancel_event)
     return VideoReadingResult(
         bvid=analysis.bvid,
         url=analysis.url,
@@ -193,13 +194,13 @@ def analyze(
     )
 
 
-def analyze_video_message(text: str, *, client=None, on_progress=None) -> VideoReadingResult:
+def analyze_video_message(text: str, *, client=None, on_progress=None, cancel_event=None) -> VideoReadingResult:
     """Chat-entry wrapper: detect the reference in the message and analyze it."""
     bvid = detect_bilibili_reference(text)
     if not bvid:
         raise BiliServiceError("invalid_args", "message contains no Bilibili video reference",
                                "metadata")
-    return analyze(text, extract_video_question(text, bvid), client=client, on_progress=on_progress)
+    return analyze(text, extract_video_question(text, bvid), client=client, on_progress=on_progress, cancel_event=cancel_event)
 
 
 def video_reading_failure_reply(exc: Exception) -> str:
@@ -212,6 +213,7 @@ def video_reading_failure_reply(exc: Exception) -> str:
             "asr": "语音转文字失败",
             "model": "本地语音模型加载失败",
             "invalid_args": "没有识别到有效的 B站视频链接",
+            "cancelled": "已停止",
         }
         reason = reasons.get(exc.kind, "视频阅读服务出错")
         return f"抱歉，{reason}。（{exc.kind}）"

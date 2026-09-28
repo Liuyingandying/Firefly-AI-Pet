@@ -1643,7 +1643,7 @@ class CharacterConversationRunner(QObject):
                         )
                     )
 
-                result = vr.analyze_video_message(text, on_progress=_emit_video_progress)
+                result = vr.analyze_video_message(text, on_progress=_emit_video_progress, cancel_event=cancel_event)
                 answer = result.to_answer()
             except Exception as exc:  # video failure must not crash the turn
                 answer = vr.video_reading_failure_reply(exc)
