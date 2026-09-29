@@ -36,7 +36,7 @@ class FakeCapture:
         self.calls = []
 
     def capture_primary_screen(self, **kwargs):
-        from screen_vision.models import ScreenFrame
+        from core.screen_vision.models import ScreenFrame
         from datetime import datetime
 
         self.calls.append("primary")
@@ -58,7 +58,7 @@ class FakeVision:
         self.calls += 1
         if self._error is not None:
             raise self._error
-        from screen_vision.models import ScreenObservation
+        from core.screen_vision.models import ScreenObservation
 
         return ScreenObservation(scene_summary="primary scene")
 
@@ -90,7 +90,7 @@ class FallbackVision:
         self.calls += 1
         if self._error is not None:
             raise self._error
-        from screen_vision.models import ScreenObservation
+        from core.screen_vision.models import ScreenObservation
 
         return ScreenObservation(scene_summary="fallback scene")
 
@@ -276,7 +276,7 @@ def test_j_breaker_allows_probe_after_cooldown():
     clock.now += 61.0
     assert provider.inspect(_frame()) == "primary scene" or True
     result = provider.inspect(_frame())
-    from screen_vision.models import ScreenObservation
+    from core.screen_vision.models import ScreenObservation
 
     assert isinstance(result, ScreenObservation)
     assert not breaker.is_open

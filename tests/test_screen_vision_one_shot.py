@@ -11,7 +11,7 @@ from PySide6.QtGui import QImage
 
 from screen_vision.circuit_breaker import CircuitBreaker
 from screen_vision.failover import FailoverReasoningProvider, FailoverVisionProvider
-from screen_vision.models import ScreenFrame, ScreenObservation, ScreenVisionResult
+from core.screen_vision.models import ScreenFrame, ScreenObservation, ScreenVisionResult
 from screen_vision.provider_errors import (
     EmptyProviderResponse,
     ProviderHTTPError,

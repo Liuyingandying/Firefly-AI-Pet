@@ -12,7 +12,7 @@ from datetime import datetime
 import pytest
 
 from screen_vision.failover import FailoverReasoningProvider, FailoverVisionProvider
-from screen_vision.models import ScreenFrame, ScreenObservation
+from core.screen_vision.models import ScreenFrame, ScreenObservation
 from screen_vision.provider_errors import (
     ProviderHTTPError,
     ReasoningTemporarilyUnavailable,
