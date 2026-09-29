@@ -438,19 +438,21 @@ class ChatView(QFrame):
 
     def append_user(self, text: str) -> None:
         self._append_card(text, role="user")
-        self.show_thinking("正在思考…")
 
     def show_thinking(self, text: str = "正在思考…") -> None:
         """思考指示器：固定在消息区底部、输入框正上方（位置恒定不随消息数浮动）.
 
         重复调用刷新文本（阶段推进）；回复到达时调 hide_thinking()。
         """
+        if self._thinking_label is None or self._thinking_widget is None:
+            return  # 控件尚未就绪（极端时序兜底），避免 None 崩溃
         self._thinking_label.setText(text)
         self._thinking_widget.setVisible(True)
 
     def hide_thinking(self) -> None:
+        if self._thinking_widget is None:
+            return
         self._thinking_widget.setVisible(False)
-        self._thinking_label.setText("正在思考…")
 
     def append_assistant(self, text: str, voice_text: str | None = None) -> None:
         """voice_text: 传入时在卡片底部渲染 🔊 播放按钮 (v1.3 语音播放)。"""
