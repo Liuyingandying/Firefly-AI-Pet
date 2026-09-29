@@ -24,7 +24,7 @@ from __future__ import annotations
 import struct
 from datetime import datetime
 
-from screen_vision.models import ScreenFrame
+from core.screen_vision.models import ScreenFrame
 from screen_vision.vision.base import VisionProvider
 
 VIDEO_VISION_INSTRUCTION = """你是视频关键帧视觉描述模块。

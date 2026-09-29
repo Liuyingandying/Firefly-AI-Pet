@@ -309,10 +309,8 @@ class CompanionChatWindow(QWidget):
             window = cls(runner=runner, display_names=display_names)
             cls._instance = window
         window.show()
-        try:
+        if foreground_tracker is not None:
             foreground_tracker.remember_firefly_window(int(window.winId()))
-        except (ImportError, RuntimeError):
-            pass
         window.raise_()
         window.activateWindow()
         window.input.setFocus()

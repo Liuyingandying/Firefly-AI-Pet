@@ -20,7 +20,7 @@ from screen_vision.config import (
     normalize_routing_mode,
 )
 from screen_vision.failover import FailoverReasoningProvider, FailoverVisionProvider
-from screen_vision.models import ScreenFrame, ScreenObservation
+from core.screen_vision.models import ScreenFrame, ScreenObservation
 from screen_vision.provider_errors import (
     ProviderHTTPError,
     VisionTemporarilyUnavailable,

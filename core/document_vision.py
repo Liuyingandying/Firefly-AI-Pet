@@ -24,7 +24,7 @@ from typing import Any
 from PIL import Image
 
 from core.document_attachment import _PAGE_CN_RE, _PAGE_EN_RE, _SLIDE_RE
-from screen_vision.models import ScreenFrame
+from core.screen_vision.models import ScreenFrame
 
 log = logging.getLogger(__name__)
 

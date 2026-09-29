@@ -14,7 +14,7 @@ import logging
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from screen_vision.models import ScreenFrame
+from core.screen_vision.models import ScreenFrame
 
 log = logging.getLogger("firefly.pdf_visual_region")
 

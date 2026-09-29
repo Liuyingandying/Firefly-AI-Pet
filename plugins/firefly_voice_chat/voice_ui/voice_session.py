@@ -220,8 +220,11 @@ class VoiceSessionController(QObject):
         except Exception as exc:  # noqa: BLE001
             log.warning("companion stop failed: %s", exc)
         self._queue_playing = False
-        self.speaking_changed.emit(False)
-        self.status_text_changed.emit(self.status_text())
+        try:  # 控制台已关闭（Qt 对象已销毁）时信号发送会抛 RuntimeError
+            self.speaking_changed.emit(False)
+            self.status_text_changed.emit(self.status_text())
+        except RuntimeError:
+            pass
 
     # ------------------------------------------------------------ 静音
 

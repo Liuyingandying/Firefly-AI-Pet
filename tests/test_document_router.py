@@ -25,7 +25,7 @@ from core.document_router import (
 )
 from core.lazy_pdf_ocr import LazyPdfOcrState
 from core.pdf_processor import LazyPdfIndex, PdfPageStatus
-from screen_vision.models import ScreenFrame
+from core.screen_vision.models import ScreenFrame
 from ui.character_conversation_runner import CharacterConversationRunner
 from ui.companion_attachment import DocumentAttachment
 

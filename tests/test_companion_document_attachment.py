@@ -48,7 +48,7 @@ from core.document_attachment import (
     parse_document_bytes,
     retrieve_chunks,
 )
-from screen_vision.models import ScreenObservation, ScreenVisionResult
+from core.screen_vision.models import ScreenObservation, ScreenVisionResult
 from screen_vision.provider_errors import EmptyProviderResponse
 from ui import companion_chat_window as window_mod
 from ui.companion_attachment import (
