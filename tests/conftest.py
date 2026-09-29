@@ -13,6 +13,10 @@ for _plug in ("firefly_vision", "firefly_learning", "firefly_voice_chat", "firef
     if Path(_plug_dir).is_dir() and _plug_dir not in sys.path:
         sys.path.insert(0, _plug_dir)
 
+# voice 插件自带的验收测试（voice_plugin\）依赖真实服务在线：默认跳过，
+# 避免 8 个环境性失败与潜在段错误污染全量结果。
+collect_ignore_glob: list[str] = ["voice_plugin/*"]
+
 from urllib.parse import urlparse
 import urllib.request
 
