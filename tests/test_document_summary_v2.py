@@ -30,7 +30,7 @@ from core.document_attachment import (
     format_summary_input,
     summarize_document,
 )
-from core.screen_vision.models import ScreenObservation, ScreenVisionResult
+from screen_vision.models import ScreenObservation, ScreenVisionResult
 from ui.companion_attachment import DocumentAttachment
 from ui.character_conversation_runner import CharacterConversationRunner
 

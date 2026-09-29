@@ -114,31 +114,24 @@ class ProviderStatusService:
             statuses.append(self._api_status(spec, ROLE_PRIMARY if rank == 0 else ROLE_FALLBACK, rank))
 
         # Vision: order comes from the screen-vision config.
-        # vision 插件缺失时跳过视觉/推理行（AI Status 如实显示不可用）。
-        try:
-            from screen_vision.config import get_vision_provider_order
-        except ImportError:
-            get_vision_provider_order = None
-        if get_vision_provider_order is not None:
-            for rank, registry_name in enumerate(get_vision_provider_order("fast")):
-                spec_id = _REGISTRY_TO_CATALOG[registry_name]
-                spec = CATALOG[spec_id]
-                if spec.status == STATUS_DEPRECATED:
-                    continue
-                statuses.append(self._api_status(spec, ROLE_PRIMARY if rank == 0 else ROLE_FALLBACK, rank))
+        from screen_vision.config import get_vision_provider_order
+
+        for rank, registry_name in enumerate(get_vision_provider_order("fast")):
+            spec_id = _REGISTRY_TO_CATALOG[registry_name]
+            spec = CATALOG[spec_id]
+            if spec.status == STATUS_DEPRECATED:
+                continue
+            statuses.append(self._api_status(spec, ROLE_PRIMARY if rank == 0 else ROLE_FALLBACK, rank))
 
         # Reasoning: same source as vision config.
-        try:
-            from screen_vision.config import get_reasoning_provider_order
-        except ImportError:
-            get_reasoning_provider_order = None
-        if get_reasoning_provider_order is not None:
-            for rank, registry_name in enumerate(get_reasoning_provider_order("fast")):
-                spec_id = _REGISTRY_TO_CATALOG[registry_name]
-                spec = CATALOG[spec_id]
-                if spec.status == STATUS_DEPRECATED:
-                    continue
-                statuses.append(self._api_status(spec, ROLE_PRIMARY if rank == 0 else ROLE_FALLBACK, rank))
+        from screen_vision.config import get_reasoning_provider_order
+
+        for rank, registry_name in enumerate(get_reasoning_provider_order("fast")):
+            spec_id = _REGISTRY_TO_CATALOG[registry_name]
+            spec = CATALOG[spec_id]
+            if spec.status == STATUS_DEPRECATED:
+                continue
+            statuses.append(self._api_status(spec, ROLE_PRIMARY if rank == 0 else ROLE_FALLBACK, rank))
 
         # Coding agents: local CLI entries (independent channels).
         for spec_id in ("codex-cli", "claude-cli"):

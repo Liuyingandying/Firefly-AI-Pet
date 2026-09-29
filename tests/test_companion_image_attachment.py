@@ -42,7 +42,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QFileDialog, QPushButton
 
 from core.agent_events import AgentEventType
-from core.screen_vision.models import ScreenObservation, ScreenVisionResult
+from screen_vision.models import ScreenObservation, ScreenVisionResult
 from screen_vision.provider_errors import EmptyProviderResponse
 from ui import companion_chat_window as window_mod
 from ui.companion_attachment import (

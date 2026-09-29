@@ -7,7 +7,7 @@ credential source, image transport, schema compatibility, and privacy.
 
 import pytest
 
-from core.screen_vision.models import ScreenFrame, ScreenObservation
+from screen_vision.models import ScreenFrame, ScreenObservation
 from screen_vision.vision import glm_vision
 from screen_vision.vision.glm_vision import (
     DEFAULT_GLM_VISION_MODEL,

@@ -19,7 +19,7 @@ from datetime import datetime
 
 import pytest
 
-from core.screen_vision.models import (
+from screen_vision.models import (
     ScreenFrame,
     ScreenObservation,
     ScreenVisionResult,

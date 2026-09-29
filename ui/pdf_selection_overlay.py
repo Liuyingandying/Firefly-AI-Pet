@@ -28,7 +28,7 @@ from PySide6.QtWidgets import QWidget
 
 from core.pdf_text_hit_test import hit_test, line_rect, screen_to_image_rect
 from core.pdf_viewport_context import ocr_lines_from_raw
-from core.screen_vision.models import ScreenFrame
+from screen_vision.models import ScreenFrame
 
 _CLICK_EPSILON = 1.5  # logical px per axis below which a release is a click
 _DEFAULT_SUMMARY_DELAY_MS = 700

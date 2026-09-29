@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QApplication
 
 from screen_vision import foreground_tracker as ft_module
 from screen_vision.foreground_tracker import ForegroundContextTracker
-from core.screen_vision.models import ScreenFrame, ScreenObservation
+from screen_vision.models import ScreenFrame, ScreenObservation
 from screen_vision.service import ScreenVisionService
 from screen_vision.trigger import (
     CAPTURE_FIREFLY_COMPANION,

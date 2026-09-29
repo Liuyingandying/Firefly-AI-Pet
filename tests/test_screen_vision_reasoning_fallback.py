@@ -266,7 +266,7 @@ class _OkVision:
     model = "tju-llm"
 
     def inspect(self, frame, instruction=None):
-        from core.screen_vision.models import ScreenObservation
+        from screen_vision.models import ScreenObservation
 
         return ScreenObservation(scene_summary="s")
 
@@ -278,7 +278,7 @@ class _SpyCapture:
     def capture_primary_screen(self, **kwargs):
         from datetime import datetime
 
-        from core.screen_vision.models import ScreenFrame
+        from screen_vision.models import ScreenFrame
 
         self.calls += 1
         return ScreenFrame(8, 8, "image/jpeg", b"\xff\xd8x", datetime.now())
@@ -296,7 +296,7 @@ class _SpyCapture:
 
 
 def test_n_service_exactly_one_capture_per_look():
-    from core.screen_vision.models import ScreenObservation
+    from screen_vision.models import ScreenObservation
 
     class DownReasoning:
         name = "tju-deepseek"

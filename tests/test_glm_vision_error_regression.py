@@ -20,7 +20,7 @@ from providers.zhipu_glm import ZhipuGLMProvider
 from screen_vision import foreground_tracker as ft_module
 from screen_vision.foreground_tracker import ForegroundContextTracker
 from screen_vision.failover import FailoverVisionProvider
-from core.screen_vision.models import ScreenFrame, ScreenObservation
+from screen_vision.models import ScreenFrame, ScreenObservation
 from screen_vision.provider_errors import (
     ProviderHTTPError,
     VisionTemporarilyUnavailable,
