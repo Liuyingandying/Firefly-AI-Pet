@@ -408,54 +408,49 @@ class ChatView(QFrame):
         bar.rangeChanged.connect(self._on_range_changed)
         bar.valueChanged.connect(self._on_bar_value)
 
+        # -- 思考指示器：消息区底部固定行（输入框正上方，位置恒定） ---------
+        from ui.v2.motion import ThinkingDots
+
+        self._thinking_widget = QWidget(self)
+        think_row = QHBoxLayout(self._thinking_widget)
+        think_row.setContentsMargins(16, 2, 16, 4)
+        think_row.setSpacing(8)
+        self._thinking_dots_flow = ThinkingDots()
+        self._thinking_label = QLabel("正在思考…")
+        self._thinking_label.setStyleSheet(
+            f"color: rgba{theme.V2.CHAT_TEXT_SOFT}; background: transparent;"
+            f"font-size: {theme.V2.FONT_CAPTION}pt;"
+            f"font-family: {theme.V2_FONT_STACK};"
+        )
+        think_row.addWidget(self._thinking_dots_flow, 0, Qt.AlignVCenter)
+        think_row.addWidget(self._thinking_label, 0, Qt.AlignVCenter)
+        think_row.addStretch(1)
+        self._thinking_widget.setVisible(False)
+
         root = QVBoxLayout(self)
         root.setContentsMargins(1, 1, 1, 1)   # 留出 1px 内描边的绘制空间
         root.setSpacing(0)
         root.addWidget(status_bar)
         root.addWidget(self._scroll, 1)
+        root.addWidget(self._thinking_widget)  # 固定行：输入框正上方
 
     # ------------------------------------------------------------ messages
 
     def append_user(self, text: str) -> None:
         self._append_card(text, role="user")
-        self.show_thinking("正在思考…") if self._thinking_widget is None else None
+        self.show_thinking("正在思考…")
 
     def show_thinking(self, text: str = "正在思考…") -> None:
-        """消息流内的思考指示器（AI 侧三跳点 + 阶段文本）。
+        """思考指示器：固定在消息区底部、输入框正上方（位置恒定不随消息数浮动）.
 
         重复调用刷新文本（阶段推进）；回复到达时调 hide_thinking()。
         """
-        if self._thinking_widget is None:
-            from ui.v2.motion import ThinkingDots
-
-            row = QHBoxLayout()
-            row.setContentsMargins(8, 0, 0, 0)
-            row.setSpacing(8)
-            dots = ThinkingDots()
-            label = QLabel(text)
-            label.setStyleSheet(
-                f"color: rgba{theme.V2.CHAT_TEXT_SOFT}; background: transparent;"
-                f"font-size: {theme.V2.FONT_CAPTION}pt;"
-                f"font-family: {theme.V2_FONT_STACK};"
-            )
-            row.addWidget(dots, 0, Qt.AlignVCenter)
-            row.addWidget(label, 0, Qt.AlignVCenter)
-            row.addStretch(1)
-            wrap = QWidget()
-            wrap.setLayout(row)
-            self._thinking_label = label
-            self._thinking_widget = wrap
-            self._insert_message(wrap)
-        else:
-            self._thinking_label.setText(text)
+        self._thinking_label.setText(text)
+        self._thinking_widget.setVisible(True)
 
     def hide_thinking(self) -> None:
-        """移除思考指示器（回复/错误/取消时调用）。"""
-        w, self._thinking_widget = self._thinking_widget, None
-        self._thinking_label = None
-        if w is not None:
-            w.setParent(None)
-            w.deleteLater()
+        self._thinking_widget.setVisible(False)
+        self._thinking_label.setText("正在思考…")
 
     def append_assistant(self, text: str, voice_text: str | None = None) -> None:
         """voice_text: 传入时在卡片底部渲染 🔊 播放按钮 (v1.3 语音播放)。"""
