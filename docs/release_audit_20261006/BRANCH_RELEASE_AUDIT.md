@@ -66,8 +66,40 @@ The seven feature commits below contain 385 changed paths, 58,665 insertions and
 | f758c51c138eba26234e205f9588d337eca02c3b | Control CLI | 6 |
 | 532a9ff04c6e4e96690d34f263dfc087680ef911 | Console/host UI | 16 |
 | 9c975ef98623c8b4e6472885d5666339c63623cb | Archive/plugin/MCP boundaries | 29 |
+| 4f0ae81a74e99189c85a1fe947ca789af7469a9b | Character contract, test isolation, privacy/branch audit and ignore rules | 13 |
 
-Push result and remote equality verification are added after execution. Secret scan findings are reviewed individually in [PRE_PUSH_PRIVACY_AUDIT.md](PRE_PUSH_PRIVACY_AUDIT.md). The final committed-tree scan is required before this task is complete.
+### Verified publication
+
+- The eight module/audit commits were pushed normally to the existing recovery branch, without force.
+- After fetch, local HEAD and remote branch HEAD both equal `4f0ae81a74e99189c85a1fe947ca789af7469a9b`.
+- Remote `main` remains `df18cc414c7abcc92ff5a56480021c1b7b5ee8fd`.
+- The verified feature/audit diff is 398 changed paths, 67,646 insertions and 226 deletions. This documentation-only receipt follows it and changes only the two audit Markdown files.
+- Original checkout: branch/HEAD unchanged; all 4,980 snapshotted generic file hashes still match. The 2,446 entries without source hashes were not opened by that check.
+- The post-fetch full committed-tree scan has zero private-pattern matches and the same three known synthetic guard fixtures. Gitleaks scanning the new commit range has zero findings. See [PRE_PUSH_PRIVACY_AUDIT.md](PRE_PUSH_PRIVACY_AUDIT.md).
+- Remote branch workflow runs returned an empty list. The unchanged main/PR workflow is not triggered by this recovery-branch push. The proposed expanded file list passed locally; remote expanded CI is NOT RUN.
+
+The final documentation receipt is pushed and reverified by the release executor. Its exact tip is the latest commit on the branch; the final executor report records that SHA because a document cannot contain its own Git commit hash.
+
+[Review branch](https://github.com/Liuyingandying/Firefly-AI-Pet/tree/recovery/original-feel-plus-features-20261006) · [Compare against main](https://github.com/Liuyingandying/Firefly-AI-Pet/compare/main...recovery/original-feel-plus-features-20261006)
+
+### Final gate scope
+
+| Gate | Status |
+|---|---|
+| BRANCH_PUSHED | YES |
+| MAIN_UNCHANGED | YES |
+| PRIVATE_DATA_LEAK | NO detected leak; all scanner findings individually reviewed |
+| ORIGINAL_CHARACTER_CONTRACT | PASS (offline provider-ready ownership tests) |
+| CAMERA_PERSONA_FIX | PASS (offline complete style-context propagation) |
+| MEMORY_FEATURES | PASS (isolated owner/lifecycle/index/recall/UI tests) |
+| LEARNING_FEATURES | PASS offline; LIMITED real formal-session acceptance |
+| MODEL_ROUTER | PASS offline |
+| VOICE_HOST | PASS offline; live host/device acceptance NOT RUN in this task |
+| TARGETED_REGRESSION | PASS |
+| FULL_REGRESSION | PARTIAL_PASS: whole-repository regression NOT RUN |
+| EXPANDED_REMOTE_CI | NOT RUN: workflow extension excluded by authorization boundary |
+
+No main merge, release tag, packaging or publication of v0.2 was performed.
 
 ### Workflow publication boundary
 

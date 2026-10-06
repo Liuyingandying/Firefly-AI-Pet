@@ -35,4 +35,10 @@ Every pre-documentation candidate keyword hit is listed in [PRIVACY_TEXT_FINDING
 
 The fresh pre-commit export contains 919 paths, including public audit documentation. All Python source compiled. The full export again has exactly the three synthetic JWT fixtures above; private-pattern matches remain zero. Reference counts including audit tables and their per-hit CSV are: API_KEY 508, Bearer 87, sk- 212, password 74, token 907. Additional documentation hits are scan-pattern labels, repeated per-hit index rows and public command/configuration references; they do not embed source line values or live secrets.
 
-The committed-tree scan will be repeated after commits and again after remote verification. The raw reports and exact local receipts remain private. The branch remains unmerged.
+## Committed and remote verification
+
+The eight published commits through `4f0ae81a74e99189c85a1fe947ca789af7469a9b` were scanned with `gitleaks git --log-opts=origin/main..HEAD`: exit 0, no delta findings. After fetch, the remote recovery branch equals that local HEAD and main still equals the frozen baseline.
+
+The Git archive of that remotely verified tree was scanned in full again: 919 paths, no private-pattern matches, no Python compile errors, exactly the same three synthetic JWT guard fixtures. Raw full-tree scanner exit remains 1 for those reviewed fixtures; it is not reported as an empty raw scan. Pattern counts match the final candidate counts above.
+
+This publication receipt is a documentation-only follow-up. The final receipt commit is scanned once more before and after its normal push; the final exact tip is available from Git history. The raw reports and exact local receipts remain private. The branch remains unmerged.
