@@ -128,7 +128,7 @@ def _pdf_bytes(pages: int = 3) -> bytes:
     doc = fitz.open()
     for index in range(1, pages + 1):
         page = doc.new_page()
-        page.insert_text((72, 72), f"Page {index}: neural network training details.")
+        page.insert_text((72, 72), f"Page {index}: neural network training details. " + "Native document text for the asynchronous parsing fixture. " * 4)
     data = doc.tobytes()
     doc.close()
     return data
@@ -569,7 +569,8 @@ def test_aa_file_bytes_not_sent_to_provider():
     blob = json.dumps(chat.calls[0]["messages"], ensure_ascii=False)
     assert "data:" not in blob
     assert "base64" not in blob
-    assert len(chat.calls[0]["messages"][1]["content"]) < 2000  # excerpts only
+    user = next(m for m in chat.calls[0]["messages"] if m["role"] == "user")
+    assert len(user["content"]) < 2000  # excerpts only, not the persona instruction
 
 
 def test_ab_absolute_path_not_sent(tmp_path):
@@ -588,7 +589,8 @@ def test_ac_full_document_not_sent_for_ordinary_qa():
     runner = _runner(chat)
     large = ("sentence " * 50 + "\n") * 30  # ~7000 chars, many chunks
     runner.perform_with_document("问题", _ready_attachment("txt", large.encode(), "big.txt"))
-    user = chat.calls[0]["messages"][1]["content"]
+    user = next(m["content"] for m in chat.calls[0]["messages"] if m["role"] == "user")
+    assert "PERSONA CONTEXT READ LAYER" not in chat.calls[0]["messages"][0]["content"]
     assert len(user) < 4000
     assert runner.last_document_meta["chunks_sent"] <= 6
 
@@ -695,7 +697,8 @@ def test_document_empty_text_uses_default_question():
     chat = FakeTextChat()
     runner = _runner(chat)
     runner.perform_with_document("", _ready_attachment("txt", b"content", "d.txt"))
-    user = chat.calls[0]["messages"][1]["content"]
+    user = next(m["content"] for m in chat.calls[0]["messages"] if m["role"] == "user")
+    assert "PERSONA CONTEXT READ LAYER" not in chat.calls[0]["messages"][0]["content"]
     # Empty text maps to the default summary request, which now runs the
     # five-point summary prompt.
     assert "研究问题/目的" in user

@@ -107,7 +107,10 @@ class GlmVisionProvider:
 
     def _send(self, payload: dict, headers: dict, timeout: float) -> ScreenObservation:
         try:
-            body = default_transport(self._zhipu.endpoint, payload, headers, timeout)
+            from core.model_router import get_model_router
+            body = get_model_router().passthrough(
+                lambda: default_transport(self._zhipu.endpoint, payload, headers, timeout),
+                task="vision", provider=self.name, model=self._model)
         except Exception as exc:  # noqa: BLE001 - classified at the boundary
             raise classify_provider_exception(exc) from None
         try:

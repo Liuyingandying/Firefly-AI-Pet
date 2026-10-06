@@ -30,6 +30,7 @@ import time
 from pathlib import Path
 
 import pytest
+
 from PIL import Image as PILImage
 from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, Qt, QUrl
 from PySide6.QtGui import (

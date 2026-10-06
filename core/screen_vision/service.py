@@ -178,6 +178,7 @@ class ScreenVisionService:
         self,
         user_question: str,
         capture_mode: str = "last_non_firefly_window",
+        *, style_context: str | None = None,
     ) -> ScreenVisionResult:
         """Capture once, observe, and answer. The only method that triggers
         a screenshot."""
@@ -204,7 +205,10 @@ class ScreenVisionService:
             try:
                 if not self._vision_breaker.allow_primary():
                     raise VisionTemporarilyUnavailable("circuit_open")
-                answer = self._direct_vision.answer_direct(frame, user_question)
+                if style_context:
+                    answer = self._direct_vision.answer_direct(frame, user_question, style_context=style_context)
+                else:
+                    answer = self._direct_vision.answer_direct(frame, user_question)
                 if not isinstance(answer, str) or not answer.strip():
                     raise EmptyProviderResponse()
                 answer = answer.strip()

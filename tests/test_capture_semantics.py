@@ -12,6 +12,7 @@ tracking stores references only — never pixels, never provider calls.
 from datetime import datetime
 
 import pytest
+
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
@@ -21,6 +22,7 @@ from core.screen_vision.models import ScreenFrame, ScreenObservation
 from core.screen_vision.service import ScreenVisionService
 from core.screen_vision.trigger import (
     CAPTURE_FIREFLY_COMPANION,
+    CAPTURE_CAMERA,
     CAPTURE_LAST_NON_FIREFLY_WINDOW,
     CAPTURE_PRIMARY_SCREEN,
     is_explicit_screen_vision_request,
@@ -53,12 +55,12 @@ def _obs(scene="s"):
     ("看看我的桌面", CAPTURE_PRIMARY_SCREEN),
     ("看看整个桌面", CAPTURE_PRIMARY_SCREEN),
     # B
-    ("看看我在做什么", CAPTURE_LAST_NON_FIREFLY_WINDOW),
-    ("看一下我在干什么", CAPTURE_LAST_NON_FIREFLY_WINDOW),
+    ("看看我在做什么", CAPTURE_CAMERA),
+    ("看一下我在干什么", CAPTURE_CAMERA),
     ("看看刚才这个窗口", CAPTURE_LAST_NON_FIREFLY_WINDOW),
     ("看看我刚才在看的东西", CAPTURE_LAST_NON_FIREFLY_WINDOW),
     ("看看这个页面", CAPTURE_LAST_NON_FIREFLY_WINDOW),
-    ("看看我现在在做什么", CAPTURE_LAST_NON_FIREFLY_WINDOW),
+    ("看看我现在在做什么", CAPTURE_CAMERA),
     # C
     ("看看这个聊天框", CAPTURE_FIREFLY_COMPANION),
     ("看看你的窗口", CAPTURE_FIREFLY_COMPANION),
@@ -304,7 +306,8 @@ def test_j_stale_hwnd_falls_back_gracefully(monkeypatch):
     )
     monkeypatch.setattr(
         capture_module, "_encode_pixmap",
-        lambda pixmap, crop=None, max_edge=1600, jpeg_quality=85: _frame(),
+        lambda pixmap, crop=None, crop_origin=None, max_edge=1600,
+         jpeg_quality=85: _frame(),
     )
 
     service = capture_module.ScreenCaptureService()
@@ -340,7 +343,8 @@ def test_j2_stale_hwnd_uses_current_external_foreground(monkeypatch):
     )
     monkeypatch.setattr(
         capture_module, "_encode_pixmap",
-        lambda pixmap, crop=None, max_edge=1600, jpeg_quality=85: _frame(),
+        lambda pixmap, crop=None, crop_origin=None, max_edge=1600,
+         jpeg_quality=85: _frame(),
     )
 
     service = capture_module.ScreenCaptureService()
@@ -370,7 +374,8 @@ def test_companion_target_falls_back_to_primary_when_no_hwnd(monkeypatch):
     )
     monkeypatch.setattr(
         capture_module, "_encode_pixmap",
-        lambda pixmap, crop=None, max_edge=1600, jpeg_quality=85: _frame(),
+        lambda pixmap, crop=None, crop_origin=None, max_edge=1600,
+         jpeg_quality=85: _frame(),
     )
     service = capture_module.ScreenCaptureService()
     frame = service.capture_firefly_companion()

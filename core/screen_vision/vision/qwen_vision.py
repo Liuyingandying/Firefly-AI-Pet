@@ -10,6 +10,7 @@ import re
 from time import perf_counter
 
 import requests
+from core.model_router import routed_http_call
 
 from core.screen_vision.config import VISION_TIMEOUT_SECONDS, VisionConfig, load_vision_config
 from core.screen_vision.models import ScreenFrame, ScreenObservation
@@ -111,8 +112,8 @@ class QwenVisionProvider(VisionProvider):
 
         started = perf_counter()
         try:
-            response = requests.post(
-                f"{cfg.base_url}/chat/completions",
+            response = routed_http_call(requests.post,
+                f"{cfg.base_url}/chat/completions", task="vision", provider=self.name,
                 headers={
                     "Authorization": f"Bearer {cfg.api_key}",
                     "Content-Type": "application/json",
@@ -158,7 +159,8 @@ class QwenVisionProvider(VisionProvider):
         cfg = self._config
         payload = {
             "model": cfg.model,
-            "messages": build_vision_messages(frame, question),
+            "messages": ([{"role": "system", "content": style_context}] if style_context else [])
+                        + build_vision_messages(frame, question),
             "stream": False,
             "max_tokens": 1500,
         }
@@ -167,8 +169,8 @@ class QwenVisionProvider(VisionProvider):
         if extra:
             payload.update(extra)
         try:
-            response = requests.post(
-                f"{cfg.base_url}/chat/completions",
+            response = routed_http_call(requests.post,
+                f"{cfg.base_url}/chat/completions", task="vision", provider=self.name,
                 headers={
                     "Authorization": f"Bearer {cfg.api_key}",
                     "Content-Type": "application/json",

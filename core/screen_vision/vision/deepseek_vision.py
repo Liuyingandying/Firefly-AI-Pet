@@ -17,6 +17,7 @@ import json
 from typing import Callable
 
 import requests
+from core.model_router import routed_http_call
 
 from providers.base import resolve_setting
 
@@ -157,8 +158,8 @@ class DeepSeekVisionProvider:
             "Content-Type": "application/json",
         }
         try:
-            response = self._transport(
-                f"{self._base_url}/chat/completions",
+            response = routed_http_call(self._transport,
+                f"{self._base_url}/chat/completions", task="vision", provider=self.name,
                 headers=headers,
                 json=payload,
                 timeout=VISION_TIMEOUT_SECONDS,

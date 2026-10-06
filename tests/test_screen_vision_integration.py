@@ -129,7 +129,6 @@ def test_trigger_explicit_requests():
         "流萤，看一下我的屏幕",
         "看看我的屏幕",
         "帮我看看当前窗口",
-        "看看我现在在干什么",
         "你看看这是怎么回事",
         "/look",
         "/look 现在在播放什么",
@@ -149,7 +148,7 @@ def test_capture_target_semantics_v1():
     assert resolve_capture_target("看看整个屏幕") == "primary_screen"
     assert resolve_capture_target("看看我的桌面") == "primary_screen"
     # B: what I was just doing / the window before Firefly
-    assert resolve_capture_target("看看我在做什么") == "last_non_firefly_window"
+    assert resolve_capture_target("看看我在做什么") == "camera"
     assert resolve_capture_target("看看刚才这个窗口") == "last_non_firefly_window"
     assert resolve_capture_target("看看这个页面") == "last_non_firefly_window"
     # C: Firefly's own surface

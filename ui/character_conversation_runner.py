@@ -1850,9 +1850,24 @@ class CharacterConversationRunner(QObject):
             is_camera = capture_mode == "camera"
             try:
                 self._camera_trace("T1_worker_entering_vision_look", f"mode={capture_mode}")
-                result = self._get_screen_vision_service().look(
+                service = self._get_screen_vision_service()
+                style_args = {}
+                if is_camera:
+                    character = getattr(self.runtime, "character", None)
+                    if character is None:
+                        from character.character_loader import CharacterLoader
+                        character = CharacterLoader().load()
+                    style = "\n".join(m["content"] for m in character.to_system_messages())
+                    import inspect
+                    parameters = inspect.signature(service.look).parameters
+                    if "style_context" in parameters or any(
+                        p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters.values()
+                    ):
+                        style_args["style_context"] = style
+                result = service.look(
                     screen_vision_question(text),
                     capture_mode=capture_mode,
+                    **style_args,
                 )
             except Exception as exc:  # vision failure must not crash the turn
                 from core.screen_vision.provider_errors import (

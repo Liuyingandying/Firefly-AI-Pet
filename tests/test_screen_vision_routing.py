@@ -9,6 +9,7 @@ from datetime import datetime
 
 import pytest
 
+
 from core.screen_vision import config as sv_config
 from core.screen_vision.config import (
     ROUTING_FAST,
@@ -139,10 +140,13 @@ class _Capture:
 # ------------------------------------------------------ F-I ordering
 
 
-def test_f_fast_vision_prefers_deepseek():
-    assert get_vision_provider_order(ROUTING_FAST)[0] == "deepseek_vision"
+def test_f_fast_vision_prefers_tju():
+    # Both routes are TJU-first (the verified multimodal endpoint); the
+    # official DeepSeek client remains only as a fallback so a balance
+    # failure on it cannot break the primary one-shot vision path.
+    assert get_vision_provider_order(ROUTING_FAST)[0] == "qwen_vision"
     assert get_vision_provider_order(ROUTING_FAST) == (
-        "deepseek_vision", "qwen_vision", "glm_vision")
+        "qwen_vision", "deepseek_vision", "glm_vision")
 
 
 def test_g_fast_reasoning_prefers_deepseek():
@@ -343,7 +347,8 @@ def test_synthetic_resilient_would_wait_on_tju():
     avoids this serial wait."""
     order = get_vision_provider_order(ROUTING_RESILIENT)
     assert order[0] == "qwen_vision"
-    assert get_vision_provider_order(ROUTING_FAST)[0] == "deepseek_vision"
+    # FAST is also TJU-first now; DeepSeek is a fallback on both routes.
+    assert get_vision_provider_order(ROUTING_FAST)[0] == "qwen_vision"
 
 
 class _Breaker:

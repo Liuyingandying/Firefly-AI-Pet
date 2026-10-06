@@ -395,7 +395,8 @@ def test_g_vision_receives_page_text() -> None:
     assert "[Page 2 extracted text]" in question
     assert "PDF page 2 content" in question  # the page's own text
     assert "PDF page 1 content" not in question  # never other pages
-    assert style == DOCUMENT_VISION_STYLE_CONTEXT
+    assert style.startswith(DOCUMENT_VISION_STYLE_CONTEXT)
+    assert "PERSONA CONTEXT READ LAYER" not in style
 
 
 def test_h_no_pdf_bytes_sent_to_provider() -> None:

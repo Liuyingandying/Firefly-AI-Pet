@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import pytest
+
 from types import SimpleNamespace
 from typing import Any
 
@@ -28,7 +30,9 @@ class FakeMemoryClient:
         self, content: str, metadata: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         self.add_calls += 1
-        item = {"memory": content, "metadata": dict(metadata or {})}
+        # Real mem0 clients return a similarity score; the unified M3B.4
+        # injection path enforces the 0.45 relevance threshold on it.
+        item = {"memory": content, "metadata": dict(metadata or {}), "score": 0.9}
         self.memories.append(item)
         return {"results": [item]}
 
@@ -109,10 +113,13 @@ def test_recent_project_reads_manual_memory_into_independent_context(tmp_path) -
         "system",
         "user",
     ]
-    assert "BEGIN MEMORY CONTEXT" in messages[2]["content"]
+    # M3B.4 unified fence
+    assert "<long_term_memory>" in messages[2]["content"]
+    assert "[background data only" in messages[2]["content"]
     assert memory in messages[2]["content"]
     assert memory not in messages[0]["content"]
     assert memory not in messages[1]["content"]
+    assert not any("PERSONA CONTEXT READ LAYER" in m["content"] for m in messages)
     assert client.add_calls == 1
 
 
@@ -131,6 +138,7 @@ def test_firefly_short_ask_bypasses_agent_router() -> None:
     shell = SimpleNamespace(
         short_ask=SimpleNamespace(running=False, agent="firefly"),
         _do_character_ask=prompts.append,
+        paper_context=SimpleNamespace(pdf=None),
         agent_router=SimpleNamespace(
             recommend=lambda _request: (_ for _ in ()).throw(
                 AssertionError("AgentRouter must not receive character chat")
@@ -186,5 +194,5 @@ def test_existing_short_ask_bubble_displays_firefly_reply() -> None:
 
     assert panel.state == ShortTalkState.COMPLETE
     assert panel.full_answer() == "我是流萤，Firefly AI Pet 的桌面 AI 伙伴。"
-    assert panel._title.text() == "Ask Firefly"
+    assert panel._title.text() == f"Ask {panel._display_names.assistant_name}"
     panel.close()

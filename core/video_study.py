@@ -26,8 +26,7 @@ from core.video_reader import SessionVideoContext
 _STUDY_ENTRY_MARKERS = (
     "陪我学习", "学习这个视频", "陪我看", "带我学习", "陪我看完", "陪我刷",
 )
-_QUIZ_MARKERS = ("考考我", "考我", "出题", "出个题", "出道题", "出几道",
-                 "测测我", "来个问题", "检验一下")
+from core.learning.intents import QUIZ_MARKERS
 _EXIT_MARKERS = ("退出学习", "不学了", "学完了", "结束学习", "不陪了", "先到这里")
 
 _MAX_PROMPT_TRANSCRIPT_CHARS = 6_000
@@ -81,7 +80,7 @@ def is_study_entry(text: str) -> bool:
 
 
 def is_quiz_request(text: str) -> bool:
-    return any(marker in (text or "") for marker in _QUIZ_MARKERS)
+    return any(marker in (text or "") for marker in QUIZ_MARKERS)
 
 
 def is_study_exit(text: str) -> bool:

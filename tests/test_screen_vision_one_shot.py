@@ -6,6 +6,7 @@ import traceback
 import urllib.request
 
 import pytest
+
 import requests
 from PySide6.QtGui import QImage
 
@@ -290,6 +291,7 @@ def test_f_direct_answer_is_returned_to_companion_without_runtime_chat():
     assert answer == "这是天津大学教务系统课程页面。"
     assert runtime.calls == 0
     assert runner.last_screen_vision_meta["remote_calls"] == 1
+    assert "boundary_review_calls" not in runner.last_screen_vision_meta
 
 
 def test_g_transient_direct_failure_runs_resilient_pipeline():
@@ -303,6 +305,7 @@ def test_g_transient_direct_failure_runs_resilient_pipeline():
     assert result.answer == "resilient answer"
     assert result.meta["fallback_mode"] == "resilient"
     assert result.meta["remote_calls"] == 3
+    assert "boundary_review_calls" not in result.meta
 
 
 def test_h_failed_direct_deepseek_is_excluded_from_same_request():
@@ -342,6 +345,7 @@ def test_j_k_l_resilient_is_two_stage_observation_then_text_reasoning():
     service.set_routing_mode("resilient")
     result = service.look("q")
     assert result.meta["remote_calls"] == 2
+    assert "boundary_review_calls" not in result.meta
     assert result.observation.scene_summary == "教务系统课程页面"
     assert reasoning_leaf.calls == 1
     payload = json.dumps(reasoning_leaf.payloads[0], ensure_ascii=False).lower()

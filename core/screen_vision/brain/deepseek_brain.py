@@ -7,6 +7,7 @@ against image-data markers before every send.
 import json
 
 import requests
+from core.model_router import routed_http_call
 
 from core.screen_vision.brain.base import ReasoningProvider, assert_text_only_payload
 from core.screen_vision.config import BRAIN_TIMEOUT_SECONDS, ReasoningConfig, load_reasoning_config
@@ -62,8 +63,8 @@ class DeepSeekV4FlashProvider(ReasoningProvider):
             "stream": False,
         }
         try:
-            response = requests.post(
-                f"{cfg.base_url}/chat/completions",
+            response = routed_http_call(requests.post,
+                f"{cfg.base_url}/chat/completions", task="reasoning", provider=self.name,
                 headers={
                     "Authorization": f"Bearer {cfg.api_key}",
                     "Content-Type": "application/json",
