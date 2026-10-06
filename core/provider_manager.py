@@ -65,11 +65,23 @@ class ProviderManager:
     dotenv layer for tests; production uses the project ``.env``.
     """
 
-    def __init__(self, store: Any | None = None, *, env_file: Any | None = None) -> None:
+    def __init__(self, store: Any | None = None, *, env_file: Any | None = None, model_management=None) -> None:
         self._store = store if store is not None else default_store()
         self._env_file = env_file
         self._lock = threading.RLock()
         self._state_version = 0
+        self._model_management = model_management
+
+    @property
+    def model_management(self):
+        if self._model_management is None:
+            from core.model_management import ModelManagement
+            self._model_management = ModelManagement()
+        return self._model_management
+
+    def list_model_resources(self):
+        """Local capability declarations + evidence, not live server discovery."""
+        return self.model_management.resources(self)
 
     # ------------------------------------------------------------------
     # queries

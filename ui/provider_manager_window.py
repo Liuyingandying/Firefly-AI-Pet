@@ -24,6 +24,7 @@ from typing import Any, Callable
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QDialog,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QInputDialog,
@@ -232,7 +233,25 @@ class ProviderManagerWindow(QDialog):
         self._cards_layout.setSpacing(8)
 
         body = QWidget()
-        body.setLayout(self._cards_layout)
+        body_layout = QVBoxLayout(body)
+        from core.model_management import POLICIES
+        body_layout.addWidget(QLabel("系统模型能力与运行策略"))
+        self._policy_combo = QComboBox()
+        self._policy_combo.setObjectName("systemModelPolicy")
+        for key, label in POLICIES:
+            self._policy_combo.addItem(label, key)
+        body_layout.addWidget(self._policy_combo)
+        self._resource_summary = QLabel()
+        self._resource_summary.setObjectName("modelResourceSummary")
+        self._resource_summary.setWordWrap(True)
+        self._resource_summary.setTextFormat(Qt.TextFormat.PlainText)
+        body_layout.addWidget(self._resource_summary)
+        self._policy_status = QLabel()
+        self._policy_status.setWordWrap(True)
+        body_layout.addWidget(self._policy_status)
+        body_layout.addWidget(QLabel("Provider 凭据"))
+        body_layout.addLayout(self._cards_layout)
+        self._policy_combo.currentIndexChanged.connect(self._select_policy)
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setWidget(body)
@@ -250,6 +269,10 @@ class ProviderManagerWindow(QDialog):
             card.setParent(None)
             card.deleteLater()
         self._cards = []
+        # Clear prior stretch items too; refreshing must not grow the layout.
+        while self._cards_layout.count():
+            self._cards_layout.takeAt(0)
+        self._refresh_model_policy()
 
         for row in self._manager.list_providers():
             card = ProviderCard(
@@ -265,6 +288,31 @@ class ProviderManagerWindow(QDialog):
             self._cards_layout.addWidget(card)
             self._cards.append(card)
         self._cards_layout.addStretch(1)
+
+    def _refresh_model_policy(self):
+        management = self._manager.model_management
+        self._policy_combo.blockSignals(True)
+        self._policy_combo.setCurrentIndex(self._policy_combo.findData(management.policy))
+        self._policy_combo.blockSignals(False)
+        lines = ["能力声明与验证记录；不代表实时在线状态。"]
+        for row in self._manager.list_model_resources():
+            configured = "凭据已配置" if row["configured"] else "凭据未配置"
+            lines.append(f"{row['display_name']} · {configured}\n"
+                         f"声明：{', '.join(row['declared_capabilities'])}；"
+                         f"已验证：{', '.join(row['verified_capabilities']) or '暂无'}")
+        lines.append("当前任务分配（显式调用参数优先）：")
+        lines.extend(f"{r['task']} → {r['profile']}" for r in management.task_plan())
+        lines.append("策略作用于下一次受管请求；视觉和外部代理保留既有协议。")
+        self._resource_summary.setText("\n\n".join(lines))
+
+    def _select_policy(self, index):
+        try:
+            self._manager.model_management.set_policy(self._policy_combo.itemData(index))
+        except (OSError, ValueError):
+            self._policy_status.setText("策略未保存，已保留原策略。")
+        else:
+            self._policy_status.setText("策略已保存；下一次受管请求生效，当前会话保持。")
+        self._refresh_model_policy()
 
     def cards(self) -> list[ProviderCard]:
         """Card handles for tests/tooling (id / status / labels)."""

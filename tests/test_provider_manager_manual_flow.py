@@ -29,8 +29,8 @@ from providers import base as provider_base
 from ui.provider_manager_window import KEY_MASK, ProviderManagerWindow
 from ui.settings_popover import SettingsPopover
 
-SECRET_OLD = "sk-rc2-synthetic-old"
-SECRET_NEW = "sk-rc2-synthetic-new"
+SECRET_OLD = "test-credential-old"
+SECRET_NEW = "test-credential-new"
 
 
 class _Settings:

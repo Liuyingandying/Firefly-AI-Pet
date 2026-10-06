@@ -278,6 +278,7 @@ class OpenAICompatibleProvider(BaseProvider):
         temperature: float = 0.2,
         *,
         timeout: float | None = None,
+        variant: str | None = None,
     ) -> ChatCompletion:
         normalized_messages = validate_messages(messages)
         if not self.api_key:
@@ -294,6 +295,8 @@ class OpenAICompatibleProvider(BaseProvider):
             "temperature": float(temperature),
             "stream": False,
         }
+        if variant is not None:
+            payload["variant"] = variant
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
@@ -303,12 +306,14 @@ class OpenAICompatibleProvider(BaseProvider):
             request_timeout = min(request_timeout, float(timeout))
         if request_timeout <= 0:
             raise ProviderTimeoutError("provider request timeout budget is exhausted")
-        response = self._transport(
-            self.endpoint,
-            payload,
-            headers,
-            request_timeout,
-        )
+        def send():
+            return self._transport(self.endpoint, payload, headers, request_timeout)
+        if self.name == "tju":
+            response = send()  # TJUQwenProvider owns profile selection above this transport
+        else:
+            from core.model_router import get_model_router
+            response = get_model_router().passthrough(send, task="text",
+                                                     provider=self.name, model=request_model)
         return normalize_chat_completion(
             response,
             provider=self.name,

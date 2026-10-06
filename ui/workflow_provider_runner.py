@@ -239,9 +239,10 @@ class DirectProviderRunner(QObject):
         try:
             payload = build_messages_payload(prompt, config)
             headers = build_messages_headers(config)
-            response_json = self._transport(
-                config.endpoint, payload, headers, config.timeout_seconds, cancel_event
-            )
+            from core.model_router import get_model_router
+            response_json = get_model_router().passthrough(
+                lambda: self._transport(config.endpoint, payload, headers, config.timeout_seconds, cancel_event),
+                task="workflow", provider="anthropic-compatible", model=payload["model"])
         except Exception as exc:  # noqa: BLE001 - classify every provider failure
             category, message = self._classify(exc)
             return [

@@ -194,7 +194,7 @@ class SettingsPopover(PopoverBase):
         ai_header.setStyleSheet(theme.section_label_style())
         ai_header.setToolTip(
             "Read-only view of the providers Firefly currently uses. "
-            "Routing cannot be changed here."
+            "Provider health is read-only. Manage system resources in AI model management."
         )
         self.content_layout.addWidget(ai_header)
 

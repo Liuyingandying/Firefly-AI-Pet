@@ -34,7 +34,7 @@ from core.runtime_bus import RuntimeBus, RuntimeEvent
 from providers import base as provider_base
 from ui.provider_manager_window import KEY_MASK, ProviderManagerWindow
 
-SECRET = "sk-phase3b-synthetic-secret"
+SECRET = "test-credential-for-provider-ui"
 EXPECTED_IDS = {
     "tju", "zhipu", "deepseek",
     "tju-qwen", "glm-vision", "deepseek-vision",

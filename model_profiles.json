@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "default": "tju-stable",
+  "task_routes": {"chat": "tju-stable", "learning": "tju-stable", "authoring": "tju-max", "review": "tju-max"},
+  "task_capabilities": {"chat": ["text"], "learning": ["text"], "authoring": ["text", "tools"], "review": ["text", "json"]},
+  "profiles": [
+    {"name": "tju-stable", "provider": "tju", "model": "tju-llm", "variant": null, "capabilities": ["text", "json", "tools", "vision"], "fallback": null,
+     "protocol": "openai-chat-completions", "display_name": "TJU Stable", "verified_capabilities": ["text"], "evidence": "docs/model_routing/Model_Routing_Public_Summary.md"},
+    {"name": "tju-max", "provider": "tju", "model": "tju-llm-max", "variant": "dsv4.1flash", "capabilities": ["text", "json", "tools"], "fallback": "tju-stable",
+     "protocol": "openai-chat-completions", "display_name": "TJU Max(dsv4.1flash)", "verified_capabilities": ["text"], "evidence": "docs/model_routing/Model_Routing_Public_Summary.md"}
+  ]
+}

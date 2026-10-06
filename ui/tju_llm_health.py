@@ -132,7 +132,10 @@ def probe_tju_llm(provider, *, transport=None, timeout=PROBE_TIMEOUT_SECONDS):
         "Content-Type": "application/json",
         "Authorization": f"Bearer {provider.api_key}",
     }
-    return send(provider.endpoint, payload, headers, timeout)
+    from core.model_router import get_model_router
+    return get_model_router().passthrough(
+        lambda: send(provider.endpoint, payload, headers, timeout),
+        task="health_probe", provider="tju", model=provider.default_model)
 
 
 def classify_probe_error(exc: Exception) -> str:

@@ -143,6 +143,7 @@ class ProviderRouter:
         messages: list[dict[str, Any]],
         model: str | None = None,
         temperature: float = 0.2,
+        *, task: str = "chat", profile: str | None = None,
     ) -> ChatCompletion:
         """Return the first successful provider response.
 
@@ -153,6 +154,8 @@ class ProviderRouter:
         request's remaining global budget.
         """
         normalized_messages = validate_messages(messages)
+        from core.model_router import get_model_router
+        get_model_router().resolve(task=task, profile=profile, model=model)
         failures: list[tuple[str, Exception]] = []
         deadline = self._clock() + self.timeout_budget
 
@@ -168,12 +171,20 @@ class ProviderRouter:
                 break
             request_timeout = min(self.provider_timeout, remaining)
             try:
-                response = provider.chat(
-                    normalized_messages,
-                    model=model,
-                    temperature=temperature,
-                    timeout=request_timeout,
-                )
+                if getattr(provider, "supports_model_routing", False) is True:
+                    response = provider.chat(normalized_messages, model=model, temperature=temperature,
+                                             timeout=request_timeout, task=task, profile=profile)
+                else:
+                    # A TJU profile/model name must never leak to another service.
+                    from core.model_router import get_model_router
+                    mr = get_model_router()
+                    aliases = {p.model for p in mr.profiles.values()} | set(mr.profiles)
+                    fallback_model = None if profile is not None or model in aliases else model
+                    response = mr.passthrough(
+                        lambda: provider.chat(normalized_messages, model=fallback_model,
+                                              temperature=temperature, timeout=request_timeout),
+                        task=task, provider=provider_name,
+                        model=fallback_model or getattr(provider, "default_model", "provider-default"))
             except Exception as exc:  # provider isolation is the router's boundary
                 failures.append((provider_name, exc))
                 self._record_failure(provider_name)
@@ -301,10 +312,13 @@ def chat(
     messages: list[dict[str, Any]],
     model: str | None = None,
     temperature: float = 0.2,
+    *, task: str = "chat", profile: str | None = None,
 ) -> ChatCompletion:
     """Chat through TJU Qwen, then Zhipu GLM, then DeepSeek Chat."""
     return _get_default_router().chat(
         messages,
         model=model,
         temperature=temperature,
+        task=task,
+        profile=profile,
     )
