@@ -165,3 +165,28 @@ tools/firefly_memory_importer/data/
 
 Firefly_AI_Pet_v0.1.bundle
 *.bundle
+
+# Publication boundary: user state, credentials and private evidence
+userdata/
+qdrant/
+**/qdrant_storage/
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+**/memory_records.json
+**/bond_state.json
+**/credentials.json
+screenshots/
+crash_dumps/
+*.dmp
+staging/
+original/
+release-original-features/
+config/workspaces.json
+config/*.bak*
+*.safetensors
+*.pth
+*.pt
+*.ckpt

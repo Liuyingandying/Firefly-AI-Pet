@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
@@ -14,6 +15,15 @@ from PySide6.QtCore import QEvent, QEventLoop
 from PySide6.QtWidgets import QApplication
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _qt_application_keepalive():
+    """Keep one QApplication alive across modules that own short Qt fixtures."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    application = QApplication.instance() or QApplication([])
+    yield application
+    application.processEvents()
 
 
 def _is_loopback_url(value) -> bool:
@@ -91,6 +101,18 @@ def _pytest_local_temproot(
 def project_tmp_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Return the unique repo-local temp directory for this test run."""
     return tmp_path_factory.getbasetemp()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_suggestion_store(tmp_path, monkeypatch):
+    """M3B.7 isolation: tests must never read/write the production
+    runtime/companion/memory_suggestions.json.  Redirect the store default
+    path to a per-test temp file (production boot path is unaffected)."""
+    import memory.suggestion_store as _ss
+
+    target = tmp_path / "memory_suggestions.json"
+    monkeypatch.setattr(_ss, "DEFAULT_SUGGESTION_STORE_PATH", target)
+    yield
 
 
 def teardown_qt_widget(widget) -> None:

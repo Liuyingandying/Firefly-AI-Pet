@@ -255,7 +255,7 @@ def test_parse_file_roundtrip(tmp_path: Path) -> None:
 
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-_ZIP_PATH = _DATA_DIR / "89e3821900eb4847af207291bdb2678b-2.zip"
+_ZIP_PATH = _DATA_DIR / "synthetic-export.zip"
 _TXT_PATH = _DATA_DIR / "conversations.txt"
 
 

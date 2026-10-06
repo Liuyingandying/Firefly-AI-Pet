@@ -1,0 +1,940 @@
+{
+  "schema_version": 2,
+  "candidate_baseline": "df18cc414c7abcc92ff5a56480021c1b7b5ee8fd",
+  "scope": "Actual targeted offline invocations against the isolated release candidate. This document contains no live provider-ready payloads or user state.",
+  "placeholders": {
+    "REPOSITORY_ROOT": "Absolute path to this release checkout; use it as cwd.",
+    "TEST_ROOT": "A fresh absolute scratch root outside the checkout and production user data, unique for each replay. pytest may replace its basetemp directory; never use a data directory.",
+    "python": "The Python executable of an environment with project test dependencies installed. Observed runs used the existing Windows Python 3.13 project environment."
+  },
+  "replay_instructions": [
+    "Expand placeholders in argv/environment strings, then launch the argument array from REPOSITORY_ROOT. JSON does not itself expand placeholders.",
+    "Set each listed environment override and remove each environment_unset key only in the child test process; preserve unrelated host configuration.",
+    "Keep external/live opt-in flags disabled for these recorded offline gates. Enabling those flags changes the scope and does not replay the recorded result."
+  ],
+  "counting_note": "Groups and earlier/later invocations overlap. Counts are per actual command, not a unique-case total and not a whole-repository result.",
+  "final_runs": [
+    {
+      "group": "memory_owner",
+      "cwd": "${REPOSITORY_ROOT}",
+      "argv": [
+        "python",
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "pytest",
+        "--rootdir=.",
+        "tests/test_memory_records.py",
+        "tests/test_memory_repository.py",
+        "tests/test_memory_service.py",
+        "tests/test_memory_dedup.py",
+        "tests/test_write_guards.py",
+        "tests/test_memory_access_mode.py",
+        "tests/test_memory_m1_consistency.py",
+        "tests/test_memory_m1_runtime_wiring.py",
+        "tests/test_memory_m2_policy.py",
+        "tests/test_memory_m2_conflicts.py",
+        "tests/test_memory_m2b_migration.py",
+        "tests/test_memory_m2c_revision.py",
+        "tests/test_memory_m2c_confirmation.py",
+        "tests/test_memory_m2c_atomicity.py",
+        "tests/test_memory_m2c_subject_safety.py",
+        "tests/test_memory_history_restore.py",
+        "tests/test_memory_reconcile.py",
+        "tests/test_suggestion_store.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "${TEST_ROOT}/pytest/memory_owner"
+      ],
+      "environment_overrides": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "FIREFLY_CONVERSATION_PACING": "0",
+        "FIREFLY_USER_DATA_DIR": "${TEST_ROOT}/userdata/memory_owner",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "HF_HUB_OFFLINE": "1",
+        "HF_HUB_DISABLE_TELEMETRY": "1"
+      },
+      "environment_unset": [],
+      "exit_code": 0,
+      "status": "PASS",
+      "observed_result": [
+        "230 passed in 20.99s"
+      ],
+      "counts": {
+        "passed": 230
+      },
+      "command_evidence": "memory_test_results_verified.json",
+      "result_evidence_log": "memory_owner_tests_verified.log",
+      "reproducibility": "COMPLETE_ARGV_AND_EXPLICIT_ENV"
+    },
+    {
+      "group": "memory_recall",
+      "cwd": "${REPOSITORY_ROOT}",
+      "argv": [
+        "python",
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "pytest",
+        "--rootdir=.",
+        "tests/test_memory_identity_recall.py",
+        "tests/test_memory_identity_integration.py",
+        "tests/test_memory_nickname_restore.py",
+        "tests/test_memory_index_consistency_fix.py",
+        "tests/test_memory_ranking_p4.py",
+        "tests/test_memory_m3b_ranking.py",
+        "tests/test_memory_m3b_injection.py",
+        "tests/test_memory_recall_gate.py",
+        "tests/test_memory_retrieval_eval.py",
+        "tests/test_memory_retrieval_unification.py",
+        "tests/test_memory_m3b_benchmark.py",
+        "tests/test_memory_prompt_builder.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "${TEST_ROOT}/pytest/memory_recall"
+      ],
+      "environment_overrides": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "FIREFLY_CONVERSATION_PACING": "0",
+        "FIREFLY_USER_DATA_DIR": "${TEST_ROOT}/userdata/memory_recall",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "HF_HUB_OFFLINE": "1",
+        "HF_HUB_DISABLE_TELEMETRY": "1"
+      },
+      "environment_unset": [],
+      "exit_code": 0,
+      "status": "PASS",
+      "observed_result": [
+        "240 passed in 3.17s"
+      ],
+      "counts": {
+        "passed": 240
+      },
+      "command_evidence": "memory_test_results_verified.json",
+      "result_evidence_log": "memory_recall_tests_verified.log",
+      "reproducibility": "COMPLETE_ARGV_AND_EXPLICIT_ENV"
+    },
+    {
+      "group": "memory_ui",
+      "cwd": "${REPOSITORY_ROOT}",
+      "argv": [
+        "python",
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "pytest",
+        "--rootdir=.",
+        "tests/test_hardening_memory.py",
+        "tests/test_memory_panel.py",
+        "tests/test_memory_manager_v2.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "${TEST_ROOT}/pytest/memory_ui"
+      ],
+      "environment_overrides": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "FIREFLY_CONVERSATION_PACING": "0",
+        "FIREFLY_USER_DATA_DIR": "${TEST_ROOT}/userdata/memory_ui",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "HF_HUB_OFFLINE": "1",
+        "HF_HUB_DISABLE_TELEMETRY": "1"
+      },
+      "environment_unset": [],
+      "exit_code": 0,
+      "status": "PASS",
+      "observed_result": [
+        "48 passed in 0.70s"
+      ],
+      "counts": {
+        "passed": 48
+      },
+      "command_evidence": "memory_test_results_verified.json",
+      "result_evidence_log": "memory_ui_tests_verified.log",
+      "reproducibility": "COMPLETE_ARGV_AND_EXPLICIT_ENV"
+    },
+    {
+      "group": "character_conversation",
+      "cwd": "${REPOSITORY_ROOT}",
+      "argv": [
+        "python",
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "pytest",
+        "--rootdir=.",
+        "tests/test_companion_config.py",
+        "tests/test_companion_context_builder.py",
+        "tests/test_companion_runtime.py",
+        "tests/test_conversation_runtime.py",
+        "tests/test_conversation_store.py",
+        "tests/test_character_runtime.py",
+        "tests/test_character_conversation_runner.py",
+        "tests/test_companion_memory_boundary.py",
+        "tests/test_companion_image_attachment.py",
+        "tests/test_companion_document_attachment.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "${TEST_ROOT}/pytest/character_conversation"
+      ],
+      "environment_overrides": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "FIREFLY_CONVERSATION_PACING": "0",
+        "FIREFLY_USER_DATA_DIR": "${TEST_ROOT}/userdata/character_conversation",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "HF_HUB_OFFLINE": "1",
+        "HF_HUB_DISABLE_TELEMETRY": "1"
+      },
+      "environment_unset": [],
+      "exit_code": 0,
+      "status": "PASS",
+      "observed_result": [
+        "136 passed, 2 warnings in 41.84s"
+      ],
+      "counts": {
+        "passed": 136,
+        "warnings": 2
+      },
+      "command_evidence": "memory_test_results_verified.json",
+      "result_evidence_log": "character_conversation_tests_verified.log",
+      "reproducibility": "COMPLETE_ARGV_AND_EXPLICIT_ENV"
+    },
+    {
+      "group": "bond",
+      "cwd": "${REPOSITORY_ROOT}",
+      "argv": [
+        "python",
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "pytest",
+        "--rootdir=.",
+        "tests/test_bond_state.py",
+        "tests/test_bond_context_builder.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "${TEST_ROOT}/pytest/bond"
+      ],
+      "environment_overrides": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "FIREFLY_CONVERSATION_PACING": "0",
+        "FIREFLY_USER_DATA_DIR": "${TEST_ROOT}/userdata/bond",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "HF_HUB_OFFLINE": "1",
+        "HF_HUB_DISABLE_TELEMETRY": "1"
+      },
+      "environment_unset": [],
+      "exit_code": 0,
+      "status": "PASS",
+      "observed_result": [
+        "18 passed in 0.39s"
+      ],
+      "counts": {
+        "passed": 18
+      },
+      "command_evidence": "memory_test_results_verified.json",
+      "result_evidence_log": "bond_tests_verified.log",
+      "reproducibility": "COMPLETE_ARGV_AND_EXPLICIT_ENV"
+    },
+    {
+      "group": "memory_suggestion",
+      "cwd": "${REPOSITORY_ROOT}",
+      "argv": [
+        "python",
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "pytest",
+        "--rootdir=.",
+        "memory/suggestion/tests/test_suggestion_service.py",
+        "memory/suggestion/tests/test_suggestion_service_p5a.py",
+        "memory/suggestion/tests/test_suggestion_service_p5a3.py",
+        "memory/suggestion/tests/test_semantic_dedup_p5a2.py",
+        "memory/suggestion/tests/test_memory_candidate_detector.py",
+        "memory/suggestion/tests/test_candidate_extractor.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "${TEST_ROOT}/pytest/memory_suggestion"
+      ],
+      "environment_overrides": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "FIREFLY_CONVERSATION_PACING": "0",
+        "FIREFLY_USER_DATA_DIR": "${TEST_ROOT}/userdata/memory_suggestion",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "HF_HUB_OFFLINE": "1",
+        "HF_HUB_DISABLE_TELEMETRY": "1"
+      },
+      "environment_unset": [],
+      "exit_code": 0,
+      "status": "PASS",
+      "observed_result": [
+        "115 passed in 0.44s"
+      ],
+      "counts": {
+        "passed": 115
+      },
+      "command_evidence": "memory_suggestion_final_results.json",
+      "result_evidence_log": "memory_suggestion_tests_verified_final.log",
+      "reproducibility": "COMPLETE_ARGV_AND_EXPLICIT_ENV"
+    },
+    {
+      "group": "learning_all_keepalive",
+      "cwd": "${REPOSITORY_ROOT}",
+      "argv": [
+        "python",
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "pytest",
+        "--rootdir=.",
+        "--confcutdir=.",
+        "tests/test_authoring_output_path_resolver.py",
+        "tests/test_authoring_question_schema_adapter.py",
+        "tests/test_curriculum_domain.py",
+        "tests/test_curriculum_draft_adapter.py",
+        "tests/test_curriculum_review_agent.py",
+        "tests/test_curriculum_review_provider.py",
+        "tests/test_curriculum_store.py",
+        "tests/test_learning_action.py",
+        "tests/test_learning_agent.py",
+        "tests/test_learning_agent_context.py",
+        "tests/test_learning_agent_loop.py",
+        "tests/test_learning_agent_model.py",
+        "tests/test_learning_answer_evidence.py",
+        "tests/test_learning_assessment.py",
+        "tests/test_learning_bootstrap.py",
+        "tests/test_learning_bootstrap_priority.py",
+        "tests/test_learning_brain.py",
+        "tests/test_learning_bridge.py",
+        "tests/test_learning_bridge_memory_guard.py",
+        "tests/test_learning_concept_approval.py",
+        "tests/test_learning_concept_choice.py",
+        "tests/test_learning_concept_refinement.py",
+        "tests/test_learning_context.py",
+        "tests/test_learning_curriculum_generator.py",
+        "tests/test_learning_curriculum_planner.py",
+        "tests/test_learning_decision.py",
+        "tests/test_learning_dialog_runtime.py",
+        "tests/test_learning_document_attachment.py",
+        "tests/test_learning_end_to_end.py",
+        "tests/test_learning_entry_ui.py",
+        "tests/test_learning_entry_wiring.py",
+        "tests/test_learning_evidence.py",
+        "tests/test_learning_evidence_bridge.py",
+        "tests/test_learning_experience.py",
+        "tests/test_learning_explanation.py",
+        "tests/test_learning_extractor.py",
+        "tests/test_learning_interactions.py",
+        "tests/test_learning_judge.py",
+        "tests/test_learning_knowledge_graph.py",
+        "tests/test_learning_knowledge_import.py",
+        "tests/test_learning_mastery_adapter.py",
+        "tests/test_learning_mastery_integration.py",
+        "tests/test_learning_mode_controller.py",
+        "tests/test_learning_mode_ui.py",
+        "tests/test_learning_orchestrator.py",
+        "tests/test_learning_presentation_ui.py",
+        "tests/test_learning_profile.py",
+        "tests/test_learning_question.py",
+        "tests/test_learning_quiz_adapter.py",
+        "tests/test_learning_recommendation.py",
+        "tests/test_learning_resources.py",
+        "tests/test_learning_response_contract.py",
+        "tests/test_learning_restore_semantics.py",
+        "tests/test_learning_return_channel.py",
+        "tests/test_learning_return_delivery.py",
+        "tests/test_learning_review_scheduler.py",
+        "tests/test_learning_rule_engine.py",
+        "tests/test_learning_runtime_integration.py",
+        "tests/test_learning_runtime_v65.py",
+        "tests/test_learning_session.py",
+        "tests/test_learning_simulation.py",
+        "tests/test_learning_skill_loop.py",
+        "tests/test_learning_skill_runtime.py",
+        "tests/test_learning_skill_v2.py",
+        "tests/test_learning_skill_v2_ui.py",
+        "tests/test_learning_store.py",
+        "tests/test_learning_teaching.py",
+        "tests/test_learning_tjullm_model.py",
+        "tests/test_learning_tools.py",
+        "tests/test_learning_tutor_session.py",
+        "tests/test_learning_v02_bootstrap.py",
+        "tests/test_phase9a_curriculum_import_recovery.py",
+        "tests/test_product_learning_integration.py",
+        "tests/test_student_presentation.py",
+        "tests/test_teach_mcp_provider_launcher.py",
+        "tests/test_teach_mcp_stdio_integration.py",
+        "tests/test_textbook_chapter_policy.py",
+        "tests/test_tutor_chat_integration.py",
+        "tests/test_learning_optional_course_mapping.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "${TEST_ROOT}/pytest/learning_all_keepalive"
+      ],
+      "environment_overrides": {
+        "FIREFLY_USER_DATA_DIR": "${TEST_ROOT}/userdata/learning_all_keepalive",
+        "QT_QPA_PLATFORM": "offscreen",
+        "FIREFLY_RUN_TEACH_MCP_INTEGRATION": "0"
+      },
+      "environment_unset": [],
+      "exit_code": 0,
+      "status": "PASS",
+      "observed_result": [
+        "1172 passed, 8 skipped, 3 warnings in 284.55s (0:04:44)"
+      ],
+      "counts": {
+        "passed": 1172,
+        "skipped": 8,
+        "warnings": 3
+      },
+      "command_evidence": "learning_all_keepalive_command.json",
+      "result_evidence_log": "learning_all_tests_keepalive.log",
+      "reproducibility": "COMPLETE_ARGV_AND_EXPLICIT_ENV",
+      "skip_scope": "Eight external teach-mcp/textbook opt-in cases were not run. This is offline Learning closure, not real course/MCP/desktop acceptance."
+    },
+    {
+      "group": "model_security",
+      "cwd": "${REPOSITORY_ROOT}",
+      "argv": [
+        "python",
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "pytest",
+        "tests/test_model_routing_layer.py",
+        "tests/test_model_management.py",
+        "tests/test_control_cli.py",
+        "tests/test_provider_router.py",
+        "tests/test_provider_manager.py",
+        "tests/test_provider_manager_ui.py",
+        "tests/test_provider_manager_manual_flow.py",
+        "tests/test_provider_reload.py",
+        "tests/test_credential_store.py",
+        "tests/test_provider_catalog.py",
+        "tests/test_provider_status.py",
+        "tests/test_hardening_security.py",
+        "tests/test_pagelens_ai_bridge.py",
+        "tests/test_pagelens_selection_bridge.py",
+        "tests/test_teach_mcp_server_path.py",
+        "tests/test_teach_mcp_provider_launcher.py",
+        "tests/test_architecture_hardening.py",
+        "tests/test_extension_api.py",
+        "tests/test_path_decoupling.py",
+        "tests/test_plugin_loader.py",
+        "tests/test_quick_tools_plugin_allowlist.py",
+        "tools/character_package/tests/test_package.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "${TEST_ROOT}/pytest/model_security"
+      ],
+      "environment_overrides": {
+        "FIREFLY_USER_DATA_DIR": "${TEST_ROOT}/userdata/model_security",
+        "LOCALAPPDATA": "${TEST_ROOT}/localappdata/model_security",
+        "QT_QPA_PLATFORM": "offscreen",
+        "QTWEBENGINE_DISABLE_SANDBOX": "1"
+      },
+      "environment_unset": [
+        "FIREFLY_PAGELENS_TOKEN",
+        "FIREFLY_PAGELENS_ORIGINS"
+      ],
+      "exit_code": 0,
+      "status": "PASS",
+      "observed_result": [
+        "209 passed, 3 warnings in 58.14s"
+      ],
+      "counts": {
+        "passed": 209,
+        "warnings": 3
+      },
+      "command_evidence": "Model_Security_Release_Audit.md explicit file list/options plus executing agent confirmation of actual argv and explicit environment",
+      "result_evidence_log": "model_security_tests_6.log",
+      "reproducibility": "COMPLETE_ARGV_AND_EXPLICIT_ENV"
+    },
+    {
+      "group": "model_server_path_final",
+      "cwd": "${REPOSITORY_ROOT}",
+      "argv": [
+        "python",
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "pytest",
+        "tests/test_teach_mcp_server_path.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "${TEST_ROOT}/pytest/model_server_path_final"
+      ],
+      "environment_overrides": {
+        "FIREFLY_USER_DATA_DIR": "${TEST_ROOT}/userdata/model_server_path_final",
+        "LOCALAPPDATA": "${TEST_ROOT}/localappdata/model_server_path_final",
+        "QT_QPA_PLATFORM": "offscreen",
+        "QTWEBENGINE_DISABLE_SANDBOX": "1",
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "environment_unset": [
+        "FIREFLY_PAGELENS_TOKEN",
+        "FIREFLY_PAGELENS_ORIGINS"
+      ],
+      "exit_code": 0,
+      "status": "PASS",
+      "observed_result": [
+        "3 passed in 0.33s"
+      ],
+      "counts": {
+        "passed": 3
+      },
+      "command_evidence": "Model_Security_Release_Audit.md explicit file list/options plus executing agent confirmation of actual argv and explicit environment",
+      "result_evidence_log": "model_security_path_final.log",
+      "reproducibility": "COMPLETE_ARGV_AND_EXPLICIT_ENV",
+      "coverage_overlap_note": "Two cases overlap the earlier model/security batch; this later invocation validates the added direct-script case as well."
+    },
+    {
+      "group": "root_vision_receipted",
+      "cwd": "${REPOSITORY_ROOT}",
+      "argv": [
+        "python",
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "pytest",
+        "--rootdir=.",
+        "--confcutdir=.",
+        "tests/test_screen_vision_routing.py",
+        "tests/test_screen_vision_one_shot.py",
+        "tests/test_screen_vision_integration.py",
+        "tests/test_character_conversation_runner.py",
+        "tests/test_capture_semantics.py",
+        "tests/test_companion_image_attachment.py",
+        "tests/test_companion_document_attachment.py",
+        "tests/test_document_vision.py",
+        "tests/test_camera_capture.py",
+        "tests/test_camera_observed_event.py",
+        "tests/test_screen_vision_cleanup.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "${TEST_ROOT}/pytest/root_vision_receipted"
+      ],
+      "environment_overrides": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "QTWEBENGINE_DISABLE_SANDBOX": "1",
+        "FIREFLY_USER_DATA_DIR": "${TEST_ROOT}/userdata/root_vision_receipted",
+        "FIREFLY_RUN_TEACH_MCP_INTEGRATION": "0",
+        "FIREFLY_LIVE_VOICE": "0"
+      },
+      "environment_unset": [],
+      "exit_code": 0,
+      "status": "PASS",
+      "observed_result": [
+        "222 passed in 59.86s"
+      ],
+      "counts": {
+        "passed": 222
+      },
+      "command_evidence": "root_final_test_commands.json",
+      "result_evidence_log": "root_vision_receipted.log",
+      "reproducibility": "COMPLETE_ARGV_AND_EXPLICIT_ENV"
+    },
+    {
+      "group": "root_ui_receipted",
+      "cwd": "${REPOSITORY_ROOT}",
+      "argv": [
+        "python",
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "pytest",
+        "--rootdir=.",
+        "--confcutdir=.",
+        "tests/test_ui_v2_console.py",
+        "tests/test_console_default_entry.py",
+        "tests/test_recent_sessions_scroll.py",
+        "tests/test_camera_vision_plugin_integration.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "${TEST_ROOT}/pytest/root_ui_receipted"
+      ],
+      "environment_overrides": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "QTWEBENGINE_DISABLE_SANDBOX": "1",
+        "FIREFLY_USER_DATA_DIR": "${TEST_ROOT}/userdata/root_ui_receipted",
+        "FIREFLY_RUN_TEACH_MCP_INTEGRATION": "0",
+        "FIREFLY_LIVE_VOICE": "0"
+      },
+      "environment_unset": [],
+      "exit_code": 0,
+      "status": "PASS",
+      "observed_result": [
+        "63 passed, 2 skipped, 3 warnings in 7.93s"
+      ],
+      "counts": {
+        "passed": 63,
+        "skipped": 2,
+        "warnings": 3
+      },
+      "command_evidence": "root_final_test_commands.json",
+      "result_evidence_log": "root_ui_receipted.log",
+      "reproducibility": "COMPLETE_ARGV_AND_EXPLICIT_ENV",
+      "skip_scope": "Optional installed-plugin scenarios are skipped in the public main-repository environment; no live GUI acceptance is claimed."
+    },
+    {
+      "group": "root_voice_receipted",
+      "cwd": "${REPOSITORY_ROOT}",
+      "argv": [
+        "python",
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "pytest",
+        "--rootdir=.",
+        "--confcutdir=.",
+        "tests/test_voice_config_default_disabled.py",
+        "tests/test_voice_external_unavailable_offline.py",
+        "tests/test_voice_integration.py",
+        "tests/test_voice_v131.py",
+        "tests/test_voice_v132_regression.py",
+        "tests/test_voice_expression.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "${TEST_ROOT}/pytest/root_voice_receipted"
+      ],
+      "environment_overrides": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "QTWEBENGINE_DISABLE_SANDBOX": "1",
+        "FIREFLY_USER_DATA_DIR": "${TEST_ROOT}/userdata/root_voice_receipted",
+        "FIREFLY_RUN_TEACH_MCP_INTEGRATION": "0",
+        "FIREFLY_LIVE_VOICE": "0"
+      },
+      "environment_unset": [],
+      "exit_code": 0,
+      "status": "PASS",
+      "observed_result": [
+        "18 passed, 15 skipped in 4.98s"
+      ],
+      "counts": {
+        "passed": 18,
+        "skipped": 15
+      },
+      "command_evidence": "root_final_test_commands.json",
+      "result_evidence_log": "root_voice_receipted.log",
+      "reproducibility": "COMPLETE_ARGV_AND_EXPLICIT_ENV",
+      "skip_scope": "Fifteen optional Voice plugin/service/assets cases were skipped; no live TTS, speaker, or plugin-service acceptance is claimed."
+    },
+    {
+      "group": "root_contract_receipted",
+      "cwd": "${REPOSITORY_ROOT}",
+      "argv": [
+        "python",
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "pytest",
+        "--rootdir=.",
+        "--confcutdir=.",
+        "tests/test_original_character_prompt_contract.py",
+        "tests/test_conversation_pacing.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "${TEST_ROOT}/pytest/root_contract_receipted"
+      ],
+      "environment_overrides": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "QTWEBENGINE_DISABLE_SANDBOX": "1",
+        "FIREFLY_USER_DATA_DIR": "${TEST_ROOT}/userdata/root_contract_receipted",
+        "FIREFLY_RUN_TEACH_MCP_INTEGRATION": "0",
+        "FIREFLY_LIVE_VOICE": "0"
+      },
+      "environment_unset": [],
+      "exit_code": 0,
+      "status": "PASS",
+      "observed_result": [
+        "24 passed in 0.54s"
+      ],
+      "counts": {
+        "passed": 24
+      },
+      "command_evidence": "root_final_test_commands.json",
+      "result_evidence_log": "root_contract_receipted.log",
+      "reproducibility": "COMPLETE_ARGV_AND_EXPLICIT_ENV"
+    },
+    {
+      "group": "ci_selected_files_windows",
+      "cwd": "${REPOSITORY_ROOT}",
+      "argv": [
+        "python",
+        "-X",
+        "utf8",
+        "-B",
+        "-m",
+        "pytest",
+        "--rootdir=.",
+        "--confcutdir=.",
+        "tests/test_provider_router.py",
+        "tests/test_pagelens_ai_bridge.py",
+        "tests/test_original_character_prompt_contract.py",
+        "tests/test_memory_service.py",
+        "tests/test_memory_access_mode.py",
+        "tests/test_memory_identity_recall.py",
+        "tests/test_memory_nickname_restore.py",
+        "tests/test_memory_index_consistency_fix.py",
+        "tests/test_model_routing_layer.py",
+        "tests/test_model_management.py",
+        "tests/test_control_cli.py",
+        "tests/test_student_presentation.py",
+        "tests/test_learning_optional_course_mapping.py",
+        "tests/test_architecture_hardening.py",
+        "tests/test_hardening_security.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "${TEST_ROOT}/pytest/ci_selected_files_windows"
+      ],
+      "environment_overrides": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "QTWEBENGINE_DISABLE_SANDBOX": "1",
+        "FIREFLY_USER_DATA_DIR": "${TEST_ROOT}/userdata/ci_selected_files_windows",
+        "FIREFLY_RUN_TEACH_MCP_INTEGRATION": "0",
+        "FIREFLY_LIVE_VOICE": "0"
+      },
+      "environment_unset": [],
+      "exit_code": 0,
+      "status": "PASS",
+      "observed_result": [
+        "243 passed, 2 warnings in 8.34s"
+      ],
+      "counts": {
+        "passed": 243,
+        "warnings": 2
+      },
+      "command_evidence": "ci_probe_command.json",
+      "result_evidence_log": "ci_probe_tests.log",
+      "reproducibility": "COMPLETE_ARGV_AND_EXPLICIT_ENV",
+      "scope": "Proposed CI extension test-file selection combined on local Windows; extension omitted from publication due to OAuth workflow-write scope; not remote Ubuntu/Python matrix"
+    }
+  ],
+  "initial_failures": [
+    {
+      "group": "character_conversation",
+      "iteration": "initial",
+      "exit_code": 1,
+      "observed_result": [
+        "6 failed, 130 passed, 2 warnings in 72.95s (0:01:12)"
+      ],
+      "result_evidence_log": "character_conversation_tests.log",
+      "final_gate": false
+    },
+    {
+      "group": "memory_suggestion",
+      "iteration": "initial",
+      "exit_code": 1,
+      "observed_result": [
+        "2 failed, 113 passed, 1 warning in 77.89s (0:01:17)"
+      ],
+      "result_evidence_log": "memory_suggestion_tests.log",
+      "final_gate": false
+    },
+    {
+      "group": "memory_suggestion",
+      "iteration": "intermediate isolated fixture adaptation",
+      "exit_code": 1,
+      "observed_result": [
+        "4 failed, 111 passed in 0.46s"
+      ],
+      "result_evidence_log": "memory_suggestion_tests_verified.log",
+      "final_gate": false,
+      "reason": "Tests required pytest import and explicit fake semantic equivalence/category vectors; final owner behavior was not weakened."
+    },
+    {
+      "group": "learning_all",
+      "iteration": "initial broad batch",
+      "exit_code": 3221225477,
+      "observed_result": [
+        "22 failing result positions before Windows access violation; no normal completed-suite summary"
+      ],
+      "result_evidence_log": "learning_all_tests.log",
+      "command_evidence": "learning_all_test_command.json",
+      "final_gate": false,
+      "reason": "Missing public experiment registration followed by test-process access violation. Final resource/QApplication keepalive rerun passed; this does not prove the historical live GUI crash cause."
+    },
+    {
+      "group": "model_security",
+      "iteration": "initial closure",
+      "observed_result": [
+        "Two file-not-found attempts ran no tests; two later attempts stopped at collection errors."
+      ],
+      "result_evidence_logs": [
+        "model_security_tests.log",
+        "model_security_tests_2.log",
+        "model_security_tests_3.log",
+        "model_security_tests_4.log"
+      ],
+      "final_gate": false
+    },
+    {
+      "group": "model_security",
+      "iteration": "earlier candidate/test-contract iteration",
+      "observed_result": [
+        "4 failed, 205 passed, 2 warnings in 25.40s"
+      ],
+      "result_evidence_log": "model_security_tests_5.log",
+      "final_gate": false
+    },
+    {
+      "group": "root_vision",
+      "iteration": "earlier candidate/test-contract iteration",
+      "observed_result": [
+        "9 failed, 250 passed in 92.79s (0:01:32)"
+      ],
+      "result_evidence_log": "root_vision_tests.log",
+      "final_gate": false
+    },
+    {
+      "group": "root_ui",
+      "iteration": "earlier candidate/test-contract iteration",
+      "observed_result": [
+        "6 failed, 76 passed, 1 skipped, 4 warnings in 23.17s"
+      ],
+      "result_evidence_log": "root_ui_tests.log",
+      "final_gate": false
+    },
+    {
+      "group": "root_voice",
+      "iteration": "earlier candidate/test-contract iteration",
+      "observed_result": [
+        "3 failed, 18 passed, 15 skipped in 2.97s"
+      ],
+      "result_evidence_log": "root_voice_tests.log",
+      "final_gate": false
+    },
+    {
+      "group": "root_contract",
+      "iteration": "earlier candidate/test-contract iteration",
+      "observed_result": [
+        "1 failed, 1 passed in 1.57s"
+      ],
+      "result_evidence_log": "root_contract_tests.log",
+      "final_gate": false
+    },
+    {
+      "group": "root_ui",
+      "iteration": "misnamed intermediate final log; superseded by verified and receipted runs",
+      "observed_result": [
+        "2 failed, 80 passed, 1 skipped, 3 warnings in 9.02s"
+      ],
+      "result_evidence_log": "root_ui_tests_final.log",
+      "final_gate": false
+    }
+  ],
+  "additional_verified_result_only_runs": [
+    {
+      "group": "root_vision_previous_broader_selection",
+      "observed_result": [
+        "259 passed in 64.80s (0:01:04)"
+      ],
+      "counts": {
+        "passed": 259
+      },
+      "result_evidence_log": "root_vision_tests_final.log",
+      "reproducibility": "RESULT_ONLY_OLD_ARGV_NOT_CAPTURED",
+      "note": "The earlier verified selection differs from the new explicit root receipt selection. Retained as evidence; argv and environment are not guessed."
+    },
+    {
+      "group": "root_ui_previous_broader_selection",
+      "observed_result": [
+        "81 passed, 2 skipped, 3 warnings in 7.58s"
+      ],
+      "counts": {
+        "passed": 81,
+        "skipped": 2,
+        "warnings": 3
+      },
+      "result_evidence_log": "root_ui_tests_verified.log",
+      "reproducibility": "RESULT_ONLY_OLD_ARGV_NOT_CAPTURED",
+      "note": "The earlier verified selection differs from the new explicit root receipt selection. Retained as evidence; argv and environment are not guessed."
+    },
+    {
+      "group": "root_voice_previous_broader_selection",
+      "observed_result": [
+        "21 passed, 15 skipped in 4.74s"
+      ],
+      "counts": {
+        "passed": 21,
+        "skipped": 15
+      },
+      "result_evidence_log": "root_voice_tests_final.log",
+      "reproducibility": "RESULT_ONLY_OLD_ARGV_NOT_CAPTURED",
+      "note": "The earlier verified selection differs from the new explicit root receipt selection. Retained as evidence; argv and environment are not guessed."
+    },
+    {
+      "group": "root_contract_original_prompt_only",
+      "observed_result": [
+        "3 passed in 0.46s"
+      ],
+      "counts": {
+        "passed": 3
+      },
+      "result_evidence_log": "root_contract_tests_verified.log",
+      "reproducibility": "RESULT_ONLY_OLD_ARGV_NOT_CAPTURED",
+      "note": "The earlier verified selection differs from the new explicit root receipt selection. Retained as evidence; argv and environment are not guessed."
+    },
+    {
+      "group": "root_contract_portability_previous_selection",
+      "observed_result": [
+        "37 passed, 1 skipped in 0.62s"
+      ],
+      "counts": {
+        "passed": 37,
+        "skipped": 1
+      },
+      "result_evidence_log": "root_contract_portability_tests.log",
+      "reproducibility": "RESULT_ONLY_OLD_ARGV_NOT_CAPTURED",
+      "note": "The earlier verified selection differs from the new explicit root receipt selection. Retained as evidence; argv and environment are not guessed."
+    }
+  ],
+  "not_run": [
+    "Whole-repository test discovery/regression",
+    "Real desktop conversation/learning acceptance",
+    "External current-model/provider generation",
+    "Real external teach-mcp or private textbook acceptance",
+    "Live Voice service, model assets, microphone or speaker acceptance"
+  ],
+  "evidence_location_note": "Named raw command receipts and logs remain in the private audit archive and are not published. Public argv/environment values above are anonymized without changing their execution options."
+}

@@ -1,0 +1,818 @@
+path,line,pattern,disposition,reason
+.env.example,15,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+.env.example,26,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+.env.example,45,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+.env.example,50,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+.env.example,55,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+.env.example,26,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+.env.example,61,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+QWEN.md,31,API_KEY,REVIEWED_REFERENCE,Public guide or boundary policy reference
+QWEN.md,44,API_KEY,REVIEWED_REFERENCE,Public guide or boundary policy reference
+QWEN.md,48,API_KEY,REVIEWED_REFERENCE,Public guide or boundary policy reference
+QWEN.md,44,sk-,REVIEWED_REFERENCE,Public guide or boundary policy reference
+QWEN.md,13,password,REVIEWED_REFERENCE,Public guide or boundary policy reference
+QWEN.md,10,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+QWEN.md,11,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+QWEN.md,12,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+QWEN.md,34,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+README.md,160,API_KEY,REVIEWED_REFERENCE,Public guide or boundary policy reference
+app.py,690,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+app.py,41,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+app.py,2056,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/agent_events.py,48,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/agent_events.py,61,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/agent_router.py,411,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/agent_router.py,47,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/agent_router.py,342,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/agent_router.py,352,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/document_attachment.py,147,password,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/document_attachment.py,119,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/document_attachment.py,573,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/document_attachment.py,574,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/document_attachment.py,577,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/document_attachment.py,581,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/document_attachment.py,582,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/document_attachment.py,628,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/document_attachment.py,632,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/handoff.py,172,password,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/handoff.py,84,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/handoff.py,130,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/handoff.py,131,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/handoff.py,172,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/agent/model/tjullm.py,12,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/agent/model/tjullm.py,36,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/agent/model/tjullm.py,74,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/agent/model/tjullm.py,92,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/agent/model/tjullm.py,8,Bearer,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/agent/model/tjullm.py,103,Bearer,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/curriculum/models.py,287,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/curriculum/models.py,313,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/curriculum/models.py,369,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/curriculum/models.py,855,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/curriculum/models.py,860,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/curriculum/models.py,865,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/curriculum/store.py,278,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/intents.py,105,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/learning/skill/v2/intelligence.py,61,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/page_context.py,112,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/page_context.py,113,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/page_context.py,115,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/page_context.py,116,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/page_context.py,117,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/page_context.py,118,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/page_context.py,123,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/page_context.py,124,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/page_context.py,126,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pagelens_bridge.py,155,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pagelens_bridge.py,169,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pagelens_bridge.py,186,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pagelens_bridge.py,193,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pagelens_bridge.py,196,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pagelens_bridge.py,346,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pagelens_bridge.py,347,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_processor.py,154,password,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_processor.py,244,password,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_processor.py,422,password,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_qa.py,58,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_qa.py,262,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_viewport_context.py,21,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_viewport_context.py,174,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_viewport_context.py,175,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_viewport_context.py,176,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_viewport_context.py,177,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_viewport_context.py,188,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_viewport_context.py,189,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_viewport_context.py,190,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_viewport_context.py,196,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_viewport_context.py,202,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_viewport_context.py,204,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_visual_region.py,41,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_visual_region.py,42,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_visual_region.py,44,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_visual_region.py,109,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_visual_region.py,121,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/pdf_visual_region.py,125,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/plan_validation.py,15,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/plan_validation.py,17,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/plan_validation.py,20,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/plan_validation.py,58,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/plan_validation.py,63,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/plan_validation.py,69,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/plan_validation.py,92,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/plan_validation.py,95,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/plan_validation.py,96,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/plan_validation.py,97,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/plan_validation.py,98,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/plan_validation.py,99,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,228,Bearer,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,11,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,14,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,16,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,40,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,47,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,83,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,88,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,91,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,101,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,102,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,128,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,130,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,132,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,134,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,142,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,188,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,195,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,207,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,216,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,223,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,227,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/provider_client.py,228,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/providers/catalog.py,73,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/providers/catalog.py,83,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/providers/catalog.py,94,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/providers/catalog.py,107,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/providers/catalog.py,117,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/providers/catalog.py,127,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/providers/catalog.py,150,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/providers/catalog.py,159,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/providers/catalog.py,191,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/providers/catalog.py,140,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/quick_ask_metrics.py,142,password,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/quick_ask_metrics.py,5,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/quick_ask_metrics.py,47,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/quick_ask_metrics.py,48,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/quick_ask_metrics.py,142,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/routing_models.py,50,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/routing_models.py,230,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/brain/deepseek_brain.py,69,Bearer,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/brain/glm_reasoning.py,4,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/brain/official_deepseek.py,4,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,9,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,10,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,11,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,12,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,20,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,25,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,44,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,45,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,46,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,78,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,79,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,82,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,111,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,113,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,122,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,123,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,127,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,128,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,130,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,9,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,92,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,93,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/config.py,96,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/safety.py,44,Bearer,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/safety.py,46,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/vision/deepseek_vision.py,5,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/vision/deepseek_vision.py,104,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/vision/deepseek_vision.py,106,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/vision/deepseek_vision.py,157,Bearer,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/vision/deepseek_vision.py,150,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/vision/glm_vision.py,70,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/vision/glm_vision.py,93,Bearer,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/vision/qwen_vision.py,118,Bearer,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/vision/qwen_vision.py,175,Bearer,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/vision/qwen_vision.py,106,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/screen_vision/vision/qwen_vision.py,165,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/session_store.py,20,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/video_reader.py,48,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/video_reader.py,50,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/video_reader.py,159,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/video_reader.py,161,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/video_reader.py,162,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/video_reader.py,163,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/zcode_state_poller.py,55,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/zcode_state_poller.py,311,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/zcode_state_poller.py,359,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/zcode_state_poller.py,383,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+core/zcode_state_poller.py,384,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+curriculum_review/provider.py,101,Bearer,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+docs/PHASE8C_BACKEND_DECISION.md,430,API_KEY,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,25,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,41,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,85,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,86,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,105,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,113,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,141,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,215,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,218,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,244,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,256,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,257,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,260,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,284,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,288,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,293,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,294,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,318,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,352,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,379,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,428,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,483,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,525,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,528,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,536,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8C_BACKEND_DECISION.md,577,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8_UI_ARCHITECTURE.md,125,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8_UI_ARCHITECTURE.md,126,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8_UI_ARCHITECTURE.md,219,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8_UI_ARCHITECTURE.md,524,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8_UI_ARCHITECTURE.md,530,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE8_UI_ARCHITECTURE.md,609,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9D6_H1_TRANSPORT_DECISION.md,80,sk-,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9D6_H1_TRANSPORT_DECISION.md,101,sk-,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9D6_H1_TRANSPORT_DECISION.md,133,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9D6_H1_TRANSPORT_DECISION.md,383,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9D6_H1_TRANSPORT_DECISION.md,386,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9D6_H2_HOTFIX_REPORT.md,23,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9D6_H2_HOTFIX_REPORT.md,26,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9D6_H2_HOTFIX_REPORT.md,46,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9D6_H2_HOTFIX_REPORT.md,47,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9_AGENT_ROUTER_ARCHITECTURE.md,663,sk-,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9_AGENT_ROUTER_ARCHITECTURE.md,974,sk-,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9_AGENT_ROUTER_ARCHITECTURE.md,53,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9_AGENT_ROUTER_ARCHITECTURE.md,443,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9_AGENT_ROUTER_ARCHITECTURE.md,581,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9_AGENT_ROUTER_ARCHITECTURE.md,586,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9_AGENT_ROUTER_ARCHITECTURE.md,653,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9_AGENT_ROUTER_ARCHITECTURE.md,931,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9_AGENT_ROUTER_ARCHITECTURE.md,1070,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE9_AGENT_ROUTER_ARCHITECTURE.md,1203,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/PHASE_D_RELEASE_REVIEW.md,225,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Packaging_Plan_v1.md,111,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Packaging_RC2_Smoke_Report.md,36,sk-,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Provider_Manager_Phase2_Report.md,56,API_KEY,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Provider_Manager_Phase3A_Report.md,29,API_KEY,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Provider_Manager_Phase3A_Report.md,37,API_KEY,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Provider_Manager_RC2_UX_Audit.md,54,API_KEY,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Provider_Manager_RC2_UX_Audit.md,5,sk-,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Provider_Manager_RC2_UX_Audit.md,33,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/RC2_User_Install_Test_Report.md,28,API_KEY,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/RC2_User_Install_Test_Report.md,6,sk-,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/RC2_User_Install_Test_Report.md,28,sk-,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_File_Manifest_v1.md,110,API_KEY,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_File_Manifest_v1.md,68,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_File_Manifest_v1.md,110,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_File_Manifest_v1.md,155,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_Scope_v1.md,83,API_KEY,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_Scope_v1.md,148,API_KEY,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_Scope_v1.md,148,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_Scope_v1.md,220,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_Scope_v1.md,248,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_Scope_v1.md,290,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_Scope_v1.md,375,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_Security_Gate_Report.md,83,Bearer,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_Security_Gate_Report.md,91,Bearer,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_Security_Gate_Report.md,83,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_Security_Gate_Report.md,91,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/Release_Security_Gate_Report.md,99,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/design/v0.3_companion_product_spec.md,65,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/design/v0.3_companion_product_spec.md,199,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/design/v0.3_companion_product_spec.md,259,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/engineering/v0.3_doc_code_gap_report.md,93,password,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/engineering/v0.3_doc_code_gap_report.md,71,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/engineering/v0.3_engineering_implementation_design.md,251,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/engineering/v0.3_history_migration_design.md,140,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/engineering/v0.3_implementation_task_breakdown.md,214,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/engineering/v0.3_implementation_task_breakdown.md,229,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/engineering/v0.3_implementation_task_breakdown.md,238,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/engineering/v0.3_implementation_task_breakdown.md,246,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/engineering/v0.3_implementation_task_breakdown.md,281,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/memory_architecture_review.md,150,sk-,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/memory_architecture_review.md,150,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/memory_architecture_review.md,162,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/plugin-integration-validation-report.md,71,sk-,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/plugin-integration-validation-report.md,67,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/release_notes_v1.0-rc2.md,42,API_KEY,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/security/PageLens_Pairing.md,3,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/security/PageLens_Pairing.md,7,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+docs/security/PageLens_Pairing.md,9,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+extensions/README.md,59,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+extensions/pagelens_bridge/README.md,78,token,REVIEWED_REFERENCE,Public guide or boundary policy reference
+extensions/pagelens_bridge/background.js,19,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+extensions/pagelens_bridge/background.js,20,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+extensions/pagelens_bridge/background.js,25,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/bridge_session.py,262,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/context_budget.py,4,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/context_budget.py,10,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/context_budget.py,45,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/context_budget.py,59,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/identity.py,26,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/launcher.py,60,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/launcher.py,273,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/launcher.py,377,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/launcher.py,441,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/launcher.py,691,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/launcher.py,377,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/resource_manager.py,172,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/resource_manager.py,382,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/resource_manager.py,385,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/task_state.py,21,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+learning/task_state.py,21,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+memory/suggestion/candidate_extractor.py,41,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+memory/suggestion/tests/test_semantic_dedup_p5a2.py,606,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a.py,209,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a.py,170,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a.py,362,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a.py,180,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a.py,182,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a.py,194,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a.py,207,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a3.py,9,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a3.py,284,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a3.py,265,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a3.py,525,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a3.py,9,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a3.py,270,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a3.py,271,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a3.py,279,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/suggestion/tests/test_suggestion_service_p5a3.py,284,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+memory/write_guards.py,104,API_KEY,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,111,API_KEY,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,144,API_KEY,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,219,API_KEY,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,222,API_KEY,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,155,Bearer,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,230,Bearer,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,145,sk-,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,113,password,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,157,password,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,158,password,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,270,password,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,271,password,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,276,password,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,304,password,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,105,token,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,112,token,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,148,token,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,166,token,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,167,token,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,190,token,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,191,token,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,213,token,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+memory/write_guards.py,230,token,REVIEWED_REFERENCE,"Secret-detection rule, not stored credential"
+providers/base.py,302,Bearer,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+providers/base.py,221,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+providers/base.py,222,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+providers/base.py,223,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+providers/deepseek.py,38,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+providers/tju_qwen.py,37,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+providers/zhipu_glm.py,31,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tests/conftest.py,64,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/conftest.py,65,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_agent_launcher.py,59,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_companion_config.py,99,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_conversation_runtime.py,75,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_conversation_runtime.py,76,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_conversation_runtime.py,77,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_credential_store.py,41,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_curriculum_domain.py,1033,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_curriculum_domain.py,1408,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_curriculum_domain.py,1409,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_curriculum_review_provider.py,21,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_curriculum_review_provider.py,24,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_curriculum_review_provider.py,25,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_curriculum_review_provider.py,26,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_glm_vision_error_regression.py,84,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_glm_vision_error_regression.py,85,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_hardening_security.py,18,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_hardening_security.py,26,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_hardening_security.py,33,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_hardening_security.py,39,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_hardening_security.py,44,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_hardening_security.py,66,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_hardening_security.py,72,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_hardening_security.py,74,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_hardening_security.py,88,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_hardening_security.py,90,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_hardening_security.py,100,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_bootstrap_priority.py,285,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_bootstrap_priority.py,287,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_bootstrap_priority.py,288,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_bridge.py,322,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_entry_wiring.py,189,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,93,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,112,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,120,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,130,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,134,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,142,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,145,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,147,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,153,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,156,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,159,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,161,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,170,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,204,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,265,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,331,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,347,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,359,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,365,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,368,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,370,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,379,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_channel.py,395,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_delivery.py,129,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_delivery.py,373,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_delivery.py,445,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_delivery.py,483,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_delivery.py,493,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_delivery.py,464,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_return_delivery.py,500,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_tjullm_model.py,21,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_tjullm_model.py,247,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_tjullm_model.py,254,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_tjullm_model.py,171,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_tjullm_model.py,250,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_v02_bootstrap.py,62,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_v02_bootstrap.py,92,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_v02_bootstrap.py,104,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_v02_bootstrap.py,112,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_v02_bootstrap.py,120,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_v02_bootstrap.py,124,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_learning_v02_bootstrap.py,134,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_memory_ranking_p4.py,755,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_model_routing_layer.py,164,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_model_routing_layer.py,237,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,19,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,427,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,450,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,1118,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,1119,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,437,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,438,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,425,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,480,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,1229,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,442,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,443,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,444,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,446,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,511,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,515,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,430,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,432,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,434,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,437,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,440,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p6_e2e.py,455,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p8_real_explain.py,157,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p8_real_explain.py,158,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p8_real_explain.py,163,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p8_real_ocr.py,18,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p8_real_ocr.py,88,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p8_real_ocr.py,90,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p8_real_ocr.py,91,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p8_real_ocr.py,92,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p8_real_ocr.py,116,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p8_real_ocr.py,118,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p8_real_ocr.py,119,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_p8_real_ocr.py,120,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_pagelens_selection_bridge.py,30,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_pagelens_selection_bridge.py,124,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_pagelens_selection_bridge.py,142,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_plugin_loader.py,198,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_plugin_loader.py,202,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_catalog.py,52,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_catalog.py,59,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_catalog.py,65,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_catalog.py,74,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_catalog.py,80,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_catalog.py,86,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_catalog.py,105,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_catalog.py,106,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_catalog.py,107,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_catalog.py,108,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,52,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,72,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,83,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,105,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,106,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,110,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,119,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,120,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,133,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,135,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,137,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,151,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,152,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,153,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,234,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,252,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager.py,31,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_manual_flow.py,81,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_manual_flow.py,84,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_manual_flow.py,189,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_manual_flow.py,199,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_manual_flow.py,215,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_manual_flow.py,218,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_manual_flow.py,224,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_manual_flow.py,233,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_manual_flow.py,271,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_manual_flow.py,318,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_manual_flow.py,319,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_ui.py,71,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_ui.py,74,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_ui.py,150,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_ui.py,168,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_ui.py,170,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_ui.py,180,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_ui.py,182,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_ui.py,191,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_ui.py,195,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_ui.py,197,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_ui.py,212,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_manager_ui.py,275,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,4,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,43,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,45,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,46,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,47,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,122,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,125,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,130,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,141,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,144,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,149,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,168,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,184,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,189,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,204,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,209,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,224,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,226,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,232,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,269,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,290,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,295,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,308,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,337,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,350,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,172,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,193,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,207,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,212,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,237,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,242,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_reload.py,315,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_router.py,368,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_router.py,369,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_router.py,370,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_router.py,373,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_router.py,374,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_router.py,375,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_router.py,381,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_router.py,382,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_router.py,383,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_router.py,251,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_router.py,41,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_router.py,42,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_provider_router.py,43,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,56,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,57,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,58,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,60,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,69,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,79,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,80,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,82,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,103,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,105,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,106,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,107,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,108,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,116,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,118,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,119,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,120,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,212,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,215,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,67,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,68,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,70,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,72,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_cleanup.py,74,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_glm_vision_fallback.py,45,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_one_shot.py,173,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_reasoning_fallback.py,221,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_reasoning_fallback.py,222,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_reasoning_fallback.py,239,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_reasoning_fallback.py,240,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_reasoning_fallback.py,253,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_reasoning_fallback.py,254,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_reasoning_fallback.py,220,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_reasoning_fallback.py,238,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_screen_vision_reasoning_fallback.py,252,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_teach_mcp_provider_launcher.py,28,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_teach_mcp_provider_launcher.py,35,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_teach_mcp_provider_launcher.py,36,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_teach_mcp_provider_launcher.py,37,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_teach_mcp_provider_launcher.py,47,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_ui_consolidation_p0.py,116,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_ui_v2_console.py,286,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_ui_v2_console.py,287,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_ui_v2_console.py,525,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_ui_v2_console.py,526,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,99,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,152,API_KEY,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,104,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,111,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,97,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,183,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,116,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,117,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,119,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,125,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,163,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,173,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,102,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,107,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,113,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,155,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/test_write_guards.py,156,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tests/verify_p5a3_e2e.py,108,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/authoring_model_router_adapter.py,18,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/authoring_model_router_adapter.py,19,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/authoring_model_router_adapter.py,24,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/authoring_model_router_adapter.py,25,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/authoring_output_path_resolver.py,88,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/authoring_output_path_resolver.py,89,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/authoring_output_path_resolver.py,93,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/authoring_output_path_resolver.py,94,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/authoring_output_path_resolver.py,123,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/authoring_output_path_resolver.py,127,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/benchmark_codex_short_talk.py,5,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/benchmark_phase8c_backend.py,10,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/benchmark_phase8c_backend.py,406,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/benchmark_phase8c_backend.py,539,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,179,Bearer,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,26,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,72,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,101,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,103,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,105,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,107,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,126,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,146,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,151,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,160,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,171,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,178,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,179,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/diagnose_direct_plan_provider.py,249,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/fullbook_planner_adapter.py,238,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/fullbook_planner_adapter.py,242,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/run_cli.ps1,6,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/scratch_plan_gate_check.py,34,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/scratch_plan_gate_check.py,39,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/smoke_codex_short_talk.py,52,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/smoke_phase8c3_short_talk_ux.py,11,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/smoke_phase8c3_short_talk_ux.py,79,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/smoke_phase8c4_session_persistence.py,99,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/smoke_phase8c4_session_persistence.py,115,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/smoke_phase9d6_h4_plan_direct.py,17,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/smoke_phase9d6_h4_plan_direct.py,43,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/smoke_phase9d6_h4_plan_direct.py,63,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/teach_mcp_provider_launcher.py,34,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/teach_mcp_provider_launcher.py,67,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/teach_mcp_provider_launcher.py,72,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+tools/test_codex_short_talk.py,305,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_codex_short_talk.py,306,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_codex_short_talk.py,313,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_codex_short_talk.py,314,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_codex_short_talk.py,449,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase8c1_short_ask.py,5,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase8c1_short_ask.py,189,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase8c1_short_ask.py,36,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase8c1_short_ask.py,91,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase8c1_short_ask.py,189,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase8c2_agent_events.py,49,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase8c2_agent_events.py,387,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase8c2_agent_events.py,388,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase8c3_short_talk_ux.py,66,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase8c3_short_talk_ux.py,139,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase8c3_short_talk_ux.py,652,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase8c3_short_talk_ux.py,662,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase8c3_short_talk_ux.py,663,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9a_agent_router.py,10,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9a_agent_router.py,353,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9a_agent_router.py,547,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9b_recommendation_ux.py,335,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9b_recommendation_ux.py,336,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9c_native_handoff.py,16,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9c_native_handoff.py,45,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9c_native_handoff.py,271,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9c_native_handoff.py,272,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9c_native_handoff.py,559,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9c_native_handoff.py,573,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9c_native_handoff.py,574,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9c_native_handoff.py,604,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9c_native_handoff.py,606,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9c_native_handoff.py,607,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9c_native_handoff.py,737,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9c_native_handoff.py,739,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d1_workflow_core.py,885,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d1_workflow_core.py,850,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d1_workflow_core.py,850,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d2_artifact_store.py,321,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d2_plan_executor.py,81,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d3_workflow_ux.py,661,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d3_workflow_ux.py,665,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d3_workflow_ux.py,666,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d3_workflow_ux.py,856,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d4_implement_workflow.py,856,Bearer,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d4_implement_workflow.py,856,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d4_implement_workflow.py,856,password,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d4_implement_workflow.py,512,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d4_implement_workflow.py,513,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d5_review_workflow.py,552,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d5_review_workflow.py,552,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d5_review_workflow.py,553,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h2_hotfix.py,919,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h2_hotfix.py,927,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h2_hotfix.py,245,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h2_hotfix.py,264,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h2_hotfix.py,278,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h2_hotfix.py,283,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h2_hotfix.py,405,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h2_hotfix.py,975,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h2_hotfix.py,977,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h2_hotfix.py,978,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,144,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,197,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,202,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,241,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,245,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,552,sk-,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,46,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,144,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,197,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,202,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,210,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,224,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,226,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,232,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,240,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,241,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,242,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,243,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,244,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,247,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,248,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,250,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,552,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,553,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,728,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,833,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_phase9d6_h4_direct_provider.py,882,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+tools/test_quick_ask_scrolling.py,78,token,REVIEWED_REFERENCE,Synthetic test input or mocked transport / detector assertion
+ui/character_conversation_runner.py,120,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/character_conversation_runner.py,510,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/process_launcher.py,27,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/process_launcher.py,101,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/process_launcher.py,330,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/recommendation_card.py,21,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/recommendation_card.py,43,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/settings_popover.py,38,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/short_ask.py,7,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/short_ask.py,56,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/short_ask.py,85,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/short_ask.py,564,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/short_ask.py,676,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/short_ask.py,678,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/short_ask.py,686,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/short_ask.py,695,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/short_ask.py,698,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/short_ask.py,701,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/short_ask.py,707,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/short_ask.py,709,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/short_ask.py,710,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/theme.py,1,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/theme.py,213,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/theme.py,236,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/theme.py,275,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/tju_llm_health.py,13,API_KEY,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/tju_llm_health.py,133,Bearer,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/tju_llm_health.py,22,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/tju_llm_health.py,62,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/tju_llm_health.py,127,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/v2/console.py,1707,sk-,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/workflow_card.py,154,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/workflow_implement_executor.py,151,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/workflow_implement_executor.py,243,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/workflow_implement_executor.py,430,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/workflow_implement_executor.py,453,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/workflow_implement_executor.py,494,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
+ui/workflow_provider_runner.py,119,token,REVIEWED_REFERENCE,Code variable/protocol/schema reference; not a credential value
