@@ -128,6 +128,8 @@ class MemoryRecord:
     lifecycle_status: str = "active"  # active | superseded
     superseded_by: str | None = None
     supersede_reason: str | None = None  # explicit_revision | explicit_correction | confirmed_conflict
+    # Optional owner-confirmed identity slot. Legacy records remain compatible.
+    identity_kind: str | None = None  # preferred_name (preference) | name (user_fact)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _required_text(self.id, "id"))
@@ -178,6 +180,13 @@ class MemoryRecord:
         if lifecycle not in ("active", "superseded"):
             raise ValueError("lifecycle_status must be 'active' or 'superseded'")
         object.__setattr__(self, "lifecycle_status", lifecycle)
+        identity_categories = {"preferred_name": MemoryCategory.PREFERENCE,
+                               "name": MemoryCategory.USER_FACT}
+        if self.identity_kind is not None:
+            if self.identity_kind not in identity_categories:
+                raise ValueError("identity_kind must be preferred_name or name")
+            if self.category != identity_categories[self.identity_kind]:
+                raise ValueError("identity_kind must match the record category")
         if lifecycle == "superseded":
             object.__setattr__(
                 self,
@@ -204,6 +213,7 @@ class MemoryRecord:
         retention_half_life_days: float | None = None,
         vector_id: str | None = None,
         timestamp_ms: int | None = None,
+        identity_kind: str | None = None,
     ) -> MemoryRecord:
         """Create a validated record with generated ID, timestamps, and defaults."""
         normalized_category = _coerce_enum(category, MemoryCategory, "category")
@@ -226,11 +236,12 @@ class MemoryRecord:
                 else retention_half_life_days
             ),
             vector_id=vector_id,
+            identity_kind=identity_kind,
         )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the record into JSON-compatible primitives."""
-        return {
+        payload = {
             "id": self.id,
             "category": self.category.value,
             "content": self.content,
@@ -247,6 +258,9 @@ class MemoryRecord:
             "superseded_by": self.superseded_by,
             "supersede_reason": self.supersede_reason,
         }
+        if self.identity_kind is not None:
+            payload["identity_kind"] = self.identity_kind
+        return payload
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> MemoryRecord:

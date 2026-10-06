@@ -61,6 +61,8 @@ class FakeRecord:
 
 class FakeMemoryService:
     def __init__(self, records=None, fail: bool = False) -> None:
+        from memory.access_mode import MemoryAccessMode
+        self.access_mode = MemoryAccessMode.SAFE_WRITE
         self.records = list(records or [])
         self.fail = fail
         self.deleted: list[str] = []
@@ -71,7 +73,7 @@ class FakeMemoryService:
             raise RuntimeError("memory unavailable")
         return list(self.records)
 
-    def delete(self, record_id: str) -> bool:
+    def delete(self, record_id: str, *, access_mode=None) -> bool:
         self.deleted.append(record_id)
         for record in self.records:
             if record.id == record_id:
@@ -83,11 +85,16 @@ class FakeMemoryService:
     def repository(self):
         return self
 
-    def clear(self) -> int:
+    def clear(self, *, access_mode=None) -> int:
         count = len(self.records)
         self._cleared = count
         self.records.clear()
         return count
+
+    def clear_all(self) -> int:
+        # M1: panel clears through the full-service API (repo + index).
+        self.index_cleared = True
+        return self.clear()
 
 
 class FakeBondState:
@@ -209,7 +216,7 @@ def test_panel_delete_memory_uses_service() -> None:
     )
     panel = MemoryPanel(memory, None)
 
-    assert panel.delete_memory("m-1") is True
+    assert panel.delete_memory("m-1", confirmed=True) is True
     assert "m-1" in memory.deleted
     assert [r.id for r in memory.records] == ["m-2"]
     panel.close()
@@ -375,7 +382,7 @@ def test_panel_delete_shows_confirmation() -> None:
     # Simulate clicking delete and confirming (Yes=65536, No=131072)
     # We can't easily simulate QMessageBox in offscreen mode,
     # but we can verify the delete_memory path works
-    assert panel.delete_memory("m-1") is True
+    assert panel.delete_memory("m-1", confirmed=True) is True
     assert len(memory.records) == 0
     panel.close()
 
@@ -388,7 +395,7 @@ def test_panel_delete_cancel_path() -> None:
     panel = MemoryPanel(memory, None)
 
     # Try to delete non-existent
-    assert panel.delete_memory("nonexistent") is False
+    assert panel.delete_memory("nonexistent", confirmed=True) is False
     assert len(memory.records) == 1  # unchanged
     panel.close()
 
@@ -461,7 +468,7 @@ def test_panel_clear_all() -> None:
     memory = FakeMemoryService(records)
     panel = MemoryPanel(memory, None)
 
-    removed = panel.clear_all_memories()
+    removed = panel.clear_all_memories(confirmed=True)
     assert removed == 3
     assert len(memory.records) == 0
     panel.close()
@@ -472,7 +479,7 @@ def test_panel_clear_all_empty() -> None:
     memory = FakeMemoryService([])
     panel = MemoryPanel(memory, None)
 
-    removed = panel.clear_all_memories()
+    removed = panel.clear_all_memories(confirmed=True)
     assert removed == 0
     panel.close()
 
@@ -485,7 +492,7 @@ def test_clear_all_does_not_affect_bond() -> None:
     memory = FakeMemoryService([_record("m-1")])
     panel = MemoryPanel(memory, bond_engine)
 
-    panel.clear_all_memories()
+    panel.clear_all_memories(confirmed=True)
 
     # Bond state should be unchanged
     assert bond_engine.state.phase.value == "trusted"
@@ -535,7 +542,7 @@ def test_panel_refresh_after_delete() -> None:
     panel = MemoryPanel(memory, None)
 
     assert panel.memory_list.count() == 2
-    panel.delete_memory("m-1")
+    panel.delete_memory("m-1", confirmed=True)
     panel.refresh()
     assert panel.memory_list.count() == 1
     panel.close()
@@ -552,7 +559,7 @@ def test_panel_refresh_after_clear() -> None:
     memory = FakeMemoryService(records)
     panel = MemoryPanel(memory, None)
 
-    panel.clear_all_memories()
+    panel.clear_all_memories(confirmed=True)
     panel.refresh()
     assert panel.memory_list.count() == 0
     panel.close()

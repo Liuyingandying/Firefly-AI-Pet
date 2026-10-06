@@ -3,7 +3,7 @@
 This module reads Character, Bond, Memory, Narrative, and Conversation into one
 ``CompanionContext`` and renders them in the fixed provider order::
 
-    Character -> Bond -> Memory -> Narrative -> Conversation -> User
+    Character -> optional turn pacing -> Bond -> Memory -> Narrative -> Conversation -> User
 
 Each source is read independently and defensively: an empty or failing source
 produces an empty block without affecting the others. It never modifies source
@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from core.bond_context_builder import BondContextBuilder
+from core.conversation_pacing import pacing_hint_for_turn
+from core.persona_context import PersonaContext, PersonaContextReadLayer
 from memory.memory_prompt_builder import MemoryPromptBuilder
 from providers.base import validate_messages
 
@@ -64,9 +66,13 @@ class CompanionContext:
     narrative_prompt: str = ""
     history: tuple[dict[str, str], ...] = ()
     bond_state: Any = None
+    persona_context: PersonaContext | None = None
+    pacing_hint: str = ""
 
     def to_messages(self, user_text: str) -> list[dict[str, str]]:
         messages: list[dict[str, str]] = list(self.identity_messages)
+        if self.pacing_hint:
+            messages.append({"role": "system", "content": self.pacing_hint})
         if self.bond_prompt:
             messages.append({"role": "system", "content": self.bond_prompt})
         if self.memory_prompt:
@@ -100,18 +106,33 @@ class CompanionContextBuilder:
         self._bond_context_builder = BondContextBuilder()
 
     def build(
-        self, user_message: str, *, history: Sequence[dict[str, str]] | None = None
+        self, user_message: str, *, history: Sequence[dict[str, str]] | None = None,
+        current_task: str = "chat",
     ) -> CompanionContext:
         identity = tuple(self.character.to_system_messages())
         bond_state, bond_prompt = self._bond()
+        memory_prompt = self._memory(user_message)
+        narrative_prompt = self._narrative()
+        normalized_history = self._history(history)
         return CompanionContext(
             identity_messages=identity,
             bond_prompt=bond_prompt,
-            memory_prompt=self._memory(user_message),
-            narrative_prompt=self._narrative(),
-            history=self._history(history),
+            memory_prompt=memory_prompt,
+            narrative_prompt=narrative_prompt,
+            history=normalized_history,
             bond_state=bond_state,
+            pacing_hint=pacing_hint_for_turn(user_message, normalized_history, current_task),
+            persona_context=PersonaContextReadLayer.snapshot(
+                _CharacterSnapshot(self.character, identity), user_message,
+                bond=bond_state, history=normalized_history, current_task=current_task),
         )
+
+    def read_persona_context(self, user_message="", *, history=None, current_task="chat"):
+        """Read bypass-route persona sources without retrieving Memory."""
+        return PersonaContextReadLayer(
+            self.character, bond_reader=self.bond_reader,
+            conversation_reader=self.conversation_reader,
+        ).read(user_message, history=history, current_task=current_task)
 
     def _bond(self) -> tuple[Any, str]:
         if self.bond_reader is None:
@@ -171,6 +192,16 @@ class CompanionContextBuilder:
     def _record(self, stage: str, exc: Exception) -> None:
         if self.on_error is not None:
             self.on_error(stage, exc)
+
+
+class _CharacterSnapshot:
+    """Reuse the character read already performed for this ordinary turn."""
+    def __init__(self, character, messages):
+        self.character_id = getattr(character, "character_id", "unknown")
+        self._messages = messages
+
+    def to_system_messages(self):
+        return self._messages
 
 
 def _memory_items(memories: Sequence[Any]) -> list[Mapping[str, Any]]:

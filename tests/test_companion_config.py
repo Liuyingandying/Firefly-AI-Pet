@@ -134,7 +134,9 @@ def test_search_top_k_reaches_adapter(tmp_path: Path) -> None:
 
     service.search("q")
 
-    assert adapter.limits == [7]
+    # M2B.1 over-fetch: the adapter is asked for max(2 * top_k, …) results so
+    # a wall of superseded duplicates cannot truncate the active canonical.
+    assert adapter.limits == [max(2 * 7, 0)]
 
 
 def test_max_messages_reaches_conversation_store() -> None:

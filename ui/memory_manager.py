@@ -76,7 +76,7 @@ class MemoryManagerWindow(QWidget):
 
     def __init__(self, memory_service: Any, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._service = self._confirmed_handle(memory_service)
+        self._service = memory_service
         self.setWindowTitle("记忆管理")
         self.resize(900, 620)
         self._build_ui()
@@ -88,29 +88,12 @@ class MemoryManagerWindow(QWidget):
 
         The manager is the explicit confirmation surface (edit / forget /
         clear all are user-confirmed in the UI), so it needs a
-        CONFIRMED_WRITE handle (M3B.1).  Viewing stays read-only regardless —
-        reads never write.  When the injected service already is
-        CONFIRMED_WRITE it is reused as-is; otherwise a sibling handle over
-        the SAME repository + semantic adapter is derived — never a second
-        source of truth.
+        CONFIRMED_WRITE handle (M3B.1), derived only after confirmation.
+        READ_ONLY cannot be elevated. The view shares the SAME repository,
+        semantic adapter, write lock and index health with the original.
         """
-        from memory.access_mode import MemoryAccessMode
-        from memory.service import MemoryService
-
-        mode = getattr(service, "access_mode", None)
-        if isinstance(mode, MemoryAccessMode) and mode is MemoryAccessMode.CONFIRMED_WRITE:
-            return service
-        return MemoryService(
-            service.repository,
-            service.adapter,
-            write_policy=service.write_policy,
-            search_top_k=service.search_top_k,
-            search_threshold=service.search_threshold,
-            security_guard=service.security_guard,
-            dedup_enabled=service.dedup_enabled,
-            dedup_similarity_threshold=service.dedup_similarity_threshold,
-            access_mode=MemoryAccessMode.CONFIRMED_WRITE,
-        )
+        from ui.confirmed_memory import confirmed_memory_handle
+        return confirmed_memory_handle(service)
 
     # ------------------------------------------------------------ build UI
 
@@ -447,7 +430,7 @@ class MemoryManagerWindow(QWidget):
             return
         # M3A.1: unified edit through MemoryService.edit_memory()
         try:
-            result = self._service.edit_memory(record_id, new_text.strip())
+            result = self._confirmed_handle(self._service).edit_memory(record_id, new_text.strip())
         except Exception as exc:
             self._stats_label.setText(f"编辑失败: {exc}")
             return
@@ -473,7 +456,7 @@ class MemoryManagerWindow(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
         try:
-            self._service.delete(record_id)
+            self._confirmed_handle(self._service).delete(record_id)
         except Exception as exc:
             self._stats_label.setText(f"删除失败: {exc}")
             return
@@ -565,7 +548,7 @@ class MemoryManagerWindow(QWidget):
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 )
                 if reply == QMessageBox.StandardButton.Yes:
-                    self._service.reconcile(dry_run=False)
+                    self._confirmed_handle(self._service).reconcile(dry_run=False)
                     info_label.setText("语义索引已修复。")
             else:
                 info_label.setText("语义索引已经正常，无需修复。")
@@ -585,7 +568,7 @@ class MemoryManagerWindow(QWidget):
         if not ok or text.strip() != "清空":
             return
         try:
-            self._service.clear_all()
+            self._confirmed_handle(self._service).clear_all()
             info_label.setText("已清空所有长期记忆。")
             self._refresh_list()
         except Exception as exc:

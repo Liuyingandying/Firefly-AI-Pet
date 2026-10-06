@@ -73,6 +73,11 @@ class ConversationRuntime:
     ) -> list[dict[str, Any]]:
         return self._runtime.build_messages(user_message, history=history)
 
+    def read_persona_context(self, user_message="", *, history=None, current_task="chat"):
+        """Read-only view shared with direct vision and learning adapters."""
+        return self._runtime.context_builder.read_persona_context(
+            user_message, history=history, current_task=current_task)
+
     def chat(
         self,
         user_message: str,

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from memory.mem0_adapter import Hit
 from memory.records import MemoryRecord
+from memory.access_mode import MemoryAccessMode
 from memory.repository import JsonMemoryRepository
 from memory.service import MemoryService
 
@@ -39,7 +40,8 @@ class FakeIndex:
 def _service(tmp_path: Path) -> tuple[MemoryService, JsonMemoryRepository, FakeIndex]:
     repo = JsonMemoryRepository(tmp_path / "records.json")
     adapter = FakeIndex()
-    return MemoryService(repo, adapter), repo, adapter
+    return MemoryService(repo, adapter,
+                         access_mode=MemoryAccessMode.CONFIRMED_WRITE), repo, adapter
 
 
 def test_reconcile_repairs_missing_index(tmp_path: Path) -> None:

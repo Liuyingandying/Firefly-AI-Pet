@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from memory.suggestion.suggestion_service import SuggestionService
 
 
@@ -63,7 +65,6 @@ def test_accept_failure_keeps_pending() -> None:
     service = SuggestionService(memory)
 
     suggestion = service.detect("我毕业了")[0]
-    record = service.accept(suggestion)
-
-    assert record is None
+    with pytest.raises(RuntimeError, match="write failed"):
+        service.accept(suggestion)
     assert service.list_pending() == [suggestion]  # still pending on failure

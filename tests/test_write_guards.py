@@ -28,7 +28,7 @@ class CountingRepository:
         self.add_count = 0
         self._records = {}
 
-    def add(self, record):
+    def add(self, record, *, access_mode=None):
         self.add_count += 1
         self._records[record.id] = record
         return record.id
@@ -39,7 +39,7 @@ class CountingRepository:
     def list(self, **kwargs):
         return list(self._records.values())
 
-    def update(self, record_id, patch):
+    def update(self, record_id, patch, *, access_mode=None):
         return self._records[record_id]
 
     def delete(self, record_id):

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Mapping, Protocol
+from functools import wraps
+from threading import RLock
 
 from .mem0_adapter import Hit, Mem0Adapter
 from .access_mode import MemoryAccessMode, MemoryAccessViolation, check_access
@@ -32,6 +34,14 @@ from difflib import SequenceMatcher
 from .m2 import MemoryCandidate, MemoryWritePolicy, WriteAction as M2Action, kind_from_category
 
 
+def _serialized_write(method):
+    @wraps(method)
+    def run(self, *args, **kwargs):
+        with self._write_lock:
+            return method(self, *args, **kwargs)
+    return run
+
+
 class SemanticIndex(Protocol):
     """Narrow vector operations consumed by MemoryService."""
 
@@ -50,6 +60,18 @@ class MemorySynchronizationError(RuntimeError):
     def __init__(self, message: str, record: MemoryRecord) -> None:
         super().__init__(message)
         self.record = record
+
+
+class MemoryPolicyError(RuntimeError):
+    """A policy decision cannot safely be executed; nothing is written."""
+
+
+class MemoryConflictError(MemoryPolicyError):
+    def __init__(self, decision, records):
+        super().__init__("记忆冲突尚未确认；请在记忆面板的待确认项中选择更新或保留原记录。")
+        self.decision = decision
+        self.records = tuple(records)
+        self.snapshot = tuple((r.id, r.content, r.updated_ts, r.lifecycle_status) for r in records)
 
 
 class WriteOutcome(str, Enum):
@@ -124,9 +146,19 @@ class MemoryService:
         )
         # In-memory only (no schema): set when the derived index could not be
         # synchronized. Read models stay valid; reconcile() heals and clears it.
-        self.index_dirty = False
+        self._index_health = {"dirty": False}
+        # Ephemeral confirmed views share the same lock and index health.
+        self._write_lock = getattr(repository, "_lock", RLock())
         # M2A: unified write policy for dedup / conflict / supersede decisions.
         self.m2_policy = MemoryWritePolicy()
+
+    @property
+    def index_dirty(self):
+        return self._index_health["dirty"]
+
+    @index_dirty.setter
+    def index_dirty(self, value):
+        self._index_health["dirty"] = bool(value)
 
     @classmethod
     def local(
@@ -180,6 +212,7 @@ class MemoryService:
         )
         return result.record if result is not None else None
 
+    @_serialized_write
     def remember_detailed(
         self,
         user_input: str,
@@ -188,6 +221,7 @@ class MemoryService:
         trigger: str = "explicit-command",
         permission: WritePolicy | str | None = None,
         asserted_explicit: bool = False,
+        _confirmed_conflict: MemoryConflictError | None = None,
     ) -> WriteResult | None:
         """Run the full write pipeline and report the outcome explicitly.
 
@@ -249,6 +283,38 @@ class MemoryService:
         all_records = self.repository.list()
         decision = self.m2_policy.evaluate(candidate, all_records)
 
+        if not isinstance(decision.action, M2Action):
+            raise MemoryPolicyError("未知 Memory WriteAction，已拒绝写入")
+        targets = [r for r in all_records if r.id in decision.target_record_ids]
+        if decision.action in (M2Action.IGNORE_DUPLICATE, M2Action.MERGE_UPDATE,
+                               M2Action.SUPERSEDE, M2Action.REQUIRE_CONFIRMATION):
+            if not targets or len(targets) != len(decision.target_record_ids):
+                raise MemoryPolicyError("记忆目标已失效，请刷新后重试")
+        if decision.action is M2Action.REQUIRE_CONFIRMATION:
+            conflict = MemoryConflictError(decision, targets)
+            if _confirmed_conflict is None:
+                raise conflict
+            check_access(self.access_mode, MemoryAccessMode.CONFIRMED_WRITE, "resolve memory conflict")
+            if (conflict.snapshot != _confirmed_conflict.snapshot
+                    or decision.candidate.content != _confirmed_conflict.decision.candidate.content):
+                raise MemoryPolicyError("确认期间记忆已改变，请重新确认")
+            decision = replace(decision, action=M2Action.SUPERSEDE,
+                               supersede_reason="user_confirmed_conflict")
+        elif _confirmed_conflict is not None:
+            raise MemoryPolicyError("冲突状态已改变，请刷新后重新确认")
+        elif decision.action is M2Action.MERGE_UPDATE:
+            # Preserve provenance as a new version; no in-place SAFE_WRITE edit.
+            decision = replace(decision, action=M2Action.SUPERSEDE,
+                               supersede_reason="deterministic_merge")
+        elif decision.action in (M2Action.CREATE, M2Action.KEEP_BOTH,
+                                 M2Action.IGNORE_DUPLICATE, M2Action.SUPERSEDE,
+                                 M2Action.DO_NOT_PERSIST):
+            pass
+        else:
+            raise MemoryPolicyError("未实现的 Memory WriteAction，已拒绝写入")
+        if decision.action is M2Action.SUPERSEDE and len(targets) != 1:
+            raise MemoryPolicyError("多个冲突目标需要逐条复核，未写入新记忆")
+
         if decision.action is M2Action.IGNORE_DUPLICATE:
             existing_id = decision.target_record_ids[0] if decision.target_record_ids else ""
             existing = (
@@ -288,6 +354,8 @@ class MemoryService:
             vector_id = self.adapter.add(content, {"record_id": record.id})
         except Exception as exc:
             self.index_dirty = True
+            if decision.action is M2Action.SUPERSEDE:
+                self.repository.delete(record.id, access_mode=MemoryAccessMode.CONFIRMED_WRITE)
             raise MemorySynchronizationError(
                 "memory is authoritative but semantic indexing failed", record
             ) from exc
@@ -295,6 +363,9 @@ class MemoryService:
             updated = self.repository.update(record.id, {"vector_id": vector_id},
                                              access_mode=self.access_mode)
         except Exception as exc:
+            self.index_dirty = True
+            if decision.action is M2Action.SUPERSEDE:
+                self.repository.delete(record.id, access_mode=MemoryAccessMode.CONFIRMED_WRITE)
             raise MemorySynchronizationError(
                 "semantic index exists but vector ID could not be recorded", record
             ) from exc
@@ -326,13 +397,24 @@ class MemoryService:
                     )
                 except Exception:  # noqa: BLE001
                     logger.exception("rollback delete also failed")
-                return WriteResult(
-                    WriteOutcome.EXACT_DUPLICATE,
-                    self.repository.get(decision.target_record_ids[0])
-                    or updated,
-                )
+                self.index_dirty = True
+                try:
+                    self.adapter.delete(vector_id)
+                except Exception:
+                    logger.warning("supersede rollback left an orphan index")
+                raise MemoryPolicyError("记忆替代失败，已撤回新记录；请检查记忆一致性后重试")
 
         return WriteResult(WriteOutcome.CREATED, updated)
+
+    def resolve_conflict(self, conflict: MemoryConflictError) -> WriteResult:
+        """Execute a user-confirmed replacement, rechecking the original snapshot."""
+        check_access(self.access_mode, MemoryAccessMode.CONFIRMED_WRITE, "MemoryService.resolve_conflict")
+        return self.remember_detailed(
+            conflict.decision.candidate.content,
+            category=conflict.records[0].category,
+            trigger="conflict_confirmed", asserted_explicit=True,
+            _confirmed_conflict=conflict,
+        )
 
     @staticmethod
     def _normalize_for_compare(content: str) -> str:
@@ -364,7 +446,7 @@ class MemoryService:
             if not isinstance(record_id, str) or not record_id.strip():
                 continue
             record = self.repository.get(record_id)
-            if record is not None and record.category is category:
+            if record is not None and record.lifecycle_status == "active" and record.category is category:
                 return record
         return None
 
@@ -538,6 +620,7 @@ class MemoryService:
 
         return filtered
 
+    @_serialized_write
     def delete(self, record_id: str) -> bool:
         """Delete semantic index entries first, then the authoritative record.
 
@@ -595,6 +678,7 @@ class MemoryService:
             ) from index_failure
         return self.repository.delete(record_id, access_mode=self.access_mode)
 
+    @_serialized_write
     def clear_all(self) -> int:
         """Clear authoritative records first, then the derived semantic index.
 
@@ -675,6 +759,7 @@ class MemoryService:
             healthy=healthy,
         )
 
+    @_serialized_write
     def edit_memory(
         self, record_id: str, new_content: str, *,
         category: str | None = None,
@@ -710,7 +795,7 @@ class MemoryService:
         ]
         decision = self.m2_policy.evaluate(candidate, other_active)
 
-        if decision.action is WriteAction.IGNORE_DUPLICATE:
+        if decision.action is M2Action.IGNORE_DUPLICATE:
             return {
                 "action": "duplicate",
                 "existing_id": decision.target_record_ids[0] if decision.target_record_ids else None,
@@ -739,6 +824,30 @@ class MemoryService:
         self.apply_supersede(record_id, record.id, reason="manual_edit")
         return {"action": "created", "record": record, "old_id": record_id}
 
+    def retrieve_identity_for_prompt(self) -> list[MemoryRecord]:
+        """Read active, typed identity facts without querying the vector index."""
+        from .identity_recall import select_user_identity_records
+
+        return select_user_identity_records(self.repository.list())
+
+    @_serialized_write
+    def set_identity_kind(self, record_id: str, identity_kind: str) -> MemoryRecord:
+        """Mark an existing record's identity slot after explicit user confirmation.
+
+        This never creates a record, changes its content, or infers a name.
+        """
+        check_access(self.access_mode, MemoryAccessMode.CONFIRMED_WRITE,
+                     "MemoryService.set_identity_kind")
+        record = self.repository.get(record_id)
+        if record is None:
+            raise KeyError(record_id)
+        if record.lifecycle_status != "active":
+            raise ValueError("identity confirmation requires an active record")
+        if record.identity_kind == identity_kind:
+            return record
+        return self.repository.update(record_id, {"identity_kind": identity_kind},
+                                      access_mode=self.access_mode)
+
     def retrieve_for_prompt(
         self, query: str, *,
         max_injected: int | None = None,
@@ -756,6 +865,14 @@ class MemoryService:
         mode / intent for the recall gate; the default rules use only the
         query and candidates.
         """
+        from .identity_recall import is_user_identity_recall
+
+        if is_user_identity_recall(query):
+            records = self.retrieve_identity_for_prompt()
+            if max_injected is not None:
+                return records[:max(0, max_injected)]
+            return records
+
         from memory.m3b import (
             MAX_INJECTED_MEMORIES, MIN_RELEVANCE_SCORE,
             MemoryRetrievalCandidate, score_candidates,

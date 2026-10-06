@@ -24,6 +24,7 @@ import os
 from pathlib import Path
 
 import pytest
+
 from PySide6.QtCore import Qt
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+
 from core.bond_rules import BondPhase
 from core.bond_state import BondState
 from core.companion_runtime import CompanionRuntime, TurnStage
@@ -128,12 +129,18 @@ def _runtime(
     store = FakeConversationStore(calls, fail_load=load_fail, fail_save=save_fail)
     bond = FakeBondStateEngine(calls, fail=bond_fail)
     provider = FakeProvider(calls, fail=provider_fail)
+    # v1.1 Companion Mode: 这些单测验证聊天机制本身, 隔离全局 companion.json
+    # 开启的 suggestion 自动提取 (它会经同一 FakeProvider 发起 LLM 提取调用)。
+    from core.companion_config import CompanionConfig, SuggestionSettings
+
+    config = CompanionConfig(suggestion=SuggestionSettings(enabled=False))
     runtime = CompanionRuntime(
         FakeCharacter(calls),
         memory,
         store,
         bond,
         provider,
+        config=config,
     )
     return runtime, calls, memory, store, bond, provider
 
@@ -189,10 +196,9 @@ def test_recoverable_module_failures_are_isolated_and_reported() -> None:
         "provider",
         "conversation_save",
     ]
-    assert provider.messages == [
-        {"role": "system", "content": "character"},
-        {"role": "user", "content": "仍要完成本轮"},
-    ]
+    assert provider.messages[0] == {"role": "system", "content": "character"}
+    assert not any("PERSONA CONTEXT READ LAYER" in m["content"] for m in provider.messages)
+    assert provider.messages[1:] == [{"role": "user", "content": "仍要完成本轮"}]
     assert [issue.stage for issue in runtime.last_turn_errors] == [
         TurnStage.BOND_READ,
         TurnStage.MEMORY_RETRIEVAL,
@@ -227,12 +233,16 @@ def _runtime_with_bond_state(
     bond = FakeBondStateEngine(calls)
     bond.state = bond_state
     provider = FakeProvider(calls)
+    from core.companion_config import CompanionConfig, SuggestionSettings
+
+    config = CompanionConfig(suggestion=SuggestionSettings(enabled=False))
     runtime = CompanionRuntime(
         FakeCharacter(calls),
         memory,
         store,
         bond,
         provider,
+        config=config,
     )
     return runtime, calls, memory, bond, provider
 

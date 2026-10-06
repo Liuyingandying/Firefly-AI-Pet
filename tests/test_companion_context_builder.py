@@ -88,6 +88,7 @@ def test_full_context_merge_and_order() -> None:
     assert "BEGIN BOND CONTEXT" in messages[2]["content"]
     assert "BEGIN MEMORY CONTEXT" in messages[3]["content"]
     assert "BEGIN NARRATIVE CONTEXT" in messages[4]["content"]
+    assert not any("PERSONA CONTEXT READ LAYER" in m["content"] for m in messages)
     assert messages[5]["content"] == "上一条"  # conversation history
     assert messages[-1] == {"role": "user", "content": "你好"}
 
@@ -104,6 +105,7 @@ def test_empty_sources_skip_blocks() -> None:
     messages = context.to_messages("你好")
 
     assert [m["role"] for m in messages] == ["system", "system", "user"]
+    assert not any("PERSONA CONTEXT READ LAYER" in m["content"] for m in messages)
     assert messages[-1] == {"role": "user", "content": "你好"}
 
 

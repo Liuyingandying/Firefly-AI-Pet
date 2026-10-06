@@ -426,10 +426,43 @@ class SuggestionService:
             return self._store_pending_suggestions()
         return list(self._pending)
 
-    def accept(self, suggestion: MemorySuggestion) -> Any:
+    def queue_conflict(self, conflict) -> None:
+        """Reuse the existing pending store; never auto-approve a conflict."""
+        content = conflict.decision.candidate.content
+        if any(s.content == content for s in self.list_pending()):
+            return
+        suggestion = MemorySuggestion(content=content, category=conflict.records[0].category,
+                                      reason="memory_conflict", confidence=1.0, evidence=())
+        if self.store is not None:
+            self.store.add(content=content, source="user_created", confidence=1.0,
+                           metadata={"category": suggestion.category.value, "reason": suggestion.reason},
+                           suggestion_id=suggestion.id)
+        else:
+            self._pending.append(suggestion)
+
+    def suggest_memory(self, content: str, metadata=None) -> dict:
+        """Machine observations enter pending only, through the existing store."""
+        metadata = dict(metadata or {})
+        suggestion = MemorySuggestion(content=content,
+            category=MemoryCategory(metadata.get("category", "user_fact")),
+            source="companion_auto", reason="machine_observation", confidence=0.5, evidence=())
+        if self._is_privacy_violation(content) or self._security_guard_candidate(suggestion) is None:
+            return {"results": []}
+        if self.store is not None:
+            self.store.add(content=content, source="companion_auto", confidence=0.5,
+                           metadata={**metadata, "reason": suggestion.reason}, suggestion_id=suggestion.id)
+        else:
+            self._pending.append(suggestion)
+        return {"results": [{"id": suggestion.id, "status": "pending"}]}
+
+    def accept(self, suggestion: MemorySuggestion, *, conflict=None, confirmed_service=None) -> Any:
         """Write one suggestion via ``MemoryService.remember`` and drop it."""
         try:
-            if self.store is not None:
+            if conflict is not None:
+                if confirmed_service is None or conflict.decision.candidate.content != suggestion.content:
+                    raise PermissionError("冲突确认与候选记忆不一致")
+                record = confirmed_service.resolve_conflict(conflict).record
+            elif self.store is not None:
                 record = self.memory_service.remember(
                     suggestion.content,
                     category=suggestion.category.value,
@@ -444,6 +477,9 @@ class SuggestionService:
                     asserted_explicit=True,
                 )
         except Exception:
+            # Keep pending and propagate: the UI must show denial/conflict/errors.
+            raise
+        if record is None:
             return None
         self._decisions[suggestion.id] = "accepted"
         if self.store is not None:

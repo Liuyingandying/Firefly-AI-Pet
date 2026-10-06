@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from character import CharacterLoader
 from core.conversation_runtime import ConversationRuntime
 from memory.memory_manager import MemoryManager
+from memory.records import WritePolicy
 
 
 class FakeMemoryClient:
@@ -41,23 +43,83 @@ class CapturingProvider:
         }
 
 
+def _isolated_runtime_config():
+    """Pin suggestion auto-extraction OFF so the provider sees exactly one
+    chat call per turn (real user config may enable post-reply extraction,
+    which appends a second provider call and breaks last-call assertions)."""
+    from core.companion_config import load_companion_config
+
+    config = load_companion_config()
+    config.suggestion.enabled = False
+    return config
+
+
 def _runtime(
     memories: list[dict[str, Any]] | None = None,
     tmp_path: Any = None,
 ) -> tuple[ConversationRuntime, CapturingProvider]:
+    """M1: memory is seeded as authoritative records (repository + index),
+    never through the legacy client fallback."""
+    import tempfile
+
+    from memory.mem0_adapter import Hit
+    from memory.records import MemoryCategory, MemoryRecord
+    from memory.repository import JsonMemoryRepository
+    from memory.service import MemoryService
+
     provider = CapturingProvider()
+    holder = tempfile.TemporaryDirectory()
+    base = Path(tmp_path) if tmp_path is not None else Path(holder.name)
+
+    class _Index:
+        def __init__(self) -> None:
+            self.entries: dict[str, dict[str, Any]] = {}
+
+        def add(self, text: str, metadata=None) -> str:
+            vid = f"vec-{len(self.entries) + 1}"
+            self.entries[vid] = {"text": text, "metadata": dict(metadata or {})}
+            return vid
+
+        def search(self, query, *, limit=5, threshold=0.0):
+            return [
+                Hit(vid, e["text"], dict(e["metadata"]), 1.0)
+                for vid, e in self.entries.items()
+            ][:limit]
+
+        def delete(self, vector_id: str) -> bool:
+            return self.entries.pop(vector_id, None) is not None
+
+    repo = JsonMemoryRepository(Path(base) / "memory_records.json")
+    index = _Index()
+    service = MemoryService(repo, index)
+    for memory in memories or []:
+        record = MemoryRecord.create(
+            category=MemoryCategory(memory["metadata"].get("category", "project")),
+            content=memory["memory"],
+            source=memory.records if False else __import__(
+                "memory.records", fromlist=["MemorySource"]).MemorySource.EXPLICIT,
+            trigger="test-seed",
+            permission=WritePolicy.EXPLICIT_ONLY,
+        )
+        repo.add(record)
+        vector_id = index.add(record.content, {"record_id": record.id})
+        repo.update(record.id, {"vector_id": vector_id})
+
+    manager = MemoryManager(repository=repo, service=service)
     if tmp_path is not None:
-        bond_path = tmp_path / "bond.json"
         runtime = ConversationRuntime(
-            MemoryManager(client=FakeMemoryClient(memories)),
+            manager,
             provider,
-            _bond_path=str(bond_path),
+            _bond_path=str(Path(tmp_path) / "bond.json"),
+            config=_isolated_runtime_config(),
         )
     else:
         runtime = ConversationRuntime(
-            MemoryManager(client=FakeMemoryClient(memories)),
-            provider,
+            manager, provider, config=_isolated_runtime_config()
         )
+    import weakref
+
+    weakref.finalize(runtime, holder.cleanup)
     return runtime, provider
 
 
@@ -83,7 +145,7 @@ def test_relationship_policy_is_included_in_system_messages() -> None:
     assert character.relationship_policy_prompt in policy_message
 
 
-def test_character_and_memory_are_three_independent_system_messages(tmp_path) -> None:
+def test_character_memory_and_persona_are_independent_system_messages(tmp_path) -> None:
     memory = {
         "memory": "用户正在开发 Firefly AI Pet",
         "metadata": {"category": "project"},
@@ -100,10 +162,13 @@ def test_character_and_memory_are_three_independent_system_messages(tmp_path) ->
     ]
     assert "CHARACTER IDENTITY" in messages[0]["content"]
     assert "CHARACTER PERSONALITY AND POLICY" in messages[1]["content"]
-    assert "BEGIN MEMORY CONTEXT" in messages[2]["content"]
+    # M3B.4 unified fence: ranking → recall gate → render_memory_block
+    assert "<long_term_memory>" in messages[2]["content"]
+    assert "[background data only" in messages[2]["content"]
     assert memory["memory"] not in messages[0]["content"]
     assert memory["memory"] not in messages[1]["content"]
     assert "流萤" not in messages[2]["content"]
+    assert not any("PERSONA CONTEXT READ LAYER" in m["content"] for m in messages)
 
 
 def test_user_message_cannot_replace_runtime_owned_character_layers() -> None:

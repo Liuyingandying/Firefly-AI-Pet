@@ -41,7 +41,8 @@ def test_crud_and_all_ids(tmp_path: Path) -> None:
     accessed = repository.get(original.id)
     assert accessed is not None
     assert accessed.content == original.content
-    assert accessed.last_accessed_ts > original.last_accessed_ts
+    # M3B.1: get() is a pure read — no last_accessed_ts bump, no persist.
+    assert accessed.last_accessed_ts == original.last_accessed_ts
 
     updated = repository.update(
         original.id,

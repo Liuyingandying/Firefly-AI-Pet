@@ -151,18 +151,20 @@ class TestSemanticDedup:
         assert result is not None
         assert result.is_duplicate is False
 
-    def test_different_category_skipped_in_pending(self) -> None:
+    def test_different_category_skipped_in_pending(self, monkeypatch) -> None:
         """Semantic dedup only compares within same category."""
         dedup = SemanticDedup(threshold=0.5)
+        monkeypatch.setattr(dedup, "_get_embedding", lambda _text: [1.0, 0.0])
         candidate = _make_suggestion("我喜欢猫", category=MemoryCategory.PREFERENCE)
         existing = [_make_suggestion("我住在杭州", category=MemoryCategory.USER_FACT)]
         result = dedup.check_pending(candidate, existing)
         assert result is not None
         assert result.is_duplicate is False
 
-    def test_different_category_skipped_in_records(self) -> None:
+    def test_different_category_skipped_in_records(self, monkeypatch) -> None:
         """Semantic dedup only compares within same category."""
         dedup = SemanticDedup(threshold=0.5)
+        monkeypatch.setattr(dedup, "_get_embedding", lambda _text: [1.0, 0.0])
         candidate = _make_suggestion("我喜欢猫", category=MemoryCategory.PREFERENCE)
         existing = [_make_record("我住在杭州", category=MemoryCategory.USER_FACT)]
         result = dedup.check_existing_records(candidate, existing)

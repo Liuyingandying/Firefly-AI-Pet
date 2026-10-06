@@ -10,6 +10,7 @@ import pytest
 from memory.mem0_adapter import Hit
 from memory.memory_manager import MemoryManager
 from memory.records import MemoryCategory, WritePolicy
+from memory.access_mode import MemoryAccessMode
 from memory.repository import JsonMemoryRepository
 from memory.service import MemoryService, MemorySynchronizationError
 from memory.write_guards import MemoryWriteDeniedError
@@ -56,7 +57,8 @@ def make_service(
     repository = JsonMemoryRepository(tmp_path / "memory_records.json")
     adapter = FakeSemanticIndex(fail_add=fail_add)
     return (
-        MemoryService(repository, adapter, write_policy=policy),
+        MemoryService(repository, adapter, write_policy=policy,
+                      access_mode=MemoryAccessMode.CONFIRMED_WRITE),
         repository,
         adapter,
     )

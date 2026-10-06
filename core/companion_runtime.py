@@ -290,19 +290,23 @@ class CompanionRuntime:
         self._begin_turn()
         try:
             user_text = _required_text(user_message, "user_message")
-            messages = self._build_messages(user_text, history=history)
+            messages = self._build_messages(user_text, history=history, current_task=turn_context or "chat")
             if turn_context:
                 messages.insert(-1, {"role": "system", "content": turn_context})
             # M1: explicit "记住…" requests persist through the authoritative
             # MemoryService immediately (repository first, then semantic
             # index). Ordinary chat text is rejected by the write policy, so
             # this is a no-op unless the user explicitly asked to remember.
-            self._try_explicit_remember(user_text)
+            memory_notice = self._try_explicit_remember(user_text)
             response = self.provider_router.chat(
                 messages,
                 model=model,
                 temperature=temperature,
             )
+            if memory_notice and _assistant_content(response) is not None:
+                from copy import deepcopy
+                response = deepcopy(response)
+                response["choices"][0]["message"]["content"] += "\n\n记忆状态：" + memory_notice
             assistant_text = _assistant_content(response)
             if self.conversation_store is not None and assistant_text is not None:
                 try:
@@ -325,9 +329,10 @@ class CompanionRuntime:
         user_message: str,
         *,
         history: Sequence[dict[str, Any]] | None,
+        current_task: str = "chat",
     ) -> list[dict[str, Any]]:
         user_text = _required_text(user_message, "user_message")
-        context = self.context_builder.build(user_text, history=history)
+        context = self.context_builder.build(user_text, history=history, current_task=current_task)
         self.last_bond_state = context.bond_state
         return context.to_messages(user_text)
 
@@ -360,7 +365,7 @@ class CompanionRuntime:
         )
 
     # ------------------------------------------------------------------ M1
-    def _try_explicit_remember(self, user_message: str) -> None:
+    def _try_explicit_remember(self, user_message: str) -> str | None:
         """Persist an explicit "记住…" request through the full MemoryService.
 
         The service's write policy does the gating: under the default
@@ -375,8 +380,15 @@ class CompanionRuntime:
         try:
             remember_detailed(user_message, trigger="explicit-command")
         except Exception as exc:
+            from memory.service import MemoryConflictError
+            if isinstance(exc, MemoryConflictError) and self.suggestion_service is not None:
+                try:
+                    self.suggestion_service.queue_conflict(exc)
+                except Exception as pending_error:
+                    self._record_error(TurnStage.MEMORY_WRITE, pending_error)
             # The turn continues; the failure is surfaced in diagnostics.
             self._record_error(TurnStage.MEMORY_WRITE, exc)
+            return str(exc) if isinstance(exc, MemoryConflictError) else "写入失败，原记忆未确认更新，请检查记忆面板。"
 
     # ------------------------------------------------------------------ P5A-1
     def _try_extract_suggestions(

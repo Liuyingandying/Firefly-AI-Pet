@@ -124,6 +124,7 @@ class JsonMemoryRepository(MemoryRepository):
         "lifecycle_status",
         "superseded_by",
         "supersede_reason",
+        "identity_kind",
     }
 
     def __init__(self, path: Path | str | None = None) -> None:

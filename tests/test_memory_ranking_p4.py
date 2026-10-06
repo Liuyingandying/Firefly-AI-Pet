@@ -26,6 +26,7 @@ from memory.records import (
     MemorySource,
     WritePolicy,
 )
+from memory.access_mode import MemoryAccessMode
 from memory.repository import JsonMemoryRepository
 from memory.ranking import (
     RankedHit,
@@ -729,7 +730,8 @@ def test_reconcile_regression_still_works_with_ranking(tmp_path: Path) -> None:
     """Reconciliation should work correctly alongside ranking."""
     repo = JsonMemoryRepository(tmp_path / "records.json")
     adapter = FakeAdapter()
-    service = MemoryService(repo, adapter)
+    service = MemoryService(repo, adapter,
+                            access_mode=MemoryAccessMode.CONFIRMED_WRITE)
 
     record = MemoryRecord.create(
         category="user_fact", content="missing index", source="explicit", trigger="t"

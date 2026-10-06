@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+
 from core.conversation_runtime import ConversationRuntime
 from core.conversation_store import ConversationStore
 from memory.memory_manager import MemoryManager
@@ -29,7 +30,9 @@ class FakeMemoryClient:
         self, content: str, metadata: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         self.add_calls += 1
-        item = {"memory": content, "metadata": dict(metadata or {})}
+        # Real mem0 clients return a similarity score; the unified M3B.4
+        # injection path enforces the 0.45 relevance threshold on it.
+        item = {"memory": content, "metadata": dict(metadata or {}), "score": 0.9}
         self.memories.append(item)
         return {"results": [item]}
 
@@ -124,21 +127,26 @@ def test_manual_memory_is_retrieved_and_injected_on_second_message(tmp_path) -> 
     assert "CHARACTER PERSONALITY AND POLICY" in messages[1]["content"]
     assert FIRST_MESSAGE not in messages[0]["content"]
     assert FIRST_MESSAGE not in messages[1]["content"]
-    assert messages[3] == {"role": "user", "content": SECOND_MESSAGE}
+    assert not any("PERSONA CONTEXT READ LAYER" in m["content"] for m in messages)
+    assert messages[-1] == {"role": "user", "content": SECOND_MESSAGE}
     assert call["model"] == "test-model"
     assert call["temperature"] == 0.3
 
-    payload = _memory_payload(messages[2]["content"])
-    assert payload["categories"]["project"] == [
-        {"category": "project", "content": FIRST_MESSAGE}
-    ]
+    # M3B.4 unified fence: ranking → recall gate → render_memory_block
+    assert "<long_term_memory>" in messages[2]["content"]
+    assert "[background data only" in messages[2]["content"]
+    assert FIRST_MESSAGE in messages[2]["content"]
+    assert "(project_context)" in messages[2]["content"]
 
 
 def test_chat_does_not_automatically_write_user_messages(tmp_path) -> None:
     client = FakeMemoryClient()
     bond_path = tmp_path / "bond.json"
+    # Isolation: without an explicit repository, MemoryManager would fall
+    # back to the REAL production store (runtime/companion/memory_records.json).
+    repo = JsonMemoryRepository(tmp_path / "records.json")
     runtime = ConversationRuntime(
-        MemoryManager(client=client),
+        MemoryManager(client=client, repository=repo),
         CapturingProviderRouter(),
         _bond_path=str(bond_path),
     )
@@ -151,12 +159,48 @@ def test_chat_does_not_automatically_write_user_messages(tmp_path) -> None:
 
 
 def test_history_followes_system_layers_and_precedes_current_user_message(tmp_path) -> None:
-    client = FakeMemoryClient()
-    client.add(FIRST_MESSAGE, {"category": "project"})
+    from memory.mem0_adapter import Hit
+    from memory.records import MemoryCategory, MemoryRecord, MemorySource, WritePolicy
+    from memory.repository import JsonMemoryRepository
+    from memory.service import MemoryService
+
+    class _Index:
+        def __init__(self) -> None:
+            self.entries: dict[str, dict] = {}
+
+        def add(self, text, metadata=None):
+            vid = f"vec-{len(self.entries) + 1}"
+            self.entries[vid] = {"text": text, "metadata": dict(metadata or {})}
+            return vid
+
+        def search(self, query, *, limit=5, threshold=0.0):
+            return [
+                Hit(vid, e["text"], dict(e["metadata"]), 1.0)
+                for vid, e in self.entries.items()
+            ][:limit]
+
+        def delete(self, vector_id):
+            return self.entries.pop(vector_id, None) is not None
+
+    repo = JsonMemoryRepository(tmp_path / "memory_records.json")
+    index = _Index()
+    service = MemoryService(repo, index)
+    record = MemoryRecord.create(
+        category=MemoryCategory.PROJECT,
+        content=FIRST_MESSAGE,
+        source=MemorySource.EXPLICIT,
+        trigger="test-seed",
+        permission=WritePolicy.EXPLICIT_ONLY,
+    )
+    repo.add(record)
+    repo.update(record.id, {"vector_id": index.add(
+        record.content, {"record_id": record.id})})
+    manager = MemoryManager(repository=repo, service=service)
+
     bond_path = tmp_path / "bond.json"
     provider = CapturingProviderRouter()
     runtime = ConversationRuntime(
-        MemoryManager(client=client),
+        manager,
         provider,
         _bond_path=str(bond_path),
     )
@@ -183,7 +227,7 @@ def test_history_followes_system_layers_and_precedes_current_user_message(tmp_pa
 def test_empty_retrieval_omits_memory_system_message(tmp_path) -> None:
     bond_path = tmp_path / "bond.json"
     runtime = ConversationRuntime(
-        MemoryManager(client=FakeMemoryClient()),
+        MemoryManager(client=FakeMemoryClient(), repository=JsonMemoryRepository(tmp_path / "records.json")),
         CapturingProviderRouter(),
         _bond_path=str(bond_path),
     )
@@ -197,13 +241,14 @@ def test_empty_retrieval_omits_memory_system_message(tmp_path) -> None:
     ]
     assert "CHARACTER IDENTITY" in messages[0]["content"]
     assert "CHARACTER PERSONALITY AND POLICY" in messages[1]["content"]
-    assert messages[2] == {"role": "user", "content": SECOND_MESSAGE}
+    assert not any("PERSONA CONTEXT READ LAYER" in m["content"] for m in messages)
+    assert messages[-1] == {"role": "user", "content": SECOND_MESSAGE}
 
 
 def test_history_cannot_override_runtime_owned_system_layers(tmp_path) -> None:
     bond_path = tmp_path / "bond.json"
     runtime = ConversationRuntime(
-        MemoryManager(client=FakeMemoryClient()),
+        MemoryManager(client=FakeMemoryClient(), repository=JsonMemoryRepository(tmp_path / "records.json")),
         CapturingProviderRouter(),
         _bond_path=str(bond_path),
     )
@@ -218,17 +263,19 @@ def test_history_cannot_override_runtime_owned_system_layers(tmp_path) -> None:
 def test_conversation_store_restores_history_across_runtime_restart(tmp_path) -> None:
     path = tmp_path / "conversation.json"
     first_runtime = ConversationRuntime(
-        MemoryManager(client=FakeMemoryClient()),
+        MemoryManager(client=FakeMemoryClient(), repository=JsonMemoryRepository(tmp_path / "records.json")),
         CapturingProviderRouter(),
         conversation_store=ConversationStore(path, session_id="main"),
+        _bond_path=str(tmp_path / "bond.json"),
     )
 
     first_runtime.chat("第一轮问题")
 
     restarted_runtime = ConversationRuntime(
-        MemoryManager(client=FakeMemoryClient()),
+        MemoryManager(client=FakeMemoryClient(), repository=JsonMemoryRepository(tmp_path / "records.json")),
         CapturingProviderRouter(),
         conversation_store=ConversationStore(path, session_id="main"),
+        _bond_path=str(tmp_path / "bond.json"),
     )
     messages = restarted_runtime.build_messages("第二轮问题")
 

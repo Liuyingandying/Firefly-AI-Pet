@@ -129,7 +129,7 @@ def _format_ts(ms_ts: int) -> str:
 
 
 class MemoryPanel(QWidget):
-    """A read-only view of Memory, Narrative, and Bond state.
+    """A view of Memory, Narrative and Bond with confirmed Memory mutations.
 
     P5B: keyword search, category filter, detail panel, export, clear-all,
     delete confirmation, status bar.
@@ -261,25 +261,24 @@ class MemoryPanel(QWidget):
         self._render(data)
         self._render_pending()
 
-    def delete_memory(self, record_id: str) -> bool:
+    def delete_memory(self, record_id: str, *, confirmed: bool = False) -> bool:
         """Delete one memory record through the existing service interface."""
-        return self.memory_service.delete(record_id)
+        if not confirmed:
+            raise PermissionError("删除记忆需要用户确认")
+        from ui.confirmed_memory import confirmed_memory_handle
+        return confirmed_memory_handle(self.memory_service).delete(record_id)
 
-    def clear_all_memories(self) -> int:
+    def clear_all_memories(self, *, confirmed: bool = False) -> int:
         """Clear all long-term memory records via the full MemoryService.
 
         M1: clears BOTH the authoritative repository and the derived semantic
-        index (repository first). Returns the number of records removed,
-        or -1 on error.
+        index (repository first). Returns the number of records removed;
+        errors propagate to the visible UI error handler.
         """
-        try:
-            clear_all = getattr(self.memory_service, "clear_all", None)
-            if callable(clear_all):
-                return int(clear_all())
-            # Legacy read-only views have no clear; never half-clear.
-            return -1
-        except Exception:
-            return -1
+        if not confirmed:
+            raise PermissionError("清空记忆需要用户确认")
+        from ui.confirmed_memory import confirmed_memory_handle
+        return int(confirmed_memory_handle(self.memory_service).clear_all())
 
     def export_memories(self) -> dict[str, Any] | None:
         """Export all memory records as a JSON-serialisable dict."""
@@ -305,6 +304,8 @@ class MemoryPanel(QWidget):
     def _on_select(self, current: QListWidgetItem | None, _previous: QListWidgetItem | None = None) -> None:
         """Show detail for the selected record."""
         if current is None:
+            self._selected_record_id = None
+            self.detail_text.clear()
             return
         record_id = current.data(Qt.ItemDataRole.UserRole)
         self._selected_record_id = record_id
@@ -329,7 +330,12 @@ class MemoryPanel(QWidget):
             QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            if self.delete_memory(record_id):
+            try:
+                removed = self.delete_memory(record_id, confirmed=True)
+            except Exception as exc:
+                self.status_label.setText(f"删除失败：{exc}")
+                return
+            if removed:
                 self.refresh()
                 self.status_label.setText(f"已删除 1 条记忆")
             else:
@@ -375,7 +381,11 @@ class MemoryPanel(QWidget):
             QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            removed = self.clear_all_memories()
+            try:
+                removed = self.clear_all_memories(confirmed=True)
+            except Exception as exc:
+                self.status_label.setText(f"清空失败：{exc}")
+                return
             if removed >= 0:
                 self.refresh()
                 self.status_label.setText(f"已清空 {removed} 条记忆")
@@ -453,8 +463,34 @@ class MemoryPanel(QWidget):
         if row < 0 or row >= len(self._pending_suggestions):
             return
         suggestion = self._pending_suggestions[row]
-        self.suggestion_service.accept(suggestion)
+        from memory.service import MemoryConflictError
+        from ui.confirmed_memory import confirmed_memory_handle
+        try:
+            record = self.suggestion_service.accept(suggestion)
+        except MemoryConflictError as conflict:
+            old = "\n".join(r.content for r in conflict.records)
+            reply = QMessageBox.question(
+                self, "确认更新冲突记忆",
+                f"原记录：\n{old}\n\n候选记录：\n{suggestion.content}\n\n是否用候选记录替代原记录？选择否将保留原记录，候选继续待确认。",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                self.status_label.setText("已保留原记忆；候选仍待确认")
+                return
+            try:
+                record = self.suggestion_service.accept(
+                    suggestion, conflict=conflict,
+                    confirmed_service=confirmed_memory_handle(self.memory_service),
+                )
+            except Exception as exc:
+                self.status_label.setText(f"确认失败：{exc}")
+                return
+        except Exception as exc:
+            self.status_label.setText(f"记忆写入失败：{exc}")
+            return
         self.refresh()
+        self.status_label.setText("已确认记忆" if record is not None else "未写入：权限或写入策略拒绝")
 
     def _reject_selected(self) -> None:
         row = self.pending_list.currentRow()

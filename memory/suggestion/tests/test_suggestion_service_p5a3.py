@@ -326,7 +326,7 @@ class TestDedup:
         assert len(result) == 0  # suppressed
         assert len(ms.remembered) == 1  # count unchanged
 
-    def test_semantic_pending_duplicate_no_auto_write(self):
+    def test_semantic_pending_duplicate_no_auto_write(self, monkeypatch):
         """Semantic duplicate of pending suggestion → suppressed by _dedup_candidates."""
         ms = FakeMemoryService()
         svc = _make_suggestion_service(
@@ -334,6 +334,8 @@ class TestDedup:
             explicit_auto_approve_enabled=True,
             semantic_dedup_enabled=True,
         )
+        # Inject equivalence evidence; this unit test never loads an embedder.
+        monkeypatch.setattr(svc.semantic_dedup, "_get_embedding", lambda _text: [1.0, 0.0])
         # Add a pending suggestion with similar content
         pending = MemorySuggestion(
             content="我喜欢机械键盘",

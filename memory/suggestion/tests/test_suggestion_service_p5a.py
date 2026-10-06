@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from typing import Any
 
 from memory.records import MemoryCategory, MemoryRecord, MemorySource, WritePolicy
@@ -421,8 +423,8 @@ class TestAcceptReject:
         service = SuggestionService(memory)
         suggestion = _make_suggestion("我喜欢猫")
         service._pending.append(suggestion)
-        record = service.accept(suggestion)
-        assert record is None
+        with pytest.raises(RuntimeError, match="write failed"):
+            service.accept(suggestion)
         assert service.list_pending() == [suggestion]
 
 

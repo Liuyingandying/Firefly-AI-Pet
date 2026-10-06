@@ -312,6 +312,11 @@ def classify_relation(
 # ---------------------------------------------------------------------------
 
 
+def _residence(content: str) -> str | None:
+    match = re.fullmatch(r"我(?:现在|目前|已经)?(?:居住在|住在|搬到了|搬到)([^，。！？!?；;]+)[。！!]?", content.strip())
+    return match.group(1).strip() if match else None
+
+
 class MemoryWritePolicy:
     """Deterministic write policy: candidate + existing records → decision.
 
@@ -333,6 +338,20 @@ class MemoryWritePolicy:
         evidence: RelationEvidence | None = None,
     ) -> MemoryWriteDecision:
         existing_records = [r for r in existing_records if getattr(r, "lifecycle_status", "active") != "superseded"]
+
+        # A residence change is a specific single-valued subject. Do not let
+        # generic text similarity call 城市A/城市B duplicates or unrelated facts.
+        residence = _residence(candidate.content)
+        if residence:
+            conflicts = tuple(r.id for r in existing_records
+                              if _residence(r.content) and _residence(r.content) != residence)
+            if conflicts:
+                return MemoryWriteDecision(
+                    action=WriteAction.REQUIRE_CONFIRMATION, candidate=candidate,
+                    target_record_ids=conflicts, relation=Relation.CONFLICTS,
+                    confidence=1.0, reason="self.residence changed; explicit confirmation required",
+                    require_confirmation=True,
+                )
 
         # 0) durability gate: 自动提取的 temporary state 默认不进入长期记忆。
         if (
