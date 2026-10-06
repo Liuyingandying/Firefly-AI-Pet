@@ -38,6 +38,95 @@ _SUPERSCRIPT_MAP = str.maketrans({
     "(": "⁽", ")": "⁾", "n": "ⁿ", "i": "ⁱ",
 })
 
+# ---------------------------------------------------------------------------
+# LaTeX → Unicode（M4.10 体验修复：AI 输出 $...$ / $$...$$ 公式时转为可读文本）
+# ---------------------------------------------------------------------------
+
+_LATEX_GREEK: dict[str, str] = {
+    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ",
+    "epsilon": "ε", "varepsilon": "ε", "zeta": "ζ", "eta": "η",
+    "theta": "θ", "iota": "ι", "kappa": "κ", "lambda": "λ",
+    "mu": "μ", "nu": "ν", "xi": "ξ", "pi": "π", "rho": "ρ",
+    "sigma": "σ", "tau": "τ", "upsilon": "υ", "phi": "φ", "varphi": "φ",
+    "chi": "χ", "psi": "ψ", "omega": "ω",
+    "Gamma": "Γ", "Delta": "Δ", "Theta": "Θ", "Lambda": "Λ",
+    "Xi": "Ξ", "Pi": "Π", "Sigma": "Σ", "Phi": "Φ", "Psi": "Ψ", "Omega": "Ω",
+}
+
+_LATEX_OPERATORS: dict[str, str] = {
+    "times": "×", "cdot": "·", "div": "÷", "pm": "±", "mp": "∓",
+    "leq": "≤", "geq": "≥", "neq": "≠", "approx": "≈", "equiv": "≡",
+    "infty": "∞", "partial": "∂", "nabla": "∇", "propto": "∝",
+    "in": "∈", "notin": "∉", "subset": "⊂", "supset": "⊃",
+    "cup": "∪", "cap": "∩", "emptyset": "∅",
+    "rightarrow": "→", "leftarrow": "←", "Rightarrow": "⇒", "Leftarrow": "⇐",
+    "leftrightarrow": "↔", "perp": "⊥", "parallel": "∥",
+    "angle": "∠", "degree": "°",
+}
+
+_LATEX_FUNCS: dict[str, str] = {
+    "sin": "sin", "cos": "cos", "tan": "tan", "log": "log",
+    "ln": "ln", "exp": "exp", "min": "min", "max": "max",
+}
+
+_LATEX_GREEK_RE = re.compile(
+    r"\\(" + "|".join(_LATEX_GREEK) + r")\b"
+)
+_LATEX_OP_RE = re.compile(
+    r"\\(" + "|".join(_LATEX_OPERATORS) + r")\b"
+)
+_LATEX_FUNC_RE = re.compile(
+    r"\\(" + "|".join(_LATEX_FUNCS) + r")\b"
+)
+_LATEX_MATHBF_RE = re.compile(r"\\mathbf\{([^}]*)\}")
+_LATEX_MATHIT_RE = re.compile(r"\\mathit\{([^}]*)\}")
+_LATEX_FRAC_RE = re.compile(r"\\frac\{([^{}]*)\}\{([^{}]*)\}")
+_LATEX_TEXT_RE = re.compile(r"\\text\{([^}]*)\}")
+_LATEX_DOLLAR_DISPLAY_RE = re.compile(r"\$\$(.+?)\$\$", re.S)
+_LATEX_DOLLAR_INLINE_RE = re.compile(r"\$([^$\n]+?)\$")
+
+
+def _latex_to_unicode(text: str) -> str:
+    """将常见 LaTeX 命令转为 Unicode 等价物（零依赖, 纯文本替换）。
+
+    处理顺序: mathbf/mathit → frac → greek → operators → funcs → text。
+    不处理复杂嵌套（矩阵/积分等）——那些保持原样但去掉 $ 定界符。
+    """
+    # \frac{a}{b} → a/b
+    text = _LATEX_FRAC_RE.sub(r"\1/\2", text)
+    # \mathbf{X} → X（Unicode 粗体映射太复杂, 直接去壳）
+    text = _LATEX_MATHBF_RE.sub(r"\1", text)
+    # \mathit{X} → X
+    text = _LATEX_MATHIT_RE.sub(r"\1", text)
+    # \text{X} → X
+    text = _LATEX_TEXT_RE.sub(r"\1", text)
+    # 希腊字母
+    text = _LATEX_GREEK_RE.sub(lambda m: _LATEX_GREEK[m.group(1)], text)
+    # 运算符
+    text = _LATEX_OP_RE.sub(lambda m: _LATEX_OPERATORS[m.group(1)], text)
+    # 函数名
+    text = _LATEX_FUNC_RE.sub(lambda m: _LATEX_FUNCS[m.group(1)], text)
+    return text
+
+
+def _latex_blocks_to_unicode(text: str) -> str:
+    """处理 $$...$$ display 块和 $...$ inline 公式。
+
+    只做命令→Unicode 替换 + 去 $ 定界符; 不尝试完整排版。
+    """
+    # display 块
+    def _display_sub(m):
+        inner = _latex_to_unicode(m.group(1).strip())
+        return f" [{inner}] " if inner else ""
+    text = re.sub(r"\$\$(.+?)\$\$", _display_sub, text, flags=re.S)
+
+    # inline 公式
+    def _inline_sub(m):
+        inner = _latex_to_unicode(m.group(1).strip())
+        return inner if inner else m.group(0)
+    text = re.sub(r"\$([^$\n]+?)\$", _inline_sub, text)
+    return text
+
 # QTextDocument 会把任何输入转换为它自己的标准标签子集；toHtml() 输出若
 # 出现该白名单之外的标签，说明上游注入了未转义的 HTML（验收测试用）。
 _KNOWN_QT_TAGS = frozenset({
@@ -78,6 +167,7 @@ def markdown_to_html(text: str) -> str:
     if not text:
         return ""
     text = _sub_sup_to_unicode(text)
+    text = _latex_blocks_to_unicode(text)
     rendered: list[str] = []
     for raw in text.splitlines():
         m = _HEADING_RE.match(raw)

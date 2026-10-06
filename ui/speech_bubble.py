@@ -137,6 +137,7 @@ class SpeechBubble(QWidget):
         self._display_names = display_names or CharacterDisplayNames()
         self.setWindowTitle(f"{self._display_names.brand_name} Greeting")
 
+    @staticmethod
     def _message_html(title: str, message: str, accent) -> str:
         secondary = theme.css_color(theme.TEXT_SECONDARY)
         if accent is not None:

@@ -280,6 +280,7 @@ class CompanionChatWindow(QWidget):
                 f"和{self._display_names.assistant_name}说点什么…"
             )
 
+    @classmethod
     def open_singleton(
         cls,
         runner: CharacterConversationRunner | None = None,

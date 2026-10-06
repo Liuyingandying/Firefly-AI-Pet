@@ -20,7 +20,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QImage, QPainter, QPainterPath, QPixmap, QTextOption
 from PySide6.QtWidgets import (
     QFrame,
@@ -285,6 +285,13 @@ class ChatView(QWidget):
             "QScrollBar::handle:vertical { background: rgba(160,150,130,80);"
             " border-radius: 4px; min-height: 24px; }"
         )
+        self._follow_new_message = False
+        self._scroll.verticalScrollBar().rangeChanged.connect(
+            self._on_scroll_range_changed
+        )
+        self._scroll_finish_timer = QTimer(self)
+        self._scroll_finish_timer.setSingleShot(True)
+        self._scroll_finish_timer.timeout.connect(self._finish_scroll_to_bottom)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -339,8 +346,22 @@ class ChatView(QWidget):
         self._status_chip.setVisible(bool(text))
 
     def _scroll_to_bottom(self) -> None:
+        # The scroll range is still stale immediately after inserting a card.
+        # QTextBrowser and QScrollArea can settle their layout after the next
+        # GUI event cycle; keep following briefly until the final range exists.
+        self._follow_new_message = True
         bar = self._scroll.verticalScrollBar()
         bar.setValue(bar.maximum())
+        self._scroll_finish_timer.start(200)
+
+    def _on_scroll_range_changed(self, _minimum: int, maximum: int) -> None:
+        if self._follow_new_message:
+            self._scroll.verticalScrollBar().setValue(maximum)
+
+    def _finish_scroll_to_bottom(self) -> None:
+        bar = self._scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        self._follow_new_message = False
 
 
 __all__ = ["ChatView"]
