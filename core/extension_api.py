@@ -101,15 +101,12 @@ class ExtensionMemory:
     def remember(
         self, content: str, *, category: str = "user_fact", trigger: str = "extension"
     ) -> Any:
-        fn = getattr(self._service, "remember", None)
+        fn = getattr(self._service, "suggest_memory", None)
         if fn is None:
             return None
         try:
-            # asserted_explicit=True: persist a genuine plugin observation
-            # through the normal write pipeline (write policy + dedup gate).
-            return fn(
-                content, category=category, trigger=trigger, asserted_explicit=True
-            )
+            # Plugin observations are not explicit user instructions.
+            return fn(content, {"category": category, "trigger": trigger})
         except Exception:
             log.debug("extension memory remember failed", exc_info=True)
             return None

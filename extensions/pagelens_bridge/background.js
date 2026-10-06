@@ -11,12 +11,18 @@ let socket = null;
 let reconnectDelay = 1000;
 let keepalive = null;
 
-function connect() {
+async function connect() {
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
     return;
   }
   try {
-    socket = new WebSocket(WS_URL);
+    const { fireflyBridgeToken } = await chrome.storage.local.get("fireflyBridgeToken");
+    if (typeof fireflyBridgeToken !== "string" || fireflyBridgeToken.length < 32) {
+      scheduleReconnect();
+      return; // Unpaired clients fail closed; never fetch a credential over HTTP.
+    }
+    if (socket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(socket.readyState)) return;
+    socket = new WebSocket(WS_URL, ["firefly-auth." + fireflyBridgeToken]);
   } catch (err) {
     scheduleReconnect();
     return;

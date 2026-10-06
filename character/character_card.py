@@ -102,8 +102,9 @@ def validate_card(source: Path, *, temporary_dir: Path | None = None) -> CardVal
         extract_to = Path(tempfile.mkdtemp(prefix="firefly_card_"))
         try:
             with zipfile.ZipFile(source) as zf:
-                zf.extractall(extract_to)
-        except (zipfile.BadZipFile, OSError) as exc:
+                from tools.character_package.validator import extract_validated_archive
+                extract_validated_archive(zf, extract_to)
+        except (zipfile.BadZipFile, OSError, ValueError, RuntimeError) as exc:
             _cleanup(extract_to)
             return CardValidation(ok=False, errors=[f"zip 解包失败: {exc}"])
         root = _find_manifest_root(extract_to)

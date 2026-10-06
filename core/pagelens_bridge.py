@@ -25,6 +25,9 @@ import inspect
 import json
 import logging
 import math
+import os
+import secrets
+from http import HTTPStatus
 import threading
 import time
 from typing import Any
@@ -44,6 +47,8 @@ BRIDGE_PORT = 17321
 BRIDGE_KEEPALIVE_INTERVAL = 20  # seconds
 BRIDGE_RECONNECT_BASE = 1  # seconds (for browser client)
 BRIDGE_RECONNECT_MAX = 5  # seconds (for browser client)
+MAX_MESSAGE_BYTES = 64 * 1024
+MAX_AI_REQUESTS = 2
 
 _AI_CHAT_SOURCES = frozenset({
     "explain",
@@ -146,7 +151,8 @@ class PageLensBridge(QObject):
     action_open_question = Signal(str)
     action_back = Signal()
 
-    def __init__(self, parent: QObject | None = None, *, chat_handler=None):
+    def __init__(self, parent: QObject | None = None, *, chat_handler=None,
+                 auth_token=None, allowed_origins=None):
         super().__init__(parent)
         self._thread: QThread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -160,6 +166,9 @@ class PageLensBridge(QObject):
         self._pending_actions: list[dict] = []  # queue actions while disconnected
         self._chat_handler = chat_handler or chat
         self._ai_chat_tasks: dict[str, asyncio.Task] = {}
+        self._auth_token = auth_token if auth_token is not None else os.getenv("FIREFLY_PAGELENS_TOKEN", "")
+        self._allowed_origins = frozenset(allowed_origins if allowed_origins is not None else
+            filter(None, (s.strip() for s in os.getenv("FIREFLY_PAGELENS_ORIGINS", "").split(","))))
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -172,8 +181,21 @@ class PageLensBridge(QObject):
         event loop must call run_forever() directly — there is no way to
         make call_soon_threadsafe() execute a callback on a loop that is
         not yet running (chicken-and-egg).
+
+        RC decision 2026-09-30 (Option B): the bridge is OPT-IN. Without a
+        complete pairing configuration (token >= 32 chars AND at least one
+        allowed Origin) the server never binds the port — the feature ships
+        disabled rather than listening-and-rejecting. Pairing steps:
+        docs/security/PageLens_Pairing.md.
         """
         if self._connected:
+            return
+        if len(self._auth_token) < 32 or not self._allowed_origins:
+            log.info(
+                "[PageLens Bridge] disabled: pairing not configured "
+                "(set FIREFLY_PAGELENS_TOKEN >= 32 chars and "
+                "FIREFLY_PAGELENS_ORIGINS to enable; see PageLens_Pairing.md)"
+            )
             return
         t = threading.Thread(target=self._run_loop, daemon=True, name="PageLensBridgeThread")
         self._thread = t  # keep reference so stop() can join it
@@ -293,6 +315,8 @@ class PageLensBridge(QObject):
             self._server = await websockets.serve(
                 self._handle_client, BRIDGE_HOST, BRIDGE_PORT,
                 process_request=self._process_request,
+                origins=list(self._allowed_origins), max_size=MAX_MESSAGE_BYTES,
+                max_queue=4, compression=None, open_timeout=3, close_timeout=2,
             )
             log.info("[PageLens Bridge] WebSocket listening %s:%d", BRIDGE_HOST, BRIDGE_PORT)
         except OSError as exc:
@@ -311,20 +335,29 @@ class PageLensBridge(QObject):
                 pass
             self._server = None
 
-    async def _process_request(self, path, request):
+    async def _process_request(self, connection, request):
         """Validate incoming WebSocket connections before upgrade.
 
-        Logs the Origin header for debugging. Accepts all origins in dev mode
-        (chrome-extension:// IDs change on each reload).
+        Missing pairing configuration, mismatched Origin or credentials fail closed.
         """
-        origin = request.headers.get("Origin", "unknown")
-        log.info("[PageLens Bridge] incoming connection from %s (Origin: %s)", request.headers.get("Host"), origin)
-        # Accept all origins — Chrome extension IDs change on reload,
-        # and we only listen on 127.0.0.1 anyway.
-        return None  # None means "proceed with handshake"
+        try:
+            origin = request.headers.get("Origin", "")
+            credential = request.headers.get("Sec-WebSocket-Protocol", "")
+            authorized = (len(self._auth_token) >= 32 and origin in self._allowed_origins
+                          and secrets.compare_digest(credential, "firefly-auth." + self._auth_token))
+        except (ValueError, TypeError, LookupError):
+            authorized = False
+        if not authorized:
+            return connection.respond(HTTPStatus.FORBIDDEN, "PageLens pairing required\n")
+        if self._writer is not None:
+            return connection.respond(HTTPStatus.SERVICE_UNAVAILABLE, "PageLens connection limit\n")
+        return None
 
     async def _handle_client(self, websocket) -> None:
         """Handle a single browser extension WebSocket connection."""
+        if self._writer is not None:
+            await websocket.close(code=1013, reason="connection limit")
+            return
         self._writer = websocket
         peer = websocket.remote_address
         log.info("[PageLens Bridge] browser connected from %s", peer)
@@ -337,7 +370,11 @@ class PageLensBridge(QObject):
                 raw = raw.strip()
                 if not raw:
                     continue
-                self._handle_incoming(raw)
+                try:
+                    self._handle_incoming(raw)
+                except (ValueError, TypeError, KeyError, AttributeError):
+                    log.warning("[PageLens Bridge] invalid message structure")
+                    self._send_json({"type": "bridge_error", "error": "invalid message"})
         except websockets.ConnectionClosed:
             log.info("[PageLens Bridge] browser disconnected (closed)")
         except asyncio.CancelledError:
@@ -359,10 +396,15 @@ class PageLensBridge(QObject):
 
     def _handle_incoming(self, raw: str) -> None:
         """Parse and dispatch an incoming JSON message."""
+        if len(raw.encode("utf-8")) > MAX_MESSAGE_BYTES:
+            return
         try:
             msg = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
-            log.warning("[PageLens Bridge] invalid JSON: %s", raw[:200])
+            log.warning("[PageLens Bridge] invalid JSON")
+            return
+
+        if not isinstance(msg, dict) or not isinstance(msg.get("payload", {}), dict):
             return
 
         msg_type = msg.get("type", "")
@@ -554,6 +596,9 @@ class PageLensBridge(QObject):
         if request_id in self._ai_chat_tasks:
             self._send_ai_chat_error(request_id, "duplicate requestId")
             return
+        if len(self._ai_chat_tasks) >= MAX_AI_REQUESTS:
+            self._send_ai_chat_error(request_id, "Desktop AI bridge is busy; retry later")
+            return
         if self._loop is None or not self._loop.is_running():
             self._send_ai_chat_error(request_id, "Desktop AI bridge is unavailable")
             return
@@ -596,6 +641,13 @@ class PageLensBridge(QObject):
         messages = request.get("messages")
         if not isinstance(messages, list):
             return safe_request_id, source, [], 0.0, "messages must be a list"
+        if not 1 <= len(messages) <= 32 or any(
+            not isinstance(m, dict) or m.get("role") not in ("system", "user", "assistant")
+            or not isinstance(m.get("content"), str) for m in messages
+        ):
+            return safe_request_id, source, [], 0.0, "invalid messages"
+        if len(json.dumps(messages, ensure_ascii=False).encode("utf-8")) > MAX_MESSAGE_BYTES:
+            return safe_request_id, source, [], 0.0, "messages too large"
 
         temperature = request.get("temperature")
         if (
@@ -632,7 +684,7 @@ class PageLensBridge(QObject):
                 raise ValueError("AI Router response has no content")
         except Exception as exc:  # isolate provider and response failures
             if connection is self._writer and connection is not None:
-                self._send_ai_chat_error(request_id, str(exc)[:500])
+                self._send_ai_chat_error(request_id, "AI request failed; check desktop provider status")
             return
 
         # A request that finishes after its WebSocket disconnected must never
