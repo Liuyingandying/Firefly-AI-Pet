@@ -68,6 +68,10 @@ class ContextStatusView:
     project_prompt: bool = False   # 学习模式开启但未选项目
     conversation_title: str = ""   # 仅真实会话标题（非「新对话」）
     ai_service: str = ""           # 仅「TJU LLM · 可用」式的 availability 事实
+    activity: str = ""             # Current skill's read-only activity label
+    next_action: str = ""
+    progress: str = ""
+    resume_hint: str = ""
 
 
 class ContextStatusCard(QFrame):
@@ -113,7 +117,15 @@ class ContextStatusCard(QFrame):
             self._add_optional(view)
             return
 
-        if view.course_name:
+        if view.activity:
+            self._stack.addWidget(self._section("正在进行", view.activity))
+            if view.focus:
+                self._stack.addWidget(self._section("当前节点", view.focus))
+            if view.progress:
+                self._stack.addWidget(self._section("本次学习", view.progress))
+            if view.next_action:
+                self._stack.addWidget(self._section("下一步", view.next_action))
+        elif view.course_name:
             self._stack.addWidget(self._section("学习", view.course_name))
             if view.chapter:
                 self._stack.addWidget(self._section("当前章节", view.chapter))
@@ -134,6 +146,8 @@ class ContextStatusCard(QFrame):
         self._add_optional(view)
 
     def _add_optional(self, view: ContextStatusView) -> None:
+        if view.resume_hint:
+            self._stack.addWidget(self._section("已保留的学习位置", view.resume_hint))
         if view.ai_service:
             self._stack.addWidget(self._section("AI 服务", view.ai_service))
 

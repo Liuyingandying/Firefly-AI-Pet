@@ -55,6 +55,7 @@ class ParsedIntent:
 QUIZ_MARKERS = (
     "检查一下我", "检查我的理解", "考考我", "考我", "出题", "测测我",
     "我懂了吗", "我理解了吗", "检验一下", "测试一下",
+    "出个题", "出道题", "出几道", "来个问题",
 )
 REVIEW_MARKERS = (
     "帮我复习", "带我复习", "复习一下", "开始复习", "该复习什么",
@@ -150,3 +151,19 @@ def is_confirmation(text: str) -> bool:
 def is_cancellation(text: str) -> bool:
     compact = re.sub(r"\s+", "", text or "")
     return any(marker in compact for marker in ("不删", "取消", "算了", "不用", "别删", "不"))
+
+
+# Teaching intent is shared by Tutor and Skill 2.0. Topic vocabularies remain
+# content catalogues; they may not infer an unrelated default concept.
+TEACH_MARKERS = ("我想学习", "学习一下", "帮我学习", "学习", "教我", "帮我理解",
+                 "我想理解", "帮我掌握", "不理解", "不会", "不懂", "讲讲")
+DIAGNOSTIC_MARKERS = ("有什么问题", "薄弱", "学习状态", "学习情况", "诊断",
+                      "最近学习", "学习有什么", "哪里不足", "掌握情况")
+
+
+def is_teaching_request(text: str) -> bool:
+    return any(marker in text for marker in TEACH_MARKERS)
+
+
+def is_learning_diagnostic(text: str) -> bool:
+    return any(marker in text for marker in DIAGNOSTIC_MARKERS)

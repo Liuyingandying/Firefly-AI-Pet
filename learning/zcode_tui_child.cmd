@@ -1,0 +1,4 @@
+@echo off
+chcp 65001 >nul
+"%FIREFLY_TUI_NODE%" "%FIREFLY_TUI_ENTRY%" --resume %FIREFLY_TUI_SESSION%
+exit %ERRORLEVEL%

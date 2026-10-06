@@ -1,0 +1,22 @@
+# 均匀平面波传播实验（TE/TM 电磁场教学演示）
+experiment_id: uniform-plane-wave
+display_name: 均匀平面波传播
+description: >-
+  TE/TM 电磁场教学演示：参数化平面波传播动画（E 场分布快照 + 传播动画 GIF），
+  支持频率 / 介质 / 极化角参数调节。
+author: firefly
+version: "1.0.0"
+template: uniform_plane_wave
+concept_ids:
+  - em-uniform-plane-wave
+  - em-te-polarization
+  - em-tm-polarization
+default_params:
+  frequency: 2.4
+  medium: vacuum
+  polarization: 0.0
+  amplitude: 0.8
+tags:
+  - physics
+  - electromagnetics
+  - education
